@@ -56,6 +56,14 @@ async function crewTable(): Promise<string> {
   throw new Error("No worker table found (looked for crew, admin_employees)");
 }
 
+// Admin issued a password, so the worker's single change becomes available.
+async function armPasswordChange(crewId: string): Promise<void> {
+  await db.from("attendance_password_state").upsert(
+    { crew_id: crewId, must_change: true, changed_at: null, updated_at: new Date().toISOString() },
+    { onConflict: "crew_id" },
+  );
+}
+
 function emailFor(staffId: string): string {
   return `${String(staffId).trim().toLowerCase().replace(/\s+/g, "")}@${EMAIL_DOMAIN}`;
 }
@@ -80,6 +88,52 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user) return json({ error: "Not signed in." }, 401);
 
     const tbl = await crewTable();
+
+    // ── change_own_password: the worker acting on themselves ─────────────
+    // Handled before the sysadmin gate below, and scoped so it can only ever
+    // touch the caller's own login.
+    const pre = await req.clone().json().catch(() => ({})) as Record<string, string>;
+    if (pre.action === "change_own_password") {
+      const { data: me } = await db
+        .from(tbl).select("id, staff_id").eq("auth_user_id", userData.user.id).maybeSingle();
+      if (!me) return json({ error: "Your login is not linked to a worker record." }, 403);
+
+      const bad = badPassword(pre.new_password);
+      if (bad) return json({ error: bad }, 400);
+
+      // One change per admin-issued password. The flag is the whole rule, so
+      // it is checked here rather than trusted from the app.
+      const { data: st } = await db
+        .from("attendance_password_state").select("must_change").eq("crew_id", me.id).maybeSingle();
+      if (!st?.must_change) {
+        return json({ error: "Your password has already been set. Ask your admin for a new one." }, 409);
+      }
+
+      // Prove they know the current one. They typed it moments ago to sign in,
+      // so it costs them nothing — but it stops someone picking up an unlocked
+      // phone and taking the account, which matters when sessions last 90 days.
+      const anon = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
+        auth: { persistSession: false },
+      });
+      const check = await anon.auth.signInWithPassword({
+        email: emailFor(me.staff_id ?? ""),
+        password: pre.current_password ?? "",
+      });
+      if (!check.data?.session) {
+        return json({ error: "That is not your current password." }, 401);
+      }
+
+      const { error: upErr } = await db.auth.admin.updateUserById(
+        userData.user.id, { password: pre.new_password },
+      );
+      if (upErr) return json({ error: "Could not set the password.", detail: upErr.message }, 400);
+
+      await db.from("attendance_password_state").upsert(
+        { crew_id: me.id, must_change: false, changed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString() }, { onConflict: "crew_id" });
+
+      return json({ ok: true }, 200);
+    }
 
     // Who counts as an admin here. Two independent routes, because the two
     // populations only partly overlap: scheduler admins live in app_users and
@@ -137,6 +191,7 @@ Deno.serve(async (req) => {
         await db.auth.admin.deleteUser(created.user.id);
         return json({ error: "Could not link the login to the worker.", detail: linkErr.message }, 500);
       }
+      await armPasswordChange(crew_id);
       return json({ ok: true, staff_id: sid, auth_user_id: created.user.id }, 200);
     }
 
@@ -149,6 +204,8 @@ Deno.serve(async (req) => {
       }
       const { error } = await db.auth.admin.updateUserById(worker.auth_user_id, { password });
       if (error) return json({ error: "Could not reset the password.", detail: error.message }, 400);
+      // A reset hands them a password they did not choose, so give the change back.
+      await armPasswordChange(crew_id);
       return json({ ok: true }, 200);
     }
 

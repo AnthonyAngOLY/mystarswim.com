@@ -151,7 +151,8 @@
   function signOut() {
     clearSession();
     session = null; profile = null;
-    hide($('appScreen')); hide($('consentScreen')); show($('loginScreen'));
+    hide($('appScreen')); hide($('consentScreen')); hide($('passwordScreen'));
+    show($('loginScreen'));
     $('password').value = '';
   }
 
@@ -186,8 +187,21 @@
       }).catch(function () {});
   }
 
+  // Offered once per admin-issued password, straight after sign-in, because
+  // that is the moment they still have the slip of paper in front of them.
+  var pwOffered = false;
+  function maybeOfferPasswordChange() {
+    if (!profile || !profile.must_change_password || pwOffered) return false;
+    pwOffered = true;
+    hide($('loginScreen')); hide($('consentScreen')); hide($('appScreen'));
+    show($('passwordScreen'));
+    return true;
+  }
+
   function enterApp() {
-    hide($('loginScreen')); hide($('consentScreen')); show($('appScreen'));
+    if (maybeOfferPasswordChange()) return;
+    hide($('loginScreen')); hide($('consentScreen')); hide($('passwordScreen'));
+    show($('appScreen'));
     $('whoName').textContent = profile.full_name || '';
     $('whoId').textContent = profile.staff_id || '';
     loadSettings().then(loadToday);
@@ -608,6 +622,38 @@
     }).then(function () {
       btn.disabled = false; btn.textContent = 'I understand — continue';
     });
+  });
+
+  $('passwordForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var btn = $('pwBtn'), err = $('pwError');
+    var cur = $('curPw').value, a = $('newPw').value, b = $('newPw2').value;
+    hide(err);
+    if (a !== b) { err.textContent = 'The two new passwords do not match.'; show(err); return; }
+    if (a.length < 8) { err.textContent = 'Use at least 8 characters.'; show(err); return; }
+    if (a === cur) { err.textContent = 'Choose something different from the one you were given.'; show(err); return; }
+    btn.disabled = true; btn.textContent = 'Saving…';
+    fetch(cfg.supabaseUrl + '/functions/v1/staff-auth', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ action: 'change_own_password', current_password: cur, new_password: a })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; })
+        .then(function (d) { if (!r.ok) throw new Error(d.error || 'Could not save that.'); });
+    }).then(function () {
+      profile.must_change_password = false;
+      $('curPw').value = $('newPw').value = $('newPw2').value = '';
+      enterApp();
+    }).catch(function (ex) {
+      err.textContent = ex.message; show(err);
+    }).then(function () {
+      btn.disabled = false; btn.textContent = 'Save password';
+    });
+  });
+  // Skipping keeps the offer for next sign-in; it is spent only by using it.
+  $('pwLater').addEventListener('click', function () {
+    $('curPw').value = $('newPw').value = $('newPw2').value = '';
+    enterApp();
   });
 
   $('consentSignOut').addEventListener('click', signOut);

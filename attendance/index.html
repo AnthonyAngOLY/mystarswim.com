@@ -183,6 +183,29 @@
   </main>
 </section>
 
+<!-- ── Set your own password (offered once, after an admin issues one) ── -->
+<section id="passwordScreen" class="hidden">
+  <main>
+    <h1>Set your own password</h1>
+    <p class="sub">You can do this once. After that, ask your admin for a new one.</p>
+    <form id="passwordForm" autocomplete="off">
+      <label for="curPw">Password your admin gave you</label>
+      <input id="curPw" type="password" autocomplete="current-password" required />
+      <label for="newPw">New password</label>
+      <input id="newPw" type="password" autocomplete="new-password" required />
+      <label for="newPw2">New password again</label>
+      <input id="newPw2" type="password" autocomplete="new-password" required />
+      <div id="pwHint" class="note info" style="font-size:13px">
+        At least 8 characters. Write it down somewhere safe — nobody can look
+        it up for you.
+      </div>
+      <div id="pwError" class="note err hidden"></div>
+      <button class="btn" id="pwBtn" type="submit">Save password</button>
+      <button class="btn ghost" id="pwLater" type="button" style="margin-top:10px">Not now</button>
+    </form>
+  </main>
+</section>
+
 <!-- ── App ───────────────────────────────────────────────────────────── -->
 <section id="appScreen" class="hidden">
   <header>
