@@ -458,6 +458,9 @@ function App({ currentUser, onLogout }){
   const [attToday,setAttToday] = useState([]);
   const [attPunches,setAttPunches] = useState([]);
   const [attLoadedAt,setAttLoadedAt] = useState(null);
+  const [attReportMode,setAttReportMode] = useState('month');
+  const [attReportAnchor,setAttReportAnchor] = useState(todayStr());
+  const [attReportShifts,setAttReportShifts] = useState([]);
   const [promos,setPromos] = useState([]);
   const [programmeModal,setProgrammeModal] = useState(null);
   const [programmeDate,setProgrammeDate] = useState(todayStr());     // own week cursor (independent of Schedule)
@@ -1263,6 +1266,30 @@ function App({ currentUser, onLogout }){
     const t = setInterval(loadAttendanceLive, 45000);
     return ()=>clearInterval(t);
   }, [view, attendanceSection]);
+
+  // Report period: a Mon–Sun week, or a calendar month.
+  const attReportRange = useMemo(()=>{
+    if(attReportMode==='week'){
+      const f = weekStartStr(attReportAnchor);
+      return { from:f, to:addDays(f,6), label:weekRangeLabel(f) };
+    }
+    const d = fromDateStr(attReportAnchor);
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const last  = new Date(d.getFullYear(), d.getMonth()+1, 0);
+    return { from:toDateStr(first), to:toDateStr(last),
+             label:first.toLocaleDateString('en-GB',{month:'long',year:'numeric'}) };
+  }, [attReportMode, attReportAnchor]);
+
+  async function loadAttendanceReport(){
+    try{
+      const rows = await selectAllRows('shifts','*',
+        `&is_void=eq.false&shift_date=gte.${attReportRange.from}&shift_date=lte.${attReportRange.to}&order=shift_date.asc`);
+      setAttReportShifts(rows||[]); setAttBlocked(false);
+    } catch(_){ setAttReportShifts([]); setAttBlocked(true); }
+  }
+  useEffect(()=>{
+    if(view==='attendance' && attendanceSection==='report') loadAttendanceReport();
+  }, [view, attendanceSection, attReportRange.from, attReportRange.to]);
 
   async function attSaveLocation(data, id){
     try{
@@ -4138,6 +4165,7 @@ function App({ currentUser, onLogout }){
         <div className="sub-bar"><div className="sub-bar-inner">
           <button className={`sub-tab ${attendanceSection==='live'?'active':''}`} onClick={()=>setAttendanceSection('live')}>Live</button>
           <button className={`sub-tab ${attendanceSection==='roster'?'active':''}`} onClick={()=>setAttendanceSection('roster')}>Roster</button>
+          <button className={`sub-tab ${attendanceSection==='report'?'active':''}`} onClick={()=>setAttendanceSection('report')}>Report</button>
           <button className={`sub-tab ${attendanceSection==='locations'?'active':''}`} onClick={()=>setAttendanceSection('locations')}>Locations</button>
         </div></div>
         {attBlocked && <div className="card" style={{borderColor:'#FCD34D',background:'#FFFBEB'}}>
@@ -4152,6 +4180,15 @@ function App({ currentUser, onLogout }){
           employees={adminEmployees}
           lastLoaded={attLoadedAt}
           onRefresh={loadAttendanceLive}
+        />}
+        {!attBlocked && attendanceSection==='report' && <AttendanceReportView
+          shifts={attReportShifts}
+          categories={attCategories}
+          employees={adminEmployees}
+          mode={attReportMode} setMode={setAttReportMode}
+          anchor={attReportAnchor} setAnchor={setAttReportAnchor}
+          rangeLabel={attReportRange.label}
+          from={attReportRange.from} to={attReportRange.to}
         />}
         {!attBlocked && attendanceSection==='locations' && <AttendanceLocationsView
           locations={attLocations}
@@ -12126,6 +12163,159 @@ function AttendanceLiveView({ shifts, punches, locations, categories, employees,
         </div>)}
       </div>;
     })}
+  </div>;
+}
+
+// ── Attendance: Report ───────────────────────────────────────────────────
+// Week or month, per worker, split by category — the figures a payroll run
+// needs. Regular staff are on a monthly salary, so what matters for them is
+// the unpaid-leave count; part-timers are paid per session, so what matters
+// is sessions actually attended. Both are shown side by side rather than
+// collapsed into one "hours" number that would suit neither.
+//
+// Rates themselves are Phase 5. Until they are configured this reports the
+// inputs, which is deliberately where the money question stops: a payout
+// figure computed from a rate nobody has entered would be worse than none.
+function AttendanceReportView({ shifts, categories, employees, mode, setMode, anchor, setAnchor, rangeLabel, from, to }){
+  const empById = useMemo(()=>{ const m={}; (employees||[]).forEach(e=>{m[e.id]=e;}); return m; }, [employees]);
+  const catById = useMemo(()=>{ const m={}; (categories||[]).forEach(c=>{m[c.id]=c;}); return m; }, [categories]);
+
+  const hoursOf = s => {
+    const p=t=>{const a=String(t).split(':');return (+a[0])*60+(+a[1]);};
+    return Math.max(0, p(s.end_time)-p(s.start_time))/60;
+  };
+
+  // One row per worker per category. A worker who does both Regular and
+  // Part-time sessions gets a line for each, because they are paid differently.
+  const rows = useMemo(()=>{
+    const acc={};
+    (shifts||[]).forEach(s=>{
+      const key = s.crew_id+'|'+s.category_id;
+      const r = acc[key] = acc[key] || {
+        crew_id:s.crew_id, category_id:s.category_id,
+        worker:(empById[s.crew_id]||{}).full_name || 'Unknown worker',
+        category:(catById[s.category_id]||{}).name || '—',
+        scheduled:0, attended:0, absent:0, lateCount:0, lateMin:0,
+        earlyCount:0, earlyMin:0, hours:0, unpaidLeave:0, incomplete:0
+      };
+      r.scheduled += 1;
+      if(s.status==='absent'){ r.absent += 1; }
+      else { r.attended += 1; r.hours += hoursOf(s); }
+      if(s.status==='incomplete') r.incomplete += 1;
+      if(s.late_min>0){ r.lateCount += 1; r.lateMin += s.late_min; }
+      if(s.early_min>0){ r.earlyCount += 1; r.earlyMin += s.early_min; }
+      if(s.is_unpaid_leave) r.unpaidLeave += 1;
+    });
+    return Object.values(acc).sort((a,b)=>
+      a.worker.localeCompare(b.worker) || a.category.localeCompare(b.category));
+  }, [shifts, empById, catById]);
+
+  const tot = k => rows.reduce((n,r)=>n+r[k],0);
+
+  const FIELDS = [
+    ['worker','Worker'],['category','Category'],['scheduled','Scheduled'],
+    ['attended','Attended'],['absent','Absent'],['lateCount','Late'],
+    ['lateMin','Late min'],['earlyCount','Left early'],['earlyMin','Early min'],
+    ['hours','Hours'],['unpaidLeave','Unpaid leave']
+  ];
+  function exportRows(){
+    return rows.map(r=>{ const o={}; FIELDS.forEach(([k,label])=>{
+      o[label] = k==='hours' ? Number(r.hours.toFixed(2)) : r[k]; }); return o; });
+  }
+  function exportCSV(){
+    const head = FIELDS.map(f=>f[1]);
+    const esc = v => { const t=String(v??''); return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t; };
+    const csv = [head.join(',')].concat(exportRows().map(o=>head.map(h=>esc(o[h])).join(','))).join('\n');
+    const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=`attendance_${from}_to_${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  }
+  function exportXLSX(){
+    if(typeof XLSX==='undefined'){ alert('Excel library not loaded — use CSV export.'); return; }
+    const head = FIELDS.map(f=>f[1]);
+    const ws = XLSX.utils.json_to_sheet(exportRows(),{header:head});
+    ws['!cols'] = head.map(h=>({wch:Math.max(11,h.length+2)}));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `attendance_${from}_to_${to}.xlsx`);
+  }
+
+  const step = n => {
+    if(mode==='week') setAnchor(addDays(anchor, n*7));
+    else { const d=fromDateStr(anchor); setAnchor(toDateStr(new Date(d.getFullYear(), d.getMonth()+n, 1))); }
+  };
+
+  return <div className="card">
+    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
+      <div style={{fontWeight:800}}>Report</div>
+      <div style={{display:'flex',gap:4}}>
+        <button className={`btn ${mode==='week'?'btn-primary':'btn-ghost'} small`} onClick={()=>setMode('week')}>Week</button>
+        <button className={`btn ${mode==='month'?'btn-primary':'btn-ghost'} small`} onClick={()=>setMode('month')}>Month</button>
+      </div>
+      <div className="period-stepper" style={{margin:0}}>
+        <button className="step-btn" onClick={()=>step(-1)} aria-label="Previous period">‹</button>
+        <div className="period-label" style={{fontSize:12}}>{rangeLabel}</div>
+        <button className="step-btn" onClick={()=>step(1)} aria-label="Next period">›</button>
+      </div>
+      <button className="btn btn-ghost small" onClick={()=>setAnchor(todayStr())}>
+        {mode==='week'?'This week':'This month'}
+      </button>
+      <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+        <button className="btn btn-ghost small" onClick={exportCSV} disabled={!rows.length}>⇣ CSV</button>
+        <button className="btn btn-ghost small" onClick={exportXLSX} disabled={!rows.length}>⇣ Excel</button>
+      </div>
+    </div>
+
+    {!rows.length && <div className="small subtle" style={{padding:'22px 0'}}>
+      No sessions in this period.
+    </div>}
+
+    {!!rows.length && <>
+      <div className="table-wrap"><table className="table">
+        <thead><tr>
+          <th>Worker</th><th>Category</th>
+          <th className="num" style={{textAlign:'right'}}>Scheduled</th>
+          <th className="num" style={{textAlign:'right'}}>Attended</th>
+          <th className="num" style={{textAlign:'right'}}>Absent</th>
+          <th className="num" style={{textAlign:'right'}}>Late</th>
+          <th className="num" style={{textAlign:'right'}}>Left early</th>
+          <th className="num" style={{textAlign:'right'}}>Hours</th>
+          <th className="num" style={{textAlign:'right'}}>Unpaid leave</th>
+        </tr></thead>
+        <tbody>{rows.map(r=><tr key={r.crew_id+r.category_id}>
+          <td style={{fontWeight:600}}>{r.worker}</td>
+          <td>{r.category}</td>
+          <td style={{textAlign:'right'}}>{r.scheduled}</td>
+          <td style={{textAlign:'right',fontWeight:700}}>{r.attended}</td>
+          <td style={{textAlign:'right',color:r.absent?'#DC2626':'inherit'}}>{r.absent||'—'}</td>
+          <td style={{textAlign:'right',color:r.lateCount?'#DC2626':'inherit'}}>
+            {r.lateCount ? `${r.lateCount} (${r.lateMin}m)` : '—'}</td>
+          <td style={{textAlign:'right',color:r.earlyCount?'#DC2626':'inherit'}}>
+            {r.earlyCount ? `${r.earlyCount} (${r.earlyMin}m)` : '—'}</td>
+          <td style={{textAlign:'right'}}>{r.hours.toFixed(1)}</td>
+          <td style={{textAlign:'right',color:r.unpaidLeave?'#B45309':'inherit'}}>{r.unpaidLeave||'—'}</td>
+        </tr>)}</tbody>
+        <tfoot><tr style={{fontWeight:800,borderTop:'2px solid var(--border)'}}>
+          <td colSpan={2}>Total</td>
+          <td style={{textAlign:'right'}}>{tot('scheduled')}</td>
+          <td style={{textAlign:'right'}}>{tot('attended')}</td>
+          <td style={{textAlign:'right'}}>{tot('absent')||'—'}</td>
+          <td style={{textAlign:'right'}}>{tot('lateCount')||'—'}</td>
+          <td style={{textAlign:'right'}}>{tot('earlyCount')||'—'}</td>
+          <td style={{textAlign:'right'}}>{tot('hours').toFixed(1)}</td>
+          <td style={{textAlign:'right'}}>{tot('unpaidLeave')||'—'}</td>
+        </tr></tfoot>
+      </table></div>
+
+      <div className="small subtle" style={{marginTop:14,lineHeight:1.6}}>
+        <b>Reading this for payroll.</b> Regular staff are on a fixed monthly
+        salary — the column that matters is <b>Unpaid leave</b>, which is
+        deducted outside this app. Part-time staff are paid per session, so
+        theirs is <b>Attended</b>. Late and early-leave minutes are recorded
+        for every session; whether any of them reduce pay is a decision you
+        make per incident in the alerts, not something this report applies.
+      </div>
+    </>}
   </div>;
 }
 
