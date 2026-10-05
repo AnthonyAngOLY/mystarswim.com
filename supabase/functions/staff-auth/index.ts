@@ -80,9 +80,24 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user) return json({ error: "Not signed in." }, 401);
 
     const tbl = await crewTable();
-    const { data: caller } = await db
-      .from(tbl).select("id, is_admin").eq("auth_user_id", userData.user.id).maybeSingle();
-    if (!caller?.is_admin) return json({ error: "Admins only." }, 403);
+
+    // Who counts as an admin here. Two independent routes, because the two
+    // populations only partly overlap: scheduler admins live in app_users and
+    // usually have no worker row at all, while a supervising instructor has a
+    // worker row but no scheduler login.
+    //
+    // Only `sysadmin` qualifies. This function sets and resets passwords, and
+    // the existing Users & Logins panel is sysadmin-only for exactly that
+    // reason — a schedule_admin manages timetables, not credentials.
+    const claimRole = (userData.user.app_metadata as Record<string, unknown> | null)?.ssb_role;
+    let isAdmin = claimRole === "sysadmin";
+
+    if (!isAdmin) {
+      const { data: caller } = await db
+        .from(tbl).select("id, is_admin").eq("auth_user_id", userData.user.id).maybeSingle();
+      isAdmin = !!caller?.is_admin;
+    }
+    if (!isAdmin) return json({ error: "Only a sysadmin can manage staff logins." }, 403);
 
     const body = await req.json().catch(() => null);
     if (!body) return json({ error: "Bad request." }, 400);

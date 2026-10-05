@@ -1884,6 +1884,49 @@ function App({
     if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
     return data;
   }
+  // Staff logins for the attendance app. Unlike adminUsersCall (which carries
+  // the Phase 0 signed token), staff-auth authenticates the caller with their
+  // real Supabase JWT, so it needs the session minted at login.
+  async function staffAuthCall(action, payload = {}) {
+    if (!sbSession?.access_token) {
+      throw new Error('Sign out and sign in again to enable staff login management.');
+    }
+    const res = await fetch(`${cfg.supabaseUrl}/functions/v1/staff-auth`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: cfg.supabaseAnonKey,
+        Authorization: `Bearer ${sbSession.access_token}`
+      },
+      body: JSON.stringify({
+        action,
+        ...payload
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+    return data;
+  }
+  async function crewProvisionLogin(crewId, staffId, password) {
+    await staffAuthCall('provision', {
+      crew_id: crewId,
+      staff_id: staffId,
+      password
+    });
+    await loadAdminAll();
+  }
+  async function crewResetLogin(crewId, password) {
+    await staffAuthCall('reset', {
+      crew_id: crewId,
+      password
+    });
+  }
+  async function crewUnlinkLogin(crewId) {
+    await staffAuthCall('unlink', {
+      crew_id: crewId
+    });
+    await loadAdminAll();
+  }
   async function loadAppUsers() {
     try {
       const {
@@ -6237,6 +6280,10 @@ function App({
     loadFailed: adminCrewLoadFailed,
     importEmployees: adminImportEmployees,
     employees: adminEmployees,
+    canManageLogins: isSysadmin,
+    provisionLogin: crewProvisionLogin,
+    resetLogin: crewResetLogin,
+    unlinkLogin: crewUnlinkLogin,
     saveEmployee: adminSaveEmployee,
     deleteEmployee: adminDeleteEmployee,
     onRefresh: loadAdminAll
@@ -23886,6 +23933,150 @@ function AttendanceRosterView({
   }, "Cancel"))))));
 }
 
+// ── Crew: attendance login ───────────────────────────────────────────────
+// Creates and manages the Supabase Auth logins instructors use in the
+// attendance app. Workers never see an email address — a staff ID maps to an
+// unroutable internal one — so this form asks only for the ID and a password.
+// All three actions go through the staff-auth Edge Function, which holds the
+// service role; nothing privileged happens in the browser.
+function CrewLoginModal({
+  employee,
+  mode,
+  provisionLogin,
+  resetLogin,
+  unlinkLogin,
+  onClose
+}) {
+  const [staffId, setStaffId] = useState(employee.staff_id || employee.emp_no || '');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState('');
+  async function submit() {
+    setErr('');
+    if (mode !== 'unlink') {
+      if (mode === 'provision' && !staffId.trim()) {
+        setErr('Enter a staff ID.');
+        return;
+      }
+      if ((password || '').length < 8) {
+        setErr('Password must be at least 8 characters.');
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      if (mode === 'provision') {
+        await provisionLogin(employee.id, staffId.trim(), password);
+        setDone(`Login created. Give ${employee.full_name} their staff ID and password.`);
+      } else if (mode === 'reset') {
+        await resetLogin(employee.id, password);
+        setDone('Password reset.');
+      } else {
+        await unlinkLogin(employee.id);
+        setDone('Login removed. Attendance history is kept.');
+      }
+    } catch (ex) {
+      setErr(ex.message || 'Something went wrong.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  const title = mode === 'provision' ? 'Create attendance login' : mode === 'reset' ? 'Reset password' : 'Remove login';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      lineHeight: 1.1
+    }
+  }, title), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontSize: 10.5,
+      marginTop: 1
+    }
+  }, employee.full_name)), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onClose,
+    "aria-label": "Close"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, done ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#059669',
+      fontWeight: 700,
+      marginBottom: 14
+    }
+  }, done), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: onClose
+  }, "Done")) : /*#__PURE__*/React.createElement(React.Fragment, null, mode === 'unlink' && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 14
+    }
+  }, "This removes their sign-in only. The employee record and every past session, punch and alert stay exactly as they are."), mode === 'provision' && /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Staff ID"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    autoFocus: true,
+    value: staffId,
+    placeholder: "SS-012",
+    onChange: ev => setStaffId(ev.target.value)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "This is what they type to sign in. Short and memorable works best.")), mode !== 'unlink' && /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Password"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "text",
+    value: password,
+    placeholder: "min 8 characters",
+    autoFocus: mode === 'reset',
+    onChange: ev => setPassword(ev.target.value)
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "Shown as plain text so you can read it out. They cannot change it themselves — come back here to reset it.")), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      fontWeight: 600,
+      marginTop: 6
+    }
+  }, err), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy,
+    onClick: submit
+  }, busy ? 'Working…' : mode === 'provision' ? 'Create login' : mode === 'reset' ? 'Reset password' : 'Remove login'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Cancel"))))));
+}
+
 // ── Crew (Employees) ─────────────────────────────────────────────────────
 function AdminCrewView({
   employees,
@@ -23893,7 +24084,11 @@ function AdminCrewView({
   deleteEmployee,
   onRefresh,
   loadFailed,
-  importEmployees
+  importEmployees,
+  canManageLogins,
+  provisionLogin,
+  resetLogin,
+  unlinkLogin
 }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -24225,7 +24420,11 @@ function AdminCrewView({
     style: {
       width: 110
     }
-  }, "Status"), /*#__PURE__*/React.createElement("th", {
+  }, "Status"), canManageLogins && /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 190
+    }
+  }, "Attendance login"), /*#__PURE__*/React.createElement("th", {
     style: {
       textAlign: 'right',
       width: 100
@@ -24268,7 +24467,47 @@ function AdminCrewView({
     onChange: ev => saveEmployee({
       status: ev.target.value
     }, e.id)
-  }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive"))), /*#__PURE__*/React.createElement("td", {
+  }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive"))), canManageLogins && /*#__PURE__*/React.createElement("td", null, e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      fontWeight: 700
+    }
+  }, e.staff_id || '—'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '1px 6px',
+      fontSize: 10
+    },
+    onClick: () => setModal({
+      kind: 'login',
+      data: e,
+      mode: 'reset'
+    })
+  }, "Reset password"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '1px 6px',
+      fontSize: 10,
+      marginLeft: 4,
+      color: '#DC2626'
+    },
+    onClick: () => setModal({
+      kind: 'login',
+      data: e,
+      mode: 'unlink'
+    })
+  }, "Remove")) : /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '2px 8px',
+      fontSize: 11
+    },
+    onClick: () => setModal({
+      kind: 'login',
+      data: e,
+      mode: 'provision'
+    })
+  }, "+ Create login")), /*#__PURE__*/React.createElement("td", {
     style: {
       textAlign: 'right'
     }
@@ -24290,6 +24529,13 @@ function AdminCrewView({
       await saveEmployee(d, modal.data?.id);
       setModal(null);
     },
+    onClose: () => setModal(null)
+  }), modal?.kind === 'login' && /*#__PURE__*/React.createElement(CrewLoginModal, {
+    employee: modal.data,
+    mode: modal.mode,
+    provisionLogin: provisionLogin,
+    resetLogin: resetLogin,
+    unlinkLogin: unlinkLogin,
     onClose: () => setModal(null)
   }), modal?.kind === 'importPreview' && (() => {
     const byEmpNo = {},

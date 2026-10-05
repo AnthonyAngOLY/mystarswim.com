@@ -1162,6 +1162,34 @@ function App({ currentUser, onLogout }){
     if(!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
     return data;
   }
+  // Staff logins for the attendance app. Unlike adminUsersCall (which carries
+  // the Phase 0 signed token), staff-auth authenticates the caller with their
+  // real Supabase JWT, so it needs the session minted at login.
+  async function staffAuthCall(action, payload={}){
+    if(!sbSession?.access_token){
+      throw new Error('Sign out and sign in again to enable staff login management.');
+    }
+    const res = await fetch(`${cfg.supabaseUrl}/functions/v1/staff-auth`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', apikey: cfg.supabaseAnonKey,
+                Authorization:`Bearer ${sbSession.access_token}` },
+      body: JSON.stringify({ action, ...payload })
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+    return data;
+  }
+  async function crewProvisionLogin(crewId, staffId, password){
+    await staffAuthCall('provision', { crew_id:crewId, staff_id:staffId, password });
+    await loadAdminAll();
+  }
+  async function crewResetLogin(crewId, password){
+    await staffAuthCall('reset', { crew_id:crewId, password });
+  }
+  async function crewUnlinkLogin(crewId){
+    await staffAuthCall('unlink', { crew_id:crewId });
+    await loadAdminAll();
+  }
   async function loadAppUsers(){
     try{
       const { users } = await adminUsersCall('list');
@@ -4036,6 +4064,10 @@ function App({ currentUser, onLogout }){
       />}
       {!loading && side==='system' && view==='adminCrew' && canSystem && <AdminCrewView loadFailed={adminCrewLoadFailed} importEmployees={adminImportEmployees}
         employees={adminEmployees}
+        canManageLogins={isSysadmin}
+        provisionLogin={crewProvisionLogin}
+        resetLogin={crewResetLogin}
+        unlinkLogin={crewUnlinkLogin}
         saveEmployee={adminSaveEmployee}
         deleteEmployee={adminDeleteEmployee}
         onRefresh={loadAdminAll}
@@ -12129,8 +12161,91 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
   </div>;
 }
 
+// ── Crew: attendance login ───────────────────────────────────────────────
+// Creates and manages the Supabase Auth logins instructors use in the
+// attendance app. Workers never see an email address — a staff ID maps to an
+// unroutable internal one — so this form asks only for the ID and a password.
+// All three actions go through the staff-auth Edge Function, which holds the
+// service role; nothing privileged happens in the browser.
+function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogin, onClose }){
+  const [staffId,setStaffId]=useState(employee.staff_id||employee.emp_no||'');
+  const [password,setPassword]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+  const [done,setDone]=useState('');
+
+  async function submit(){
+    setErr('');
+    if(mode!=='unlink'){
+      if(mode==='provision' && !staffId.trim()){ setErr('Enter a staff ID.'); return; }
+      if((password||'').length<8){ setErr('Password must be at least 8 characters.'); return; }
+    }
+    setBusy(true);
+    try{
+      if(mode==='provision'){
+        await provisionLogin(employee.id, staffId.trim(), password);
+        setDone(`Login created. Give ${employee.full_name} their staff ID and password.`);
+      } else if(mode==='reset'){
+        await resetLogin(employee.id, password);
+        setDone('Password reset.');
+      } else {
+        await unlinkLogin(employee.id);
+        setDone('Login removed. Attendance history is kept.');
+      }
+    } catch(ex){ setErr(ex.message||'Something went wrong.'); }
+    finally{ setBusy(false); }
+  }
+
+  const title = mode==='provision' ? 'Create attendance login'
+              : mode==='reset'     ? 'Reset password' : 'Remove login';
+
+  return <div className="modal-backdrop"><div className="modal-card">
+    <div className="modal-head">
+      <div style={{minWidth:0,flex:1}}>
+        <div style={{fontSize:13,fontWeight:800,lineHeight:1.1}}>{title}</div>
+        <div className="small subtle" style={{fontSize:10.5,marginTop:1}}>{employee.full_name}</div>
+      </div>
+      <button className="btn btn-ghost small" onClick={onClose} aria-label="Close">✕</button>
+    </div>
+    <div className="modal-body">
+      {done ? <>
+        <div className="small" style={{color:'#059669',fontWeight:700,marginBottom:14}}>{done}</div>
+        <button className="btn btn-primary" onClick={onClose}>Done</button>
+      </> : <>
+        {mode==='unlink' && <div className="small" style={{marginBottom:14}}>
+          This removes their sign-in only. The employee record and every past
+          session, punch and alert stay exactly as they are.
+        </div>}
+
+        {mode==='provision' && <div className="field"><label>Staff ID</label>
+          <input className="input" autoFocus value={staffId} placeholder="SS-012"
+            onChange={ev=>setStaffId(ev.target.value)} />
+          <div className="small subtle" style={{marginTop:4}}>
+            This is what they type to sign in. Short and memorable works best.
+          </div></div>}
+
+        {mode!=='unlink' && <div className="field"><label>Password</label>
+          <input className="input" type="text" value={password} placeholder="min 8 characters"
+            autoFocus={mode==='reset'} onChange={ev=>setPassword(ev.target.value)} />
+          <div className="small subtle" style={{marginTop:4}}>
+            Shown as plain text so you can read it out. They cannot change it
+            themselves — come back here to reset it.
+          </div></div>}
+
+        {err && <div className="small" style={{color:'#DC2626',fontWeight:600,marginTop:6}}>{err}</div>}
+        <div style={{display:'flex',gap:8,marginTop:16}}>
+          <button className="btn btn-primary" disabled={busy} onClick={submit}>
+            {busy ? 'Working…' : mode==='provision' ? 'Create login' : mode==='reset' ? 'Reset password' : 'Remove login'}
+          </button>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </>}
+    </div>
+  </div></div>;
+}
+
 // ── Crew (Employees) ─────────────────────────────────────────────────────
-function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loadFailed, importEmployees }){
+function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loadFailed, importEmployees, canManageLogins, provisionLogin, resetLogin, unlinkLogin }){
   const [q,setQ]=useState('');
   const [statusFilter,setStatusFilter]=useState('all');
   const [modal,setModal]=useState(null); // {kind:'edit', data?} | {kind:'importPreview', rows, fileName}
@@ -12258,7 +12373,7 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
       : <div className="card" style={{padding:0,overflow:'hidden'}}>
           <div className="table-wrap" style={{border:'none',borderRadius:0}}>
             <table>
-              <thead><tr><th style={{width:36}}></th><th>Name</th><th style={{width:90}}>Emp #</th><th>Position</th><th>Department</th><th style={{width:110}}>Status</th><th style={{textAlign:'right',width:100}}>Actions</th></tr></thead>
+              <thead><tr><th style={{width:36}}></th><th>Name</th><th style={{width:90}}>Emp #</th><th>Position</th><th>Department</th><th style={{width:110}}>Status</th>{canManageLogins && <th style={{width:190}}>Attendance login</th>}<th style={{textAlign:'right',width:100}}>Actions</th></tr></thead>
               <tbody>
                 {filtered.map(e=><tr key={e.id}>
                   <td><div style={{width:30,height:30,borderRadius:'50%',background:'#0EA5E9',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:11}}>{adminIni(e.full_name)}</div></td>
@@ -12271,6 +12386,16 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
                       <option>Active</option><option>Inactive</option>
                     </select>
                   </td>
+                  {canManageLogins && <td>
+                    {e.auth_user_id ? <>
+                      <div className="small" style={{fontWeight:700}}>{e.staff_id||'—'}</div>
+                      <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10}}
+                        onClick={()=>setModal({kind:'login',data:e,mode:'reset'})}>Reset password</button>
+                      <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10,marginLeft:4,color:'#DC2626'}}
+                        onClick={()=>setModal({kind:'login',data:e,mode:'unlink'})}>Remove</button>
+                    </> : <button className="btn btn-ghost small" style={{padding:'2px 8px',fontSize:11}}
+                        onClick={()=>setModal({kind:'login',data:e,mode:'provision'})}>+ Create login</button>}
+                  </td>}
                   <td style={{textAlign:'right'}}>
                     <button className="btn btn-ghost small" onClick={()=>setModal({kind:'edit',data:e})}>✎</button>
                     <button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>deleteEmployee(e.id)}>×</button>
@@ -12282,6 +12407,10 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
         </div>}
 
     {modal?.kind==='edit' && <AdminEmployeeModal existing={modal.data} onSave={async d=>{ await saveEmployee(d, modal.data?.id); setModal(null); }} onClose={()=>setModal(null)} />}
+    {modal?.kind==='login' && <CrewLoginModal
+      employee={modal.data} mode={modal.mode}
+      provisionLogin={provisionLogin} resetLogin={resetLogin} unlinkLogin={unlinkLogin}
+      onClose={()=>setModal(null)} />}
     {modal?.kind==='importPreview' && (()=>{
       const byEmpNo={}, byName={};
       (employees||[]).forEach(e=>{ if(e.emp_no) byEmpNo[String(e.emp_no).trim().toLowerCase()]=true; if(e.full_name) byName[String(e.full_name).trim().toLowerCase()]=true; });
