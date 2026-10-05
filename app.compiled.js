@@ -2185,7 +2185,8 @@ function App({
       // unique index), so skip anything already on this week rather than
       // letting the insert fail wholesale.
       const taken = new Set((attShifts || []).map(x => `${x.crew_id}|${x.shift_date}|${x.start_time}`));
-      const rows = prev.map(x => ({
+      const today = todayStr();
+      const all = prev.map(x => ({
         crew_id: x.crew_id,
         shift_date: addDays(x.shift_date, 7),
         start_time: x.start_time,
@@ -2193,11 +2194,15 @@ function App({
         location_id: x.location_id,
         category_id: x.category_id
       })).filter(r => !taken.has(`${r.crew_id}|${r.shift_date}|${r.start_time}`));
+      // Copying into the current week would land sessions on days already
+      // gone, which can only ever become instant absences.
+      const rows = all.filter(r => r.shift_date >= today);
+      const skipped = all.length - rows.length;
       if (!rows.length) {
-        alert('Every session from last week is already on this week.');
+        alert(all.length ? 'Nothing to copy — those days have already passed.' : 'Every session from last week is already on this week.');
         return;
       }
-      if (!confirm(`Copy ${rows.length} session${rows.length === 1 ? '' : 's'} from last week into this week?`)) return;
+      if (!confirm(`Copy ${rows.length} session${rows.length === 1 ? '' : 's'} from last week into this week?` + (skipped ? `\n\n${skipped} fall on days that have already passed and will be skipped.` : ''))) return;
       await insertRows('shifts', rows);
       await loadAttendance();
     } catch (err) {
@@ -25149,6 +25154,16 @@ function AttendanceRosterView({
       alert('The end time must be after the start time.');
       return;
     }
+    // Nobody can check in to a session that has already started, so creating
+    // one only produces an immediate absence. If it genuinely happened, the
+    // admin records the time against the alert instead.
+    if (!modal.id && hasStarted({
+      shift_date: modal.shift_date,
+      start_time: modal.start_time
+    })) {
+      alert('That time has already passed.\n\nSessions can only be added for the future. If someone worked a session that was never rostered, add it from today onwards, or record the time against their alert.');
+      return;
+    }
     const base = {
       crew_id: modal.crew_id,
       shift_date: modal.shift_date,
@@ -25280,7 +25295,8 @@ function AttendanceRosterView({
   }, "This week"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: copyPreviousWeek,
-    title: "Copy every session from the previous week into this one"
+    disabled: addDays(weekStart, 6) < todayStr(),
+    title: addDays(weekStart, 6) < todayStr() ? 'This week has already passed' : 'Copy every session from the previous week into this one'
   }, "⧉ Copy last week"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: onRefresh,
@@ -25337,17 +25353,20 @@ function AttendanceRosterView({
     // The cell itself is the add target, with a faint + pinned in the
     // corner so it costs no layout height. The old button sat on its own
     // line under the cards and added a row to every single cell.
+    // A whole day in the past cannot take new sessions.
+    const dayGone = d < todayStr();
+    const canAdd = !!activeLocations.length && !dayGone;
     return /*#__PURE__*/React.createElement("td", {
       key: d,
       style: {
         verticalAlign: 'top',
         position: 'relative',
         padding: '3px 4px',
-        cursor: activeLocations.length ? 'pointer' : 'default'
+        cursor: canAdd ? 'pointer' : 'default'
       },
-      title: activeLocations.length ? 'Add a session' : '',
+      title: canAdd ? 'Add a session' : dayGone ? 'This day has passed' : '',
       onClick: () => {
-        if (activeLocations.length) openNew(cid, d);
+        if (canAdd) openNew(cid, d);
       }
     }, cell.map(s => {
       // Two lines, never three: time and place up top, then category
@@ -25420,7 +25439,7 @@ function AttendanceRosterView({
           if (confirm(started ? 'Remove this session?\n\nIt disappears from the roster. Any alert, punch or reason recorded against it is kept in the log.' : 'Remove this session?')) voidShift(s.id);
         }
       }, "Remove")));
-    }), activeLocations.length > 0 && /*#__PURE__*/React.createElement("span", {
+    }), canAdd && /*#__PURE__*/React.createElement("span", {
       "aria-hidden": "true",
       style: {
         position: 'absolute',
@@ -25476,6 +25495,7 @@ function AttendanceRosterView({
     className: "input",
     type: "date",
     value: modal.shift_date,
+    min: modal.id ? undefined : todayStr(),
     onChange: e => setModal({
       ...modal,
       shift_date: e.target.value

@@ -174,11 +174,23 @@
     });
   }
 
+  // How long a worker has to correct a reason, set by the admin.
+  var reasonWindowMin = 2;
+  function loadSettings() {
+    return api('/rest/v1/attendance_settings?select=reason_edit_window_min')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) {
+        if (rows && rows[0] && rows[0].reason_edit_window_min != null) {
+          reasonWindowMin = rows[0].reason_edit_window_min;
+        }
+      }).catch(function () {});
+  }
+
   function enterApp() {
     hide($('loginScreen')); hide($('consentScreen')); show($('appScreen'));
     $('whoName').textContent = profile.full_name || '';
     $('whoId').textContent = profile.staff_id || '';
-    loadToday();
+    loadSettings().then(loadToday);
   }
 
   // ── Today ──────────────────────────────────────────────────────────────
@@ -201,6 +213,18 @@
       todayShifts = res[0] || [];
       var buddies = res[1] || [];
       myAlerts = res[2] || [];
+      // Anything still unexplained that is NOT on today's list — an absence is
+      // almost always yesterday, so without this it would be unreachable.
+      var todayIds = todayShifts.map(function (x) { return x.id; });
+      var elsewhere = myAlerts.filter(function (a) {
+        return !a.worker_reason && todayIds.indexOf(a.shift_id) === -1;
+      }).length;
+      $('punchMsg').innerHTML = elsewhere
+        ? '<div class="note info">' + elsewhere + ' earlier session'
+          + (elsewhere === 1 ? '' : 's') + ' still need'
+          + (elsewhere === 1 ? 's' : '') + ' a reason — see <b>History</b>.</div>'
+        : '';
+
       if (!todayShifts.length) {
         $('todayList').innerHTML = '<p class="empty">No sessions scheduled today.</p>';
         return;
@@ -216,7 +240,7 @@
   // the signed-in worker's own rows.
   var myAlerts = [];
   function loadMyAlerts() {
-    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason&status=eq.open')
+    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason,worker_reason_at&status=eq.open')
       .then(function (r) { return r.ok ? r.json() : []; })
       .catch(function () { return []; });
   }
@@ -282,21 +306,8 @@
       });
     });
 
-    Array.prototype.forEach.call($('todayList').querySelectorAll('[data-send]'), function (b) {
-      b.addEventListener('click', function () {
-        var box = b.parentNode, ta = box.querySelector('textarea');
-        var text = (ta.value || '').trim();
-        if (!text) { ta.focus(); return; }
-        b.disabled = true; b.textContent = 'Sending…';
-        rpc('set_my_alert_reason', { p_alert_id: b.getAttribute('data-send'), p_reason: text })
-          .then(function () { loadToday(); })
-          .catch(function (e) {
-            b.disabled = false; b.textContent = 'Send reason';
-            box.insertAdjacentHTML('beforeend',
-              '<div class="hint err">' + esc(e.message || 'Could not send that.') + '</div>');
-          });
-      });
-    });
+    wireExplain($('todayList'));
+    startCountdowns();
   }
 
   // Shows the worker the same evidence the admin sees: where the check-in was
@@ -328,22 +339,111 @@
   function alertsFor(shiftId) {
     return myAlerts.filter(function (a) { return a.shift_id === shiftId; });
   }
+  // Seconds left to correct a reason, from the moment it was first saved.
+  function secondsLeft(a) {
+    if (!a.worker_reason_at) return reasonWindowMin * 60;
+    var gone = (Date.now() - new Date(a.worker_reason_at).getTime()) / 1000;
+    return Math.max(0, Math.round(reasonWindowMin * 60 - gone));
+  }
+  function mmss(sec) {
+    var m = Math.floor(sec / 60), r = sec % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
   function explainBox(s) {
     var list = alertsFor(s.id);
     if (!list.length) return '';
     return list.map(function (a) {
-      if (a.worker_reason) {
-        return '<div class="explain done">'
-          + '<div class="ask">' + esc(ALERT_ASK[a.type] || 'Needs an explanation.') + '</div>'
-          + '<div class="said">You said: <i>' + esc(a.worker_reason) + '</i></div>'
-          + '<div class="hint">Sent to your admin.</div></div>';
+      var ask = esc(ALERT_ASK[a.type] || 'Needs an explanation.');
+
+      if (!a.worker_reason) {
+        return '<div class="explain" data-alert="' + esc(a.id) + '">'
+          + '<div class="ask">' + ask + '</div>'
+          + '<textarea class="reason" rows="2" placeholder="What happened?"></textarea>'
+          + '<button class="btn small-btn" data-send="' + esc(a.id) + '">Send reason</button>'
+          + '<div class="hint">You can change this for ' + reasonWindowMin
+          + ' minutes after sending.</div>'
+          + '</div>';
       }
-      return '<div class="explain" data-alert="' + esc(a.id) + '">'
-        + '<div class="ask">' + esc(ALERT_ASK[a.type] || 'Needs an explanation.') + '</div>'
-        + '<textarea class="reason" rows="2" placeholder="What happened?"></textarea>'
-        + '<button class="btn small-btn" data-send="' + esc(a.id) + '">Send reason</button>'
+
+      var left = secondsLeft(a);
+      return '<div class="explain done" data-alert="' + esc(a.id) + '">'
+        + '<div class="ask">' + ask + '</div>'
+        + '<div class="said">You said: <i>' + esc(a.worker_reason) + '</i></div>'
+        + (left > 0
+            ? '<button class="btn small-btn edit" data-edit="' + esc(a.id) + '">Change</button>'
+              + '<div class="hint">Locked in <b data-countdown="' + esc(a.id) + '">'
+              + mmss(left) + '</b></div>'
+            : '<div class="hint">Sent to your admin.</div>')
         + '</div>';
     }).join('');
+  }
+
+  // Swap the box back to an editable field, keeping what they wrote.
+  function startEdit(id) {
+    var a = myAlerts.filter(function (x) { return x.id === id; })[0];
+    if (!a) return;
+    var box = document.querySelector('.explain[data-alert="' + id + '"]');
+    if (!box) return;
+    box.classList.remove('done');
+    box.innerHTML = '<div class="ask">' + esc(ALERT_ASK[a.type] || 'Needs an explanation.') + '</div>'
+      + '<textarea class="reason" rows="2"></textarea>'
+      + '<button class="btn small-btn" data-send="' + esc(id) + '">Save change</button>'
+      + '<div class="hint">Locked in <b data-countdown="' + esc(id) + '">'
+      + mmss(secondsLeft(a)) + '</b></div>';
+    var ta = box.querySelector('textarea');
+    ta.value = a.worker_reason || '';
+    ta.focus();
+    wireExplain(box);
+  }
+
+  // One ticker for the whole screen: updates every countdown and, at zero,
+  // reloads so the box settles into its locked state.
+  var countdownTimer = null;
+  function startCountdowns() {
+    if (countdownTimer) clearInterval(countdownTimer);
+    if (!document.querySelector('[data-countdown]')) return;
+    countdownTimer = setInterval(function () {
+      var any = false;
+      Array.prototype.forEach.call(document.querySelectorAll('[data-countdown]'), function (el) {
+        var a = myAlerts.filter(function (x) { return x.id === el.getAttribute('data-countdown'); })[0];
+        if (!a) return;
+        var left = secondsLeft(a);
+        el.textContent = mmss(left);
+        if (left > 0) any = true;
+      });
+      if (!any) { clearInterval(countdownTimer); countdownTimer = null; loadToday(); }
+    }, 1000);
+  }
+
+  // Used by Today, History, and a box re-opened for editing.
+  function wireExplain(root) {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-send]'), function (b) {
+      b.addEventListener('click', function () {
+        var box = b.closest('.explain'), ta = box.querySelector('textarea');
+        var text = (ta.value || '').trim();
+        if (!text) { ta.focus(); return; }
+        var label = b.textContent;
+        b.disabled = true; b.textContent = 'Sending…';
+        rpc('set_my_alert_reason', { p_alert_id: b.getAttribute('data-send'), p_reason: text })
+          .then(function () { refreshViews(); })
+          .catch(function (e) {
+            b.disabled = false; b.textContent = label;
+            var old = box.querySelector('.hint.err');
+            if (old) old.remove();
+            box.insertAdjacentHTML('beforeend',
+              '<div class="hint err">' + esc(e.message || 'Could not send that.') + '</div>');
+          });
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-edit]'), function (b) {
+      b.addEventListener('click', function () { startEdit(b.getAttribute('data-edit')); });
+    });
+  }
+  // Redraw whichever list is on screen.
+  function refreshViews() {
+    if (!$('viewHistory').classList.contains('hidden')) loadHistory();
+    else loadToday();
   }
 
   function fmtClock(iso) {
@@ -423,7 +523,12 @@
           + 'locations(name)&shift_date=gte.' + fromStr
           + '&shift_date=lt.' + todayKL() + '&order=shift_date.desc,start_time.desc';
 
-    api(q).then(function (r) { return r.ok ? r.json() : []; }).then(function (rows) {
+    Promise.all([
+      api(q).then(function (r) { return r.ok ? r.json() : []; }),
+      loadMyAlerts()
+    ]).then(function (res) {
+      var rows = res[0] || [];
+      myAlerts = res[1] || [];
       if (!rows.length) { box.innerHTML = '<p class="empty">Nothing in the last 30 days.</p>'; return; }
       box.innerHTML = rows.map(function (s) {
         var bits = [];
@@ -438,8 +543,11 @@
           +   (bits.length ? '<div class="meta">' + esc(bits.join(' · ')) + '</div>' : '')
           +   '<div style="margin-top:8px"><span class="pill p-' + esc(s.status) + '">'
           +     esc(statusLabel(s.status)) + '</span></div>'
+          +   explainBox(s)
           + '</div>';
       }).join('');
+      wireExplain(box);
+      startCountdowns();
     }).catch(function (e) {
       box.innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
     });
