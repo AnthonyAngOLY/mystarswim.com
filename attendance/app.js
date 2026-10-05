@@ -242,9 +242,13 @@
       if (s.early_min) meta.push('Left early ' + s.early_min + ' min');
       if (mates.length) meta.push('Also scheduled here: ' + mates.join(', '));
 
+      // Blue to start, green once they are in and the only thing left is to
+      // check out, grey when the session is done. The colour alone tells a
+      // worker where they are in the session from across the pool deck.
       var btn = stage === 'done'
         ? '<button class="btn done" disabled>Done</button>'
-        : '<button class="btn" data-punch="' + s.id + '" data-type="' + stage + '">'
+        : '<button class="btn' + (stage === 'out' ? ' go' : '') + '"'
+          + ' data-punch="' + s.id + '" data-type="' + stage + '">'
           + (stage === 'in' ? 'Check in' : 'Check out') + '</button>';
 
       return ''
