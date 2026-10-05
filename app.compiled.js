@@ -6582,7 +6582,8 @@ function App({
     saveShift: attSaveShift,
     voidShift: attVoidShift,
     copyPreviousWeek: attCopyPreviousWeek,
-    addShiftSeries: attAddShiftSeries
+    addShiftSeries: attAddShiftSeries,
+    onRefresh: loadAttendance
   })), !loading && side === 'system' && view === 'adminPromos' && canSystem && /*#__PURE__*/React.createElement(AdminPromosView, {
     promos: promos,
     savePromo: adminSavePromo,
@@ -25079,7 +25080,8 @@ function AttendanceRosterView({
   saveShift,
   voidShift,
   copyPreviousWeek,
-  addShiftSeries
+  addShiftSeries,
+  onRefresh
 }) {
   const [modal, setModal] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -25196,7 +25198,7 @@ function AttendanceRosterView({
   };
   function outcome(x) {
     if (x.late_min > 0 && x.early_min > 0) return {
-      t: `Late ${x.late_min}m · early ${x.early_min}m`,
+      t: `Late ${x.late_min}m · left ${x.early_min}m early`,
       ...RED
     };
     if (x.late_min > 0) return {
@@ -25204,7 +25206,7 @@ function AttendanceRosterView({
       ...RED
     };
     if (x.early_min > 0) return {
-      t: `Early ${x.early_min}m`,
+      t: `Left ${x.early_min}m early`,
       ...RED
     };
     switch (x.status) {
@@ -25280,6 +25282,10 @@ function AttendanceRosterView({
     onClick: copyPreviousWeek,
     title: "Copy every session from the previous week into this one"
   }, "⧉ Copy last week"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onRefresh,
+    title: "Reload this week"
+  }, "↻ Refresh"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary small",
     style: {
       marginLeft: 'auto'

@@ -4286,6 +4286,7 @@ function App({ currentUser, onLogout }){
           voidShift={attVoidShift}
           copyPreviousWeek={attCopyPreviousWeek}
           addShiftSeries={attAddShiftSeries}
+          onRefresh={loadAttendance}
         />}
       </>}
       {!loading && side==='system' && view==='adminPromos' && canSystem && <AdminPromosView
@@ -12807,7 +12808,7 @@ function AttendanceLocationsView({ locations, saveLocation, retireLocation, sett
 // ── Attendance: Roster ───────────────────────────────────────────────────
 // One week at a time, a row per worker. Sessions are dated rows (shifts);
 // recurring patterns come in Phase 4, so everything here is an explicit date.
-function AttendanceRosterView({ shifts, locations, categories, employees, weekStart, setWeekStart, saveShift, voidShift, copyPreviousWeek, addShiftSeries }){
+function AttendanceRosterView({ shifts, locations, categories, employees, weekStart, setWeekStart, saveShift, voidShift, copyPreviousWeek, addShiftSeries, onRefresh }){
   const [modal,setModal]=useState(null);
   const [busy,setBusy]=useState(false);
   const [repeatWeeks,setRepeatWeeks]=useState(1);
@@ -12878,9 +12879,9 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
   const AMBER = { c:'#B45309', bg:'#FFFBEB', bd:'#FCD34D' };
   const OK    = { c:'#059669', bg:'var(--surface)', bd:'var(--border)' };
   function outcome(x){
-    if(x.late_min>0 && x.early_min>0) return { t:`Late ${x.late_min}m · early ${x.early_min}m`, ...RED };
-    if(x.late_min>0)  return { t:`Late ${x.late_min}m`,  ...RED };
-    if(x.early_min>0) return { t:`Early ${x.early_min}m`, ...RED };
+    if(x.late_min>0 && x.early_min>0) return { t:`Late ${x.late_min}m · left ${x.early_min}m early`, ...RED };
+    if(x.late_min>0)  return { t:`Late ${x.late_min}m`,          ...RED };
+    if(x.early_min>0) return { t:`Left ${x.early_min}m early`,   ...RED };
     switch(x.status){
       case 'absent':        return { t:'ABSENT',       ...RED };
       case 'incomplete':    return { t:'No check-out', ...AMBER };
@@ -12903,6 +12904,8 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
       <button className="btn btn-ghost small" onClick={()=>setWeekStart(weekStartStr(todayStr()))}>This week</button>
       <button className="btn btn-ghost small" onClick={copyPreviousWeek}
         title="Copy every session from the previous week into this one">⧉ Copy last week</button>
+      <button className="btn btn-ghost small" onClick={onRefresh}
+        title="Reload this week">↻ Refresh</button>
       <button className="btn btn-primary small" style={{marginLeft:'auto'}}
         disabled={!activeLocations.length}
         title={activeLocations.length?'':'Add a location first'}
