@@ -195,10 +195,12 @@
 
     Promise.all([
       api(q).then(function (r) { return r.ok ? r.json() : []; }),
-      rpc('get_my_shift_buddies', { p_date: date }).catch(function () { return []; })
+      rpc('get_my_shift_buddies', { p_date: date }).catch(function () { return []; }),
+      loadMyAlerts()
     ]).then(function (res) {
       todayShifts = res[0] || [];
       var buddies = res[1] || [];
+      myAlerts = res[2] || [];
       if (!todayShifts.length) {
         $('todayList').innerHTML = '<p class="empty">No sessions scheduled today.</p>';
         return;
@@ -208,6 +210,15 @@
     }).catch(function (e) {
       $('todayList').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
     });
+  }
+
+  // Anything of theirs still awaiting a decision. RLS already limits this to
+  // the signed-in worker's own rows.
+  var myAlerts = [];
+  function loadMyAlerts() {
+    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason&status=eq.open')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .catch(function () { return []; });
   }
 
   function loadPunches(ids) {
@@ -260,6 +271,7 @@
         +   (p['in'] ? proofLine(p['in'], loc) : '')
         +   '<div style="margin-top:8px"><span class="pill p-' + esc(s.status) + '">'
         +     esc(statusLabel(s.status)) + '</span></div>'
+        +   explainBox(s)
         +   btn
         + '</div>';
     }).join('');
@@ -267,6 +279,22 @@
     Array.prototype.forEach.call($('todayList').querySelectorAll('[data-punch]'), function (b) {
       b.addEventListener('click', function () {
         punch(b.getAttribute('data-punch'), b.getAttribute('data-type'), b);
+      });
+    });
+
+    Array.prototype.forEach.call($('todayList').querySelectorAll('[data-send]'), function (b) {
+      b.addEventListener('click', function () {
+        var box = b.parentNode, ta = box.querySelector('textarea');
+        var text = (ta.value || '').trim();
+        if (!text) { ta.focus(); return; }
+        b.disabled = true; b.textContent = 'Sending…';
+        rpc('set_my_alert_reason', { p_alert_id: b.getAttribute('data-send'), p_reason: text })
+          .then(function () { loadToday(); })
+          .catch(function (e) {
+            b.disabled = false; b.textContent = 'Send reason';
+            box.insertAdjacentHTML('beforeend',
+              '<div class="hint err">' + esc(e.message || 'Could not send that.') + '</div>');
+          });
       });
     });
   }
@@ -284,6 +312,38 @@
       + esc(dist ? dist + ' from ' + locName : locName)
       + '<span class="ll">' + esc(Number(punch.lat).toFixed(6) + ', ' + Number(punch.lng).toFixed(6)) + '</span>'
       + '</div>';
+  }
+
+  // Being late is something only the person who was late can explain. Rather
+  // than an admin chasing them for it, they write it here and the admin only
+  // decides whether it stands.
+  var ALERT_ASK = {
+    late:        'You were marked late.',
+    early_leave: 'You left before the session ended.',
+    absent:      'You were marked absent.',
+    no_checkin:  'No check-in was recorded.',
+    no_checkout: 'No check-out was recorded.',
+    geofence:    'A check-in was refused for being too far away.'
+  };
+  function alertsFor(shiftId) {
+    return myAlerts.filter(function (a) { return a.shift_id === shiftId; });
+  }
+  function explainBox(s) {
+    var list = alertsFor(s.id);
+    if (!list.length) return '';
+    return list.map(function (a) {
+      if (a.worker_reason) {
+        return '<div class="explain done">'
+          + '<div class="ask">' + esc(ALERT_ASK[a.type] || 'Needs an explanation.') + '</div>'
+          + '<div class="said">You said: <i>' + esc(a.worker_reason) + '</i></div>'
+          + '<div class="hint">Sent to your admin.</div></div>';
+      }
+      return '<div class="explain" data-alert="' + esc(a.id) + '">'
+        + '<div class="ask">' + esc(ALERT_ASK[a.type] || 'Needs an explanation.') + '</div>'
+        + '<textarea class="reason" rows="2" placeholder="What happened?"></textarea>'
+        + '<button class="btn small-btn" data-send="' + esc(a.id) + '">Send reason</button>'
+        + '</div>';
+    }).join('');
   }
 
   function fmtClock(iso) {

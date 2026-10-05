@@ -1299,6 +1299,7 @@ function App({ currentUser, onLogout }){
     try{
       const rows = await selectAllRows('alerts','*',
         `&status=eq.${attAlertFilter}&order=raised_at.desc`);
+      // Voided sessions still matter here — the alert outlives them.
       const ids = Array.from(new Set((rows||[]).map(a=>a.shift_id)));
       let sh = [];
       if(ids.length) sh = await selectAllRows('shifts','*',`&id=in.(${ids.join(',')})`);
@@ -12417,12 +12418,15 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
     { day:'numeric', month:'short', hour:'numeric', minute:'2-digit', hour12:true });
   const hhmm = t => String(t||'').slice(0,5);
 
+  // The alert's own copy of the session, taken when it was raised. The live
+  // row is used only to tell whether the session has since been removed.
+  const snap = a => a.shift_snapshot || {};
   function open(a){
     const s = shiftById[a.shift_id] || {};
     setModal({ a, s,
       pay_treatment: a.pay_treatment || 'none',
       remark: a.remark || '',
-      time: NEEDS_TIME[a.type] === 'in' ? hhmm(s.start_time) : hhmm(s.end_time),
+      time: NEEDS_TIME[a.type] === 'in' ? hhmm(snap(a).start_time) : hhmm(snap(a).end_time),
       markAbsent: false, markUnpaidLeave: false });
   }
 
@@ -12484,8 +12488,11 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
           <b>{emp.full_name || 'Unknown worker'}</b>
           <span className="small" style={{fontWeight:700,color:bad?'#DC2626':'#B45309'}}>{LABEL[a.type]||a.type}</span>
           <span className="small subtle">
-            {s.shift_date||''} · {hhmm(s.start_time)}–{hhmm(s.end_time)} · {loc.name||'—'}
+            {snap(a).shift_date||s.shift_date||''} · {hhmm(snap(a).start_time||s.start_time)}–{hhmm(snap(a).end_time||s.end_time)} · {snap(a).location_name||loc.name||'—'}
           </span>
+          {s.is_void && <span className="small" style={{fontWeight:700,color:'#475569',
+            background:'#F1F5F9',border:'1px solid #CBD5E1',borderRadius:999,padding:'0 7px'}}>
+            session removed</span>}
           <span className="small subtle" style={{marginLeft:'auto'}}>raised {fmt(a.raised_at)}</span>
         </div>
 
@@ -12495,14 +12502,25 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
           {s.early_min>0 && <span style={{color:'#DC2626',fontWeight:600}}>Left {s.early_min} min early</span>}
         </div>
 
+        {/* What the worker said. This is the thing being judged, so it leads. */}
+        {a.worker_reason
+          ? <div className="small" style={{marginTop:6,padding:'6px 9px',background:'#F8FAFC',
+                 border:'1px solid var(--border)',borderRadius:7}}>
+              <span className="subtle">{(emp.full_name||'They').split(' ')[0]} said:</span> <i>{a.worker_reason}</i>
+            </div>
+          : a.status==='open' && <div className="small subtle" style={{marginTop:6,fontStyle:'italic'}}>
+              No reason given yet — they can add one from their app.
+            </div>}
+
         {a.status==='open'
-          ? <button className="btn btn-primary small" style={{marginTop:8}} onClick={()=>open(a)}>Resolve…</button>
+          ? <button className="btn btn-primary small" style={{marginTop:8}} onClick={()=>open(a)}>Review…</button>
           : <div className="small" style={{marginTop:6,color:'#059669'}}>
               ✓ {a.resolution_action==='time_entered' ? 'Time entered by admin'
                 : a.resolution_action==='marked_absent' ? 'Marked absent' : 'Reviewed'}
               {a.pay_treatment && <> · {a.pay_treatment==='full' ? 'Full deduction'
                 : a.pay_treatment==='half' ? 'Half deduction' : 'No deduction'}</>}
               {a.remark && <> · <i>{a.remark}</i></>}
+              {s.is_void && <> · session removed</>}
             </div>}
       </div>;
     })}
@@ -12512,9 +12530,9 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
       return <div className="modal-backdrop"><div className="modal-card">
         <div className="modal-head">
           <div style={{minWidth:0,flex:1}}>
-            <div style={{fontSize:13,fontWeight:800,lineHeight:1.1}}>Resolve — {LABEL[t]||t}</div>
+            <div style={{fontSize:13,fontWeight:800,lineHeight:1.1}}>Review — {LABEL[t]||t}</div>
             <div className="small subtle" style={{fontSize:10.5,marginTop:1}}>
-              {(empById[modal.a.crew_id]||{}).full_name} · {modal.s.shift_date} {hhmm(modal.s.start_time)}–{hhmm(modal.s.end_time)}
+              {(empById[modal.a.crew_id]||{}).full_name} · {snap(modal.a).shift_date||modal.s.shift_date} {hhmm(snap(modal.a).start_time||modal.s.start_time)}–{hhmm(snap(modal.a).end_time||modal.s.end_time)}
             </div>
           </div>
           <button className="btn btn-ghost small" onClick={()=>setModal(null)} aria-label="Close">✕</button>
@@ -12554,12 +12572,20 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
               from it until pay rates are set up.
             </div></div>}
 
+          {modal.a.worker_reason && <div className="field"><label>Their reason</label>
+            <div className="small" style={{padding:'7px 10px',background:'#F8FAFC',
+                 border:'1px solid var(--border)',borderRadius:8}}><i>{modal.a.worker_reason}</i></div>
+            </div>}
+
           <div className="field"><label>
-            Remark {(needsTime || (t==='absent' && modal.markUnpaidLeave)) && <span style={{color:'#DC2626'}}>*</span>}
+            Your note {(needsTime || (t==='absent' && modal.markUnpaidLeave)) && <span style={{color:'#DC2626'}}>*</span>}
           </label>
             <input className="input" value={modal.remark} autoFocus
-              placeholder="What happened, in your words"
-              onChange={e=>setModal({...modal,remark:e.target.value})} /></div>
+              placeholder={modal.a.worker_reason ? 'Accepted, or why not' : 'What you found out'}
+              onChange={e=>setModal({...modal,remark:e.target.value})} />
+            <div className="small subtle" style={{marginTop:4}}>
+              Kept alongside their reason, never replacing it.
+            </div></div>
 
           <div style={{display:'flex',gap:8,marginTop:16}}>
             <button className="btn btn-primary" disabled={busy} onClick={submit}>
@@ -12729,6 +12755,34 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
   const locName = id => (locations.find(l=>l.id===id)||{}).name || '—';
   const catName = id => (categories.find(c=>c.id===id)||{}).name || '';
 
+  // A session is planning until it starts, and history afterwards. Editing it
+  // later would quietly rewrite what any alert against it was about, so the
+  // roster only offers Edit beforehand — after that it can be voided, never
+  // altered.
+  function hasStarted(x){
+    const now = new Date();
+    const today = todayStr();
+    if(x.shift_date < today) return true;
+    if(x.shift_date > today) return false;
+    const p = String(x.start_time).split(':');
+    return (now.getHours()*60 + now.getMinutes()) >= ((+p[0])*60 + (+p[1]));
+  }
+  // What actually happened, short enough to sit on one line.
+  function outcome(x){
+    if(x.late_min>0 && x.early_min>0) return { t:`Late ${x.late_min}m, early ${x.early_min}m`, c:'#DC2626' };
+    if(x.late_min>0)  return { t:`Late ${x.late_min}m`, c:'#DC2626' };
+    if(x.early_min>0) return { t:`Early ${x.early_min}m`, c:'#DC2626' };
+    switch(x.status){
+      case 'absent':        return { t:'Absent',       c:'#DC2626' };
+      case 'incomplete':    return { t:'No check-out', c:'#B45309' };
+      case 'geofence_flag': return { t:'Flagged',      c:'#B45309' };
+      case 'on_time':       return { t:'On time',      c:'#059669' };
+      default:              return null;
+    }
+  }
+  const EDGE = { absent:'#DC2626', late:'#DC2626', early_leave:'#DC2626',
+                 incomplete:'#B45309', geofence_flag:'#B45309', on_time:'#059669' };
+
   return <div className="card">
     <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
       <div style={{fontWeight:800}}>Roster</div>
@@ -12776,22 +12830,32 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
               // so every extra line per session costs real legibility.
               const lk = { background:'none', border:0, padding:0, font:'inherit',
                            cursor:'pointer', textDecoration:'underline' };
-              return <div key={s.id} onClick={ev=>{ ev.stopPropagation(); openEdit(s); }}
-                           style={{border:'1px solid var(--border)',borderRadius:6,
-                           padding:'2px 6px',marginBottom:3,background:'var(--surface)',lineHeight:1.35}}>
+              const out = outcome(s), started = hasStarted(s);
+              const edge = out ? out.c : 'var(--border)';
+              return <div key={s.id}
+                           onClick={ev=>{ ev.stopPropagation(); if(!started) openEdit(s); }}
+                           style={{border:'1px solid var(--border)',borderLeft:`3px solid ${edge}`,
+                           borderRadius:6,padding:'2px 6px',marginBottom:3,
+                           background:'var(--surface)',lineHeight:1.35}}>
                 <div className="small" title={locName(s.location_id)}
                      style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
                   <b>{String(s.start_time).slice(0,5)}–{String(s.end_time).slice(0,5)}</b>
                   <span className="subtle"> | </span>{locName(s.location_id)}
                 </div>
                 <div className="small subtle" style={{fontSize:10.5,whiteSpace:'nowrap'}}>
-                  {catName(s.category_id) && <><i>{catName(s.category_id)}</i> · </>}
-                  <button style={{...lk,color:'var(--primary-on-soft,#0369A1)'}}
-                    onClick={ev=>{ ev.stopPropagation(); openEdit(s); }}>Edit</button>
-                  <span> · </span>
+                  {out ? <><span style={{color:out.c,fontWeight:700}}>{out.t}</span> · </>
+                       : (catName(s.category_id) && <><i>{catName(s.category_id)}</i> · </>)}
+                  {!started && <>
+                    <button style={{...lk,color:'var(--primary-on-soft,#0369A1)'}}
+                      onClick={ev=>{ ev.stopPropagation(); openEdit(s); }}>Edit</button>
+                    <span> · </span>
+                  </>}
                   <button style={{...lk,color:'#DC2626'}}
+                    title={started?'Remove this session. Any alert against it is kept.':'Remove this session'}
                     onClick={ev=>{ ev.stopPropagation();
-                      if(confirm('Void this session? It stays in the record.')) voidShift(s.id); }}>Void</button>
+                      if(confirm(started
+                        ? 'Remove this session?\n\nIt disappears from the roster. Any alert, punch or reason recorded against it is kept in the log.'
+                        : 'Remove this session?')) voidShift(s.id); }}>Remove</button>
                 </div>
               </div>;
             })}
