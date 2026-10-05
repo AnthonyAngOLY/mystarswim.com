@@ -21,6 +21,13 @@
 
 begin;
 
+-- Supabase installs PostGIS into the `extensions` schema, not public. Put it
+-- on the search path so geography(Point,4326) resolves, while keeping public
+-- first so every table below is still created in public.
+-- Without this the migration fails with: type "geography" does not exist —
+-- which reads like PostGIS is missing when it is actually installed.
+set local search_path = public, extensions;
+
 -- ─── 1. Extensions ──────────────────────────────────────────────────────────
 -- PostGIS gives us ST_Distance on geography (metres, accounts for curvature).
 create extension if not exists postgis;
