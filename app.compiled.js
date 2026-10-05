@@ -24549,7 +24549,7 @@ function AttendanceRosterView({
   }, "Worker"), days.map((d, i) => /*#__PURE__*/React.createElement("th", {
     key: d,
     style: {
-      minWidth: 120
+      minWidth: 138
     }
   }, DAY_NAMES[i], /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
@@ -24569,49 +24569,60 @@ function AttendanceRosterView({
       style: {
         verticalAlign: 'top'
       }
-    }, cell.map(s => /*#__PURE__*/React.createElement("div", {
-      key: s.id,
-      style: {
-        border: '1px solid var(--border)',
-        borderRadius: 8,
-        padding: '5px 7px',
-        marginBottom: 5,
-        background: 'var(--surface)'
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "small",
-      style: {
-        fontWeight: 700
-      }
-    }, String(s.start_time).slice(0, 5), "–", String(s.end_time).slice(0, 5)), /*#__PURE__*/React.createElement("div", {
-      className: "small subtle"
-    }, locName(s.location_id)), catName(s.category_id) && /*#__PURE__*/React.createElement("div", {
-      className: "small subtle",
-      style: {
-        fontSize: 10
-      }
-    }, catName(s.category_id)), /*#__PURE__*/React.createElement("div", {
-      style: {
-        marginTop: 3
-      }
-    }, /*#__PURE__*/React.createElement("button", {
-      className: "btn btn-ghost small",
-      style: {
-        padding: '1px 6px',
-        fontSize: 10
-      },
-      onClick: () => openEdit(s)
-    }, "Edit"), /*#__PURE__*/React.createElement("button", {
-      className: "btn btn-ghost small",
-      style: {
-        padding: '1px 6px',
-        fontSize: 10,
-        marginLeft: 4
-      },
-      onClick: () => {
-        if (confirm('Void this session? It stays in the record.')) voidShift(s.id);
-      }
-    }, "Void")))), /*#__PURE__*/React.createElement("button", {
+    }, cell.map(s => {
+      // Two lines, never three: time and place up top, then category
+      // and the actions. A week grid is read by scanning down a column,
+      // so every extra line per session costs real legibility.
+      const lk = {
+        background: 'none',
+        border: 0,
+        padding: 0,
+        font: 'inherit',
+        cursor: 'pointer',
+        textDecoration: 'underline'
+      };
+      return /*#__PURE__*/React.createElement("div", {
+        key: s.id,
+        style: {
+          border: '1px solid var(--border)',
+          borderRadius: 7,
+          padding: '4px 7px',
+          marginBottom: 4,
+          background: 'var(--surface)',
+          lineHeight: 1.4
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "small",
+        title: locName(s.location_id),
+        style: {
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis'
+        }
+      }, /*#__PURE__*/React.createElement("b", null, String(s.start_time).slice(0, 5), "–", String(s.end_time).slice(0, 5)), /*#__PURE__*/React.createElement("span", {
+        className: "subtle"
+      }, " | "), locName(s.location_id)), /*#__PURE__*/React.createElement("div", {
+        className: "small subtle",
+        style: {
+          fontSize: 10.5,
+          whiteSpace: 'nowrap'
+        }
+      }, catName(s.category_id) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("i", null, catName(s.category_id)), " · "), /*#__PURE__*/React.createElement("button", {
+        style: {
+          ...lk,
+          color: 'var(--primary-on-soft,#0369A1)'
+        },
+        onClick: () => openEdit(s)
+      }, "Edit"), /*#__PURE__*/React.createElement("span", null, " · "), /*#__PURE__*/React.createElement("button", {
+        style: {
+          ...lk,
+          color: '#DC2626'
+        },
+        onClick: () => {
+          if (confirm('Void this session? It stays in the record.')) voidShift(s.id);
+        }
+      }, "Void")));
+    }), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost small",
       style: {
         padding: '1px 6px',

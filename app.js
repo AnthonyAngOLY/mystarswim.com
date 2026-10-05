@@ -12503,7 +12503,7 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
 
     {!!rosteredIds.length && <div className="table-wrap"><table className="table">
       <thead><tr><th style={{minWidth:140}}>Worker</th>
-        {days.map((d,i)=><th key={d} style={{minWidth:120}}>{DAY_NAMES[i]}<div className="small subtle" style={{fontWeight:400}}>{d.slice(8)}/{d.slice(5,7)}</div></th>)}
+        {days.map((d,i)=><th key={d} style={{minWidth:138}}>{DAY_NAMES[i]}<div className="small subtle" style={{fontWeight:400}}>{d.slice(8)}/{d.slice(5,7)}</div></th>)}
       </tr></thead>
       <tbody>{rosteredIds.map(cid => <tr key={cid}>
         <td style={{fontWeight:600}}>{(empById[cid]||{}).full_name || 'Unknown worker'}</td>
@@ -12511,16 +12511,28 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
           const cell=(byCrew[cid]||[]).filter(s=>s.shift_date===d)
             .sort((a,b)=>String(a.start_time).localeCompare(String(b.start_time)));
           return <td key={d} style={{verticalAlign:'top'}}>
-            {cell.map(s => <div key={s.id} style={{border:'1px solid var(--border)',borderRadius:8,padding:'5px 7px',marginBottom:5,background:'var(--surface)'}}>
-              <div className="small" style={{fontWeight:700}}>{String(s.start_time).slice(0,5)}–{String(s.end_time).slice(0,5)}</div>
-              <div className="small subtle">{locName(s.location_id)}</div>
-              {catName(s.category_id) && <div className="small subtle" style={{fontSize:10}}>{catName(s.category_id)}</div>}
-              <div style={{marginTop:3}}>
-                <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10}} onClick={()=>openEdit(s)}>Edit</button>
-                <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10,marginLeft:4}}
-                  onClick={()=>{ if(confirm('Void this session? It stays in the record.')) voidShift(s.id); }}>Void</button>
-              </div>
-            </div>)}
+            {cell.map(s => {
+              // Two lines, never three: time and place up top, then category
+              // and the actions. A week grid is read by scanning down a column,
+              // so every extra line per session costs real legibility.
+              const lk = { background:'none', border:0, padding:0, font:'inherit',
+                           cursor:'pointer', textDecoration:'underline' };
+              return <div key={s.id} style={{border:'1px solid var(--border)',borderRadius:7,
+                           padding:'4px 7px',marginBottom:4,background:'var(--surface)',lineHeight:1.4}}>
+                <div className="small" title={locName(s.location_id)}
+                     style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                  <b>{String(s.start_time).slice(0,5)}–{String(s.end_time).slice(0,5)}</b>
+                  <span className="subtle"> | </span>{locName(s.location_id)}
+                </div>
+                <div className="small subtle" style={{fontSize:10.5,whiteSpace:'nowrap'}}>
+                  {catName(s.category_id) && <><i>{catName(s.category_id)}</i> · </>}
+                  <button style={{...lk,color:'var(--primary-on-soft,#0369A1)'}} onClick={()=>openEdit(s)}>Edit</button>
+                  <span> · </span>
+                  <button style={{...lk,color:'#DC2626'}}
+                    onClick={()=>{ if(confirm('Void this session? It stays in the record.')) voidShift(s.id); }}>Void</button>
+                </div>
+              </div>;
+            })}
             <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10}}
               disabled={!activeLocations.length} onClick={()=>openNew(cid,d)}>+</button>
           </td>;
