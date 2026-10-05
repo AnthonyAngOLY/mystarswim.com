@@ -149,6 +149,7 @@
   }
 
   function signOut() {
+    closeMenu();
     clearSession();
     session = null; profile = null;
     hide($('appScreen')); hide($('consentScreen')); hide($('passwordScreen'));
@@ -204,6 +205,7 @@
     show($('appScreen'));
     $('whoName').textContent = profile.full_name || '';
     $('whoId').textContent = profile.staff_id || '';
+    $('menuPassword').classList.toggle('hidden', !profile.must_change_password);
     loadSettings().then(loadToday);
   }
 
@@ -654,6 +656,31 @@
   $('pwLater').addEventListener('click', function () {
     $('curPw').value = $('newPw').value = $('newPw2').value = '';
     enterApp();
+  });
+
+  // ── Account menu ───────────────────────────────────────────────────────
+  // Sign out lived at the bottom of My summary, which nobody would think to
+  // look for. It belongs with the name it signs out of.
+  function closeMenu() {
+    $('whoMenu').classList.add('hidden');
+    $('whoBtn').setAttribute('aria-expanded', 'false');
+  }
+  function toggleMenu() {
+    var open = $('whoMenu').classList.toggle('hidden') === false;
+    $('whoBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  $('whoBtn').addEventListener('click', function (e) { e.stopPropagation(); toggleMenu(); });
+  document.addEventListener('click', function (e) {
+    if (!$('whoMenu').classList.contains('hidden') && !$('whoMenu').contains(e.target)) closeMenu();
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+
+  // Only shown while their one change is still available, so the menu never
+  // offers something that would be refused.
+  $('menuPassword').addEventListener('click', function () {
+    closeMenu();
+    pwOffered = false;
+    maybeOfferPasswordChange();
   });
 
   $('consentSignOut').addEventListener('click', signOut);
