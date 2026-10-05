@@ -1991,7 +1991,7 @@ function App({
       const ids = (sh || []).map(r => r.id);
       let pu = [];
       if (ids.length) {
-        pu = await selectAllRows('punches', 'shift_id,type,punched_at,accepted,distance_m,inside_fence', `&shift_id=in.(${ids.join(',')})&order=punched_at.asc`);
+        pu = await selectAllRows('punches', 'shift_id,type,punched_at,accepted,distance_m,inside_fence,lat,lng,accuracy_m', `&shift_id=in.(${ids.join(',')})&order=punched_at.asc`);
       }
       setAttToday(sh || []);
       setAttPunches(pu || []);
@@ -2043,6 +2043,59 @@ function App({
     } catch (err) {
       handleErr(err);
       alert(err.message || 'Failed to save session');
+    }
+  }
+  // Copy every session from the previous week into the one on screen.
+  // Mirrors "Duplicate Previous Week" in the lesson scheduler, which is the
+  // idiom staff already know. Each week stays independent data afterwards, so
+  // a holiday or a swap is edited on that week alone — no series to fight.
+  async function attCopyPreviousWeek() {
+    try {
+      const prevStart = addDays(attWeekStart, -7),
+        prevEnd = addDays(attWeekStart, -1);
+      const prev = await selectAllRows('shifts', '*', `&is_void=eq.false&shift_date=gte.${prevStart}&shift_date=lte.${prevEnd}`);
+      if (!(prev || []).length) {
+        alert('There are no sessions in the previous week to copy.');
+        return;
+      }
+      // A worker cannot hold two sessions at the same moment (enforced by a
+      // unique index), so skip anything already on this week rather than
+      // letting the insert fail wholesale.
+      const taken = new Set((attShifts || []).map(x => `${x.crew_id}|${x.shift_date}|${x.start_time}`));
+      const rows = prev.map(x => ({
+        crew_id: x.crew_id,
+        shift_date: addDays(x.shift_date, 7),
+        start_time: x.start_time,
+        end_time: x.end_time,
+        location_id: x.location_id,
+        category_id: x.category_id
+      })).filter(r => !taken.has(`${r.crew_id}|${r.shift_date}|${r.start_time}`));
+      if (!rows.length) {
+        alert('Every session from last week is already on this week.');
+        return;
+      }
+      if (!confirm(`Copy ${rows.length} session${rows.length === 1 ? '' : 's'} from last week into this week?`)) return;
+      await insertRows('shifts', rows);
+      await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Failed to copy last week');
+    }
+  }
+  // One session repeated on the same weekday for N weeks. Creates plain dated
+  // rows — there is no recurrence rule to reason about later.
+  async function attAddShiftSeries(base, weeks) {
+    try {
+      const rows = [];
+      for (let i = 0; i < weeks; i++) rows.push({
+        ...base,
+        shift_date: addDays(base.shift_date, i * 7)
+      });
+      await insertRows('shifts', rows);
+      await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Failed to add the sessions');
     }
   }
   async function attVoidShift(id) {
@@ -6365,7 +6418,9 @@ function App({
     weekStart: attWeekStart,
     setWeekStart: setAttWeekStart,
     saveShift: attSaveShift,
-    voidShift: attVoidShift
+    voidShift: attVoidShift,
+    copyPreviousWeek: attCopyPreviousWeek,
+    addShiftSeries: attAddShiftSeries
   })), !loading && side === 'system' && view === 'adminPromos' && canSystem && /*#__PURE__*/React.createElement(AdminPromosView, {
     promos: promos,
     savePromo: adminSavePromo,
@@ -23420,6 +23475,46 @@ function AttendanceLiveView({
   });
   const hhmm = t => String(t).slice(0, 5);
   const metres = d => d == null ? '' : d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
+  // The coordinates the SERVER stored, not what the phone claims now, with the
+  // geofence verdict spelled out. The map link lets an admin see the exact
+  // spot when a punch looks wrong.
+  function Coords({
+    punch,
+    loc
+  }) {
+    if (punch.lat == null || punch.lng == null) return null;
+    const ok = punch.inside_fence !== false;
+    const ll = `${Number(punch.lat).toFixed(6)}, ${Number(punch.lng).toFixed(6)}`;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        marginTop: 3,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: ok ? '#059669' : '#DC2626',
+        fontWeight: 700
+      }
+    }, ok ? '✓' : '✗'), /*#__PURE__*/React.createElement("a", {
+      href: `https://www.google.com/maps?q=${punch.lat},${punch.lng}`,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      style: {
+        fontFamily: 'ui-monospace,monospace',
+        fontSize: 11.5,
+        color: 'var(--primary-on-soft,#0369A1)'
+      }
+    }, ll), /*#__PURE__*/React.createElement("span", {
+      className: "subtle",
+      style: {
+        fontSize: 11
+      }
+    }, ok ? `inside the ${loc.radius_m || 300} m area` : `outside the ${loc.radius_m || 300} m area`, punch.accuracy_m != null && ` · GPS ±${Math.round(punch.accuracy_m)} m`));
+  }
   const TILES = [{
     k: 'in',
     label: 'Checked in',
@@ -23583,7 +23678,10 @@ function AttendanceLiveView({
       style: {
         color: '#DC2626'
       }
-    }, " · ", s.late_min, " min late")), state === 'done' && /*#__PURE__*/React.createElement("span", {
+    }, " · ", s.late_min, " min late")), (state === 'in' || state === 'done') && /*#__PURE__*/React.createElement(Coords, {
+      punch: p.in,
+      loc: loc
+    }), state === 'done' && /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#0369A1',
         fontWeight: 600
@@ -23605,12 +23703,18 @@ function AttendanceLiveView({
       className: "subtle"
     }, "Starts later today")), p.rejected.map((r, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
+      style: {
+        marginTop: 4
+      }
+    }, /*#__PURE__*/React.createElement("div", {
       className: "small",
       style: {
-        marginTop: 4,
         color: '#B45309'
       }
-    }, "⚠ Tried to check in ", fmt(r.punched_at), " from ", metres(r.distance_m), " away — refused")));
+    }, "⚠ Tried to check in ", fmt(r.punched_at), " from ", metres(r.distance_m), " away — refused"), /*#__PURE__*/React.createElement(Coords, {
+      punch: r,
+      loc: loc
+    }))));
   }));
 }
 
@@ -23915,10 +24019,13 @@ function AttendanceRosterView({
   weekStart,
   setWeekStart,
   saveShift,
-  voidShift
+  voidShift,
+  copyPreviousWeek,
+  addShiftSeries
 }) {
   const [modal, setModal] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [repeatWeeks, setRepeatWeeks] = useState(1);
   const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const days = useMemo(() => Array.from({
     length: 7
@@ -23943,6 +24050,7 @@ function AttendanceRosterView({
     return m;
   }, [employees]);
   function openNew(crewId, date) {
+    setRepeatWeeks(1);
     setModal({
       crew_id: crewId || '',
       shift_date: date || weekStart,
@@ -23953,6 +24061,7 @@ function AttendanceRosterView({
     });
   }
   function openEdit(s) {
+    setRepeatWeeks(1);
     setModal({
       id: s.id,
       crew_id: s.crew_id,
@@ -23980,15 +24089,16 @@ function AttendanceRosterView({
       alert('The end time must be after the start time.');
       return;
     }
-    setBusy(true);
-    await saveShift({
+    const base = {
       crew_id: modal.crew_id,
       shift_date: modal.shift_date,
       start_time: modal.start_time,
       end_time: modal.end_time,
       location_id: modal.location_id,
       category_id: modal.category_id
-    }, modal.id);
+    };
+    setBusy(true);
+    if (!modal.id && repeatWeeks > 1) await addShiftSeries(base, repeatWeeks);else await saveShift(base, modal.id);
     setBusy(false);
     setModal(null);
   }
@@ -24030,6 +24140,10 @@ function AttendanceRosterView({
     className: "btn btn-ghost small",
     onClick: () => setWeekStart(weekStartStr(todayStr()))
   }, "This week"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: copyPreviousWeek,
+    title: "Copy every session from the previous week into this one"
+  }, "⧉ Copy last week"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary small",
     style: {
       marginLeft: 'auto'
@@ -24235,7 +24349,28 @@ function AttendanceRosterView({
   }, (categories || []).map(c => /*#__PURE__*/React.createElement("option", {
     key: c.id,
     value: c.id
-  }, c.name)))), /*#__PURE__*/React.createElement("div", {
+  }, c.name)))), !modal.id && /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Repeat weekly"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: repeatWeeks,
+    onChange: e => setRepeatWeeks(Number(e.target.value))
+  }, /*#__PURE__*/React.createElement("option", {
+    value: 1
+  }, "Just this date"), /*#__PURE__*/React.createElement("option", {
+    value: 4
+  }, "4 weeks"), /*#__PURE__*/React.createElement("option", {
+    value: 8
+  }, "8 weeks"), /*#__PURE__*/React.createElement("option", {
+    value: 12
+  }, "12 weeks (a term)"), /*#__PURE__*/React.createElement("option", {
+    value: 26
+  }, "26 weeks (half a year)")), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "Creates a separate session on each date, so any single week can be changed or voided later without affecting the rest.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,

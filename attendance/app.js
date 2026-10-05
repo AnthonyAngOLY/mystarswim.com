@@ -212,7 +212,7 @@
 
   function loadPunches(ids) {
     if (!ids.length) return Promise.resolve([]);
-    var q = '/rest/v1/punches?select=shift_id,type,punched_at,accepted'
+    var q = '/rest/v1/punches?select=shift_id,type,punched_at,accepted,distance_m,inside_fence,lat,lng'
           + '&accepted=is.true&shift_id=in.(' + ids.join(',') + ')';
     return api(q).then(function (r) { return r.ok ? r.json() : []; });
   }
@@ -221,7 +221,7 @@
     var byShift = {};
     punches.forEach(function (p) {
       byShift[p.shift_id] = byShift[p.shift_id] || {};
-      byShift[p.shift_id][p.type] = p.punched_at;
+      byShift[p.shift_id][p.type] = p;
     });
     var buddyBy = {};
     buddies.forEach(function (b) {
@@ -236,8 +236,8 @@
       var mates = buddyBy[s.id] || [];
 
       var meta = [];
-      if (p['in'])  meta.push('Checked in ' + fmtClock(p['in']));
-      if (p['out']) meta.push('Checked out ' + fmtClock(p['out']));
+      if (p['in'])  meta.push('Checked in ' + fmtClock(p['in'].punched_at));
+      if (p['out']) meta.push('Checked out ' + fmtClock(p['out'].punched_at));
       if (s.late_min)  meta.push('Late ' + s.late_min + ' min');
       if (s.early_min) meta.push('Left early ' + s.early_min + ' min');
       if (mates.length) meta.push('Also scheduled here: ' + mates.join(', '));
@@ -253,6 +253,7 @@
         +     (cat ? '<span class="tag">' + esc(cat) + '</span>' : '') + '</div>'
         +   '<div class="loc">' + esc(loc) + '</div>'
         +   '<div class="meta">' + esc(meta.join(' · ')) + '</div>'
+        +   (p['in'] ? proofLine(p['in'], loc) : '')
         +   '<div style="margin-top:8px"><span class="pill p-' + esc(s.status) + '">'
         +     esc(statusLabel(s.status)) + '</span></div>'
         +   btn
@@ -264,6 +265,21 @@
         punch(b.getAttribute('data-punch'), b.getAttribute('data-type'), b);
       });
     });
+  }
+
+  // Shows the worker the same evidence the admin sees: where the check-in was
+  // taken and whether it fell inside the pool's area. Green means it counted.
+  function proofLine(punch, locName) {
+    if (punch.lat == null || punch.lng == null) return '';
+    var ok = punch.inside_fence !== false;
+    var dist = punch.distance_m == null ? ''
+      : (punch.distance_m >= 1000 ? (punch.distance_m / 1000).toFixed(1) + ' km'
+                                  : Math.round(punch.distance_m) + ' m');
+    return '<div class="proof ' + (ok ? 'ok' : 'bad') + '">'
+      + '<span class="tick">' + (ok ? '✓' : '✗') + '</span> '
+      + esc(dist ? dist + ' from ' + locName : locName)
+      + '<span class="ll">' + esc(Number(punch.lat).toFixed(6) + ', ' + Number(punch.lng).toFixed(6)) + '</span>'
+      + '</div>';
   }
 
   function fmtClock(iso) {
@@ -303,7 +319,9 @@
     btn.disabled = true;
     btn.textContent = 'Getting your location…';
 
+    var lastFix = 0, lastLng = 0;
     getPosition().then(function (c) {
+      lastFix = c.latitude; lastLng = c.longitude;
       btn.textContent = 'Sending…';
       return api('/functions/v1/punch', {
         method: 'POST',
@@ -316,9 +334,13 @@
       });
     }).then(function (res) {
       if (!res.ok) throw new Error(res.body && res.body.error ? res.body.error : 'Could not record that.');
+      var d = res.body.distance_m;
+      var where = d == null ? '' : ' · ' + (d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m') + ' from the pool';
       msg.innerHTML = '<div class="note ok">'
-        + (type === 'in' ? 'Checked in' : 'Checked out') + ' at '
-        + esc(fmtClock(res.body.punched_at)) + '.</div>';
+        + '<b>✓ ' + (type === 'in' ? 'Checked in' : 'Checked out') + ' at '
+        + esc(fmtClock(res.body.punched_at)) + '</b>' + esc(where)
+        + '<div class="ll">' + esc(lastFix.toFixed(6) + ', ' + lastLng.toFixed(6)) + '</div>'
+        + '</div>';
       loadToday();
     }).catch(function (e) {
       msg.innerHTML = '<div class="note err">' + esc(e.message) + '</div>';

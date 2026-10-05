@@ -89,6 +89,15 @@
   .p-absent{background:var(--slate-bg); color:var(--slate-tx); border-color:var(--slate-bd)}
   .p-scheduled{background:var(--slate-bg); color:var(--slate-tx); border-color:var(--slate-bd)}
 
+  /* Proof of where a punch was taken — the worker sees what the admin sees. */
+  .proof{display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+         font-size:12.5px; margin-top:6px; font-weight:600}
+  .proof.ok{color:var(--green-tx)}
+  .proof.bad{color:var(--red-tx)}
+  .proof .tick{font-size:14px}
+  .ll{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px;
+      font-weight:400; opacity:.75; letter-spacing:-.2px}
+  .note .ll{display:block; margin-top:4px}
   .note{padding:12px 14px; border-radius:10px; font-size:14px; margin:12px 0; border:1px solid}
   .note.err{background:var(--red-bg); color:var(--red-tx); border-color:var(--red-bd)}
   .note.ok {background:var(--green-bg); color:var(--green-tx); border-color:var(--green-bd)}
