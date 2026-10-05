@@ -423,13 +423,13 @@ function App({ currentUser, onLogout }){
   }
   // Robust: header rendering follows the CURRENT VIEW, not a separate `side`
   // state, so the header can never drift out of sync with the content area.
-  const isOnSystemView = ['adminDirectory','adminVouchers','adminCrew','adminPromos'].includes(view);
+  const isOnSystemView = ['adminDirectory','adminVouchers','adminCrew','adminPromos','attendance'].includes(view);
   // Defensive: if view and side ever get out of sync (e.g. after login flow
   // or a stale route), snap view back to the side's home. Prevents the
   // "half-breed" state where system nav is shown but schedule content mounts.
   useEffect(()=>{
     const scheduleViews = new Set(['schedule','programme','accounts','shop','messages','enroll','settings','students']);
-    const systemViews = new Set(['adminDirectory','adminVouchers','adminCrew','adminPromos']);
+    const systemViews = new Set(['adminDirectory','adminVouchers','adminCrew','adminPromos','attendance']);
     if(side==='schedule' && systemViews.has(view)) setView('schedule');
     if(side==='system' && scheduleViews.has(view)) setView('adminDirectory');
   }, [side, view]);
@@ -444,6 +444,17 @@ function App({ currentUser, onLogout }){
   const [adminVouchers,setAdminVouchers] = useState([]);
   const [adminEmployees,setAdminEmployees] = useState([]);
   const [adminCrewLoadFailed,setAdminCrewLoadFailed] = useState(false);
+  // ── Attendance module (geofenced punch clock) ──
+  // Reads RLS-protected tables, so these calls only succeed once the signed-in
+  // user carries a Supabase JWT (Phase 2). Before that they fail closed and
+  // the section shows a plain explanation rather than an empty grid.
+  const [attendanceSection,setAttendanceSection] = useState('roster');
+  const [attLocations,setAttLocations] = useState([]);
+  const [attCategories,setAttCategories] = useState([]);
+  const [attShifts,setAttShifts] = useState([]);
+  const [attSettings,setAttSettings] = useState(null);
+  const [attWeekStart,setAttWeekStart] = useState(weekStartStr(todayStr()));
+  const [attBlocked,setAttBlocked] = useState(false);
   const [promos,setPromos] = useState([]);
   const [programmeModal,setProgrammeModal] = useState(null);
   const [programmeDate,setProgrammeDate] = useState(todayStr());     // own week cursor (independent of Schedule)
@@ -1175,6 +1186,48 @@ function App({ currentUser, onLogout }){
       setPromos(prs||[]);
       setAdminCrewLoadFailed(empLoadFailed);
     } catch(_){ setAdminCrewLoadFailed(true); }
+  }
+
+  async function loadAttendance(){
+    try{
+      const from = attWeekStart, to = addDays(attWeekStart,6);
+      const [locs,cats,sh,st] = await Promise.all([
+        selectRows('locations','*','&order=name.asc'),
+        selectRows('shift_categories','*','&order=sort_order.asc'),
+        selectAllRows('shifts','*',`&is_void=eq.false&shift_date=gte.${from}&shift_date=lte.${to}&order=shift_date.asc,start_time.asc`),
+        selectRows('attendance_settings','*').catch(()=>[]),
+      ]);
+      setAttLocations(locs||[]); setAttCategories(cats||[]);
+      setAttShifts(sh||[]); setAttSettings((st||[])[0]||null);
+      setAttBlocked(false);
+    } catch(_){
+      // Most likely cause: no Supabase JWT yet, so RLS denies every table.
+      setAttLocations([]); setAttCategories([]); setAttShifts([]);
+      setAttBlocked(true);
+    }
+  }
+  useEffect(()=>{ if(view==='attendance') loadAttendance(); }, [view, attWeekStart]);
+
+  async function attSaveLocation(data, id){
+    try{
+      if(id) await patchRows('locations',{id},data); else await insertRows('locations',data);
+      await loadAttendance();
+    } catch(err){ handleErr(err); alert(err.message||'Failed to save location'); }
+  }
+  // Void-not-delete: retiring keeps the row so past sessions still resolve.
+  async function attRetireLocation(id){
+    try{ await patchRows('locations',{id},{is_active:false}); await loadAttendance(); }
+    catch(err){ handleErr(err); alert(err.message||'Failed to retire location'); }
+  }
+  async function attSaveShift(data, id){
+    try{
+      if(id) await patchRows('shifts',{id},data); else await insertRows('shifts',data);
+      await loadAttendance();
+    } catch(err){ handleErr(err); alert(err.message||'Failed to save session'); }
+  }
+  async function attVoidShift(id){
+    try{ await patchRows('shifts',{id},{is_void:true}); await loadAttendance(); }
+    catch(err){ handleErr(err); alert(err.message||'Failed to void session'); }
   }
 
   async function loadStudents(){
@@ -3721,6 +3774,7 @@ function App({ currentUser, onLogout }){
           <button className={`nav-btn ${view==='adminVouchers'?'active':''}`} onClick={()=>setView('adminVouchers')} title="Payment Vouchers">🧾 <span className="nav-label">Vouchers</span></button>
           <button className={`nav-btn ${view==='adminCrew'?'active':''}`} onClick={()=>setView('adminCrew')} title="Crew">👥 <span className="nav-label">Crew</span></button>
           <button className={`nav-btn ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')} title="Website Promotions">📢 <span className="nav-label">Promotions</span></button>
+          <button className={`nav-btn ${view==='attendance'?'active':''}`} onClick={()=>setView('attendance')} title="Attendance">⏱️ <span className="nav-label">Attendance</span></button>
         </>}
         </div>
         {canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && <button type="button" className="nav-btn" style={{background:side==='system'?'#EEF7FD':'#F0FDF4',border:'1px solid var(--border)',fontWeight:800}} onClick={()=>switchSide(side==='schedule'?'system':'schedule')} title={`Switch to ${side==='schedule'?'System':'Scheduling'} side`}>{side==='schedule'?'🏢 System ↔':'📅 Scheduling ↔'}</button>}
@@ -3757,6 +3811,7 @@ function App({ currentUser, onLogout }){
           <button className="more-item" onClick={()=>{ window.open('./intake.html','_blank','noopener,noreferrer'); setMobileMoreOpen(false); }}>📝 Intake form ↗</button>
           {isSysadmin && <button className="more-item" onClick={()=>{ setView('settings'); setAdminSection('pools'); }}>⚙️ Settings</button>}
         </>}
+        {side==='system' && <button className="more-item" onClick={()=>{ setView('attendance'); }}>⏱️ Attendance</button>}
         {canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) &&
           <button className="more-item" onClick={()=>{ switchSide(side==='schedule'?'system':'schedule'); }}>{side==='schedule'?'🏢 Switch to System':'📅 Switch to Scheduling'}</button>}
         <button className="more-item more-item-danger" onClick={()=>{ if(confirm('Sign out?')) onLogout(); }}>🚪 Logout</button>
@@ -3985,6 +4040,32 @@ function App({ currentUser, onLogout }){
         deleteEmployee={adminDeleteEmployee}
         onRefresh={loadAdminAll}
       />}
+      {!loading && side==='system' && view==='attendance' && canSystem && <>
+        <div className="sub-bar"><div className="sub-bar-inner">
+          <button className={`sub-tab ${attendanceSection==='roster'?'active':''}`} onClick={()=>setAttendanceSection('roster')}>Roster</button>
+          <button className={`sub-tab ${attendanceSection==='locations'?'active':''}`} onClick={()=>setAttendanceSection('locations')}>Locations</button>
+        </div></div>
+        {attBlocked && <div className="card" style={{borderColor:'#FCD34D',background:'#FFFBEB'}}>
+          <div style={{fontWeight:700,marginBottom:4}}>Attendance data is not available for this login.</div>
+          <div className="small">These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated <code>login</code> function may not be deployed yet.</div>
+        </div>}
+        {!attBlocked && attendanceSection==='locations' && <AttendanceLocationsView
+          locations={attLocations}
+          settings={attSettings}
+          saveLocation={attSaveLocation}
+          retireLocation={attRetireLocation}
+        />}
+        {!attBlocked && attendanceSection==='roster' && <AttendanceRosterView
+          shifts={attShifts}
+          locations={attLocations}
+          categories={attCategories}
+          employees={adminEmployees}
+          weekStart={attWeekStart}
+          setWeekStart={setAttWeekStart}
+          saveShift={attSaveShift}
+          voidShift={attVoidShift}
+        />}
+      </>}
       {!loading && side==='system' && view==='adminPromos' && canSystem && <AdminPromosView
         promos={promos}
         savePromo={adminSavePromo}
@@ -11802,6 +11883,250 @@ function AdminPayeesModal({ payees, savePayee, deletePayee, onClose }){
       </div>
     </div>
   </div></div>;
+}
+
+// ── Attendance: Locations ────────────────────────────────────────────────
+// Geofence centres for the punch Edge Function. Radius is deliberately tight:
+// a circle wide enough to cover a worker's home defeats the whole point, and
+// overlapping branch circles let one punch satisfy two locations.
+function AttendanceLocationsView({ locations, saveLocation, retireLocation, settings }){
+  const [modal,setModal]=useState(null);   // {id?, name, lat, lng, radius_m, notes, is_active}
+  const [busy,setBusy]=useState(false);
+  const [geoErr,setGeoErr]=useState('');
+  const defaultRadius = settings?.default_radius_m || 300;
+
+  function openNew(){ setGeoErr(''); setModal({ name:'', lat:'', lng:'', radius_m:defaultRadius, notes:'', is_active:true }); }
+  function openEdit(l){ setGeoErr(''); setModal({ id:l.id, name:l.name||'', lat:String(l.lat??''), lng:String(l.lng??''), radius_m:l.radius_m||defaultRadius, notes:l.notes||'', is_active:l.is_active!==false }); }
+
+  // Standing at the pool with a phone is by far the easiest way to get the
+  // coordinates right, so offer it rather than making someone copy from a map.
+  function useMyLocation(){
+    setGeoErr('');
+    if(!navigator.geolocation){ setGeoErr('This device cannot provide a location.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      p => setModal(m => ({ ...m, lat:p.coords.latitude.toFixed(6), lng:p.coords.longitude.toFixed(6) })),
+      () => setGeoErr('Could not read your location. Check location permission for this site.'),
+      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+    );
+  }
+
+  async function submit(){
+    const name=(modal.name||'').trim();
+    const lat=Number(modal.lat), lng=Number(modal.lng), radius=Number(modal.radius_m);
+    if(!name){ alert('Give the location a name.'); return; }
+    if(!isFinite(lat)||lat<-90||lat>90){ alert('Latitude must be between -90 and 90.'); return; }
+    if(!isFinite(lng)||lng<-180||lng>180){ alert('Longitude must be between -180 and 180.'); return; }
+    if(!isFinite(radius)||radius<25||radius>2000){ alert('Radius must be between 25 and 2000 metres.'); return; }
+    setBusy(true);
+    await saveLocation({ name, lat, lng, radius_m:Math.round(radius), notes:(modal.notes||'').trim()||null, is_active:!!modal.is_active }, modal.id);
+    setBusy(false); setModal(null);
+  }
+
+  return <div className="card">
+    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
+      <div style={{fontWeight:800}}>Locations</div>
+      <div className="small subtle">Check-in is accepted only inside a location's radius.</div>
+      <button className="btn btn-primary small" style={{marginLeft:'auto'}} onClick={openNew}>+ Add location</button>
+    </div>
+
+    {!locations.length && <div className="small subtle" style={{padding:'18px 0'}}>No locations yet. Add the pools your instructors work at.</div>}
+
+    {!!locations.length && <div className="table-wrap"><table className="table">
+      <thead><tr><th>Name</th><th>Coordinates</th><th>Radius</th><th>Status</th><th></th></tr></thead>
+      <tbody>{locations.map(l => <tr key={l.id}>
+        <td style={{fontWeight:600}}>{l.name}</td>
+        <td className="small subtle">{Number(l.lat).toFixed(5)}, {Number(l.lng).toFixed(5)}</td>
+        <td>{l.radius_m} m</td>
+        <td>{l.is_active===false
+          ? <span className="small" style={{color:'var(--slate-tx,#475569)'}}>Retired</span>
+          : <span className="small" style={{color:'#059669',fontWeight:700}}>Active</span>}</td>
+        <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+          <button className="btn btn-ghost small" onClick={()=>openEdit(l)}>Edit</button>
+          {l.is_active!==false && <button className="btn btn-ghost small" style={{marginLeft:6}}
+            onClick={()=>{ if(confirm(`Retire ${l.name}? Existing sessions keep their history.`)) retireLocation(l.id); }}>Retire</button>}
+        </td>
+      </tr>)}</tbody>
+    </table></div>}
+
+    {modal && <div className="modal-backdrop"><div className="modal-card">
+      <div className="modal-head">
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:13,fontWeight:800,lineHeight:1.1}}>{modal.id?'Edit':'Add'} location</div>
+        </div>
+        <button className="btn btn-ghost small" onClick={()=>setModal(null)} aria-label="Close">✕</button>
+      </div>
+      <div className="modal-body">
+        <div className="field"><label>Name</label>
+          <input className="input" autoFocus value={modal.name} placeholder="Botani Pool"
+            onChange={e=>setModal({...modal,name:e.target.value})} /></div>
+        <div style={{display:'flex',gap:10}}>
+          <div className="field" style={{flex:1}}><label>Latitude</label>
+            <input className="input" inputMode="decimal" value={modal.lat} placeholder="4.597500"
+              onChange={e=>setModal({...modal,lat:e.target.value})} /></div>
+          <div className="field" style={{flex:1}}><label>Longitude</label>
+            <input className="input" inputMode="decimal" value={modal.lng} placeholder="101.090100"
+              onChange={e=>setModal({...modal,lng:e.target.value})} /></div>
+        </div>
+        <button className="btn btn-ghost small" onClick={useMyLocation}>📍 Use my current location</button>
+        {geoErr && <div className="small" style={{color:'#DC2626',fontWeight:600,marginTop:6}}>{geoErr}</div>}
+        <div className="field" style={{marginTop:10}}><label>Radius (metres)</label>
+          <input className="input" inputMode="numeric" value={modal.radius_m}
+            onChange={e=>setModal({...modal,radius_m:e.target.value})} />
+          <div className="small subtle" style={{marginTop:4}}>300 m suits most pools. Too wide and a worker could check in from home.</div></div>
+        <div className="field"><label>Notes</label>
+          <input className="input" value={modal.notes} onChange={e=>setModal({...modal,notes:e.target.value})} /></div>
+        <label className="small" style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+          <input type="checkbox" checked={!!modal.is_active} onChange={e=>setModal({...modal,is_active:e.target.checked})} />
+          Active
+        </label>
+        <div style={{display:'flex',gap:8,marginTop:16}}>
+          <button className="btn btn-primary" disabled={busy} onClick={submit}>{busy?'Saving…':'Save'}</button>
+          <button className="btn btn-ghost" onClick={()=>setModal(null)}>Cancel</button>
+        </div>
+      </div>
+    </div></div>}
+  </div>;
+}
+
+// ── Attendance: Roster ───────────────────────────────────────────────────
+// One week at a time, a row per worker. Sessions are dated rows (shifts);
+// recurring patterns come in Phase 4, so everything here is an explicit date.
+function AttendanceRosterView({ shifts, locations, categories, employees, weekStart, setWeekStart, saveShift, voidShift }){
+  const [modal,setModal]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const DAY_NAMES=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const days = useMemo(()=>Array.from({length:7},(_,i)=>addDays(weekStart,i)), [weekStart]);
+  const activeLocations = (locations||[]).filter(l=>l.is_active!==false);
+
+  // Only show workers who are rostered this week, plus a picker to add anyone
+  // else — a full staff list with mostly empty rows is harder to read.
+  const byCrew = useMemo(()=>{
+    const m={};
+    (shifts||[]).forEach(s=>{ (m[s.crew_id]=m[s.crew_id]||[]).push(s); });
+    return m;
+  }, [shifts]);
+  const rosteredIds = Object.keys(byCrew);
+  const empById = useMemo(()=>{
+    const m={}; (employees||[]).forEach(e=>{ m[e.id]=e; }); return m;
+  }, [employees]);
+
+  function openNew(crewId, date){
+    setModal({ crew_id:crewId||'', shift_date:date||weekStart, start_time:'09:00', end_time:'11:00',
+               location_id:activeLocations[0]?.id||'', category_id:(categories[0]||{}).id||'' });
+  }
+  function openEdit(s){
+    setModal({ id:s.id, crew_id:s.crew_id, shift_date:s.shift_date,
+               start_time:String(s.start_time).slice(0,5), end_time:String(s.end_time).slice(0,5),
+               location_id:s.location_id, category_id:s.category_id });
+  }
+
+  async function submit(){
+    if(!modal.crew_id){ alert('Choose a worker.'); return; }
+    if(!modal.location_id){ alert('Choose a location.'); return; }
+    if(!modal.category_id){ alert('Choose a category.'); return; }
+    if(!(modal.end_time > modal.start_time)){ alert('The end time must be after the start time.'); return; }
+    setBusy(true);
+    await saveShift({
+      crew_id:modal.crew_id, shift_date:modal.shift_date,
+      start_time:modal.start_time, end_time:modal.end_time,
+      location_id:modal.location_id, category_id:modal.category_id
+    }, modal.id);
+    setBusy(false); setModal(null);
+  }
+
+  const locName = id => (locations.find(l=>l.id===id)||{}).name || '—';
+  const catName = id => (categories.find(c=>c.id===id)||{}).name || '';
+
+  return <div className="card">
+    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
+      <div style={{fontWeight:800}}>Roster</div>
+      <div className="period-stepper" style={{margin:0}}>
+        <button className="step-btn" onClick={()=>setWeekStart(addDays(weekStart,-7))} aria-label="Previous week">‹</button>
+        <div className="period-label" style={{fontSize:12}}>{weekRangeLabel(weekStart)}</div>
+        <button className="step-btn" onClick={()=>setWeekStart(addDays(weekStart,7))} aria-label="Next week">›</button>
+      </div>
+      <button className="btn btn-ghost small" onClick={()=>setWeekStart(weekStartStr(todayStr()))}>This week</button>
+      <button className="btn btn-primary small" style={{marginLeft:'auto'}}
+        disabled={!activeLocations.length}
+        title={activeLocations.length?'':'Add a location first'}
+        onClick={()=>openNew('', weekStart)}>+ Add session</button>
+    </div>
+
+    {!activeLocations.length && <div className="small" style={{color:'#B45309',fontWeight:600,marginBottom:10}}>
+      Add at least one location before rostering — a session needs somewhere to check in.
+    </div>}
+
+    {!rosteredIds.length && <div className="small subtle" style={{padding:'18px 0'}}>
+      No sessions rostered for this week.
+    </div>}
+
+    {!!rosteredIds.length && <div className="table-wrap"><table className="table">
+      <thead><tr><th style={{minWidth:140}}>Worker</th>
+        {days.map((d,i)=><th key={d} style={{minWidth:120}}>{DAY_NAMES[i]}<div className="small subtle" style={{fontWeight:400}}>{d.slice(8)}/{d.slice(5,7)}</div></th>)}
+      </tr></thead>
+      <tbody>{rosteredIds.map(cid => <tr key={cid}>
+        <td style={{fontWeight:600}}>{(empById[cid]||{}).full_name || 'Unknown worker'}</td>
+        {days.map(d => {
+          const cell=(byCrew[cid]||[]).filter(s=>s.shift_date===d)
+            .sort((a,b)=>String(a.start_time).localeCompare(String(b.start_time)));
+          return <td key={d} style={{verticalAlign:'top'}}>
+            {cell.map(s => <div key={s.id} style={{border:'1px solid var(--border)',borderRadius:8,padding:'5px 7px',marginBottom:5,background:'var(--surface)'}}>
+              <div className="small" style={{fontWeight:700}}>{String(s.start_time).slice(0,5)}–{String(s.end_time).slice(0,5)}</div>
+              <div className="small subtle">{locName(s.location_id)}</div>
+              {catName(s.category_id) && <div className="small subtle" style={{fontSize:10}}>{catName(s.category_id)}</div>}
+              <div style={{marginTop:3}}>
+                <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10}} onClick={()=>openEdit(s)}>Edit</button>
+                <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10,marginLeft:4}}
+                  onClick={()=>{ if(confirm('Void this session? It stays in the record.')) voidShift(s.id); }}>Void</button>
+              </div>
+            </div>)}
+            <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10}}
+              disabled={!activeLocations.length} onClick={()=>openNew(cid,d)}>+</button>
+          </td>;
+        })}
+      </tr>)}</tbody>
+    </table></div>}
+
+    {modal && <div className="modal-backdrop"><div className="modal-card">
+      <div className="modal-head">
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:13,fontWeight:800,lineHeight:1.1}}>{modal.id?'Edit':'Add'} session</div>
+        </div>
+        <button className="btn btn-ghost small" onClick={()=>setModal(null)} aria-label="Close">✕</button>
+      </div>
+      <div className="modal-body">
+        <div className="field"><label>Worker</label>
+          <select className="input" value={modal.crew_id} onChange={e=>setModal({...modal,crew_id:e.target.value})}>
+            <option value="">Choose…</option>
+            {(employees||[]).map(e=><option key={e.id} value={e.id}>{e.full_name}</option>)}
+          </select></div>
+        <div className="field"><label>Date</label>
+          <input className="input" type="date" value={modal.shift_date}
+            onChange={e=>setModal({...modal,shift_date:e.target.value})} /></div>
+        <div style={{display:'flex',gap:10}}>
+          <div className="field" style={{flex:1}}><label>Start</label>
+            <input className="input" type="time" value={modal.start_time}
+              onChange={e=>setModal({...modal,start_time:e.target.value})} /></div>
+          <div className="field" style={{flex:1}}><label>End</label>
+            <input className="input" type="time" value={modal.end_time}
+              onChange={e=>setModal({...modal,end_time:e.target.value})} /></div>
+        </div>
+        <div className="field"><label>Location</label>
+          <select className="input" value={modal.location_id} onChange={e=>setModal({...modal,location_id:e.target.value})}>
+            <option value="">Choose…</option>
+            {activeLocations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}
+          </select></div>
+        <div className="field"><label>Category</label>
+          <select className="input" value={modal.category_id} onChange={e=>setModal({...modal,category_id:e.target.value})}>
+            {(categories||[]).map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+          </select></div>
+        <div style={{display:'flex',gap:8,marginTop:16}}>
+          <button className="btn btn-primary" disabled={busy} onClick={submit}>{busy?'Saving…':'Save'}</button>
+          <button className="btn btn-ghost" onClick={()=>setModal(null)}>Cancel</button>
+        </div>
+      </div>
+    </div></div>}
+  </div>;
 }
 
 // ── Crew (Employees) ─────────────────────────────────────────────────────

@@ -766,13 +766,13 @@ function App({
   }
   // Robust: header rendering follows the CURRENT VIEW, not a separate `side`
   // state, so the header can never drift out of sync with the content area.
-  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos'].includes(view);
+  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance'].includes(view);
   // Defensive: if view and side ever get out of sync (e.g. after login flow
   // or a stale route), snap view back to the side's home. Prevents the
   // "half-breed" state where system nav is shown but schedule content mounts.
   useEffect(() => {
     const scheduleViews = new Set(['schedule', 'programme', 'accounts', 'shop', 'messages', 'enroll', 'settings', 'students']);
-    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos']);
+    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance']);
     if (side === 'schedule' && systemViews.has(view)) setView('schedule');
     if (side === 'system' && scheduleViews.has(view)) setView('adminDirectory');
   }, [side, view]);
@@ -787,6 +787,17 @@ function App({
   const [adminVouchers, setAdminVouchers] = useState([]);
   const [adminEmployees, setAdminEmployees] = useState([]);
   const [adminCrewLoadFailed, setAdminCrewLoadFailed] = useState(false);
+  // ── Attendance module (geofenced punch clock) ──
+  // Reads RLS-protected tables, so these calls only succeed once the signed-in
+  // user carries a Supabase JWT (Phase 2). Before that they fail closed and
+  // the section shows a plain explanation rather than an empty grid.
+  const [attendanceSection, setAttendanceSection] = useState('roster');
+  const [attLocations, setAttLocations] = useState([]);
+  const [attCategories, setAttCategories] = useState([]);
+  const [attShifts, setAttShifts] = useState([]);
+  const [attSettings, setAttSettings] = useState(null);
+  const [attWeekStart, setAttWeekStart] = useState(weekStartStr(todayStr()));
+  const [attBlocked, setAttBlocked] = useState(false);
   const [promos, setPromos] = useState([]);
   const [programmeModal, setProgrammeModal] = useState(null);
   const [programmeDate, setProgrammeDate] = useState(todayStr()); // own week cursor (independent of Schedule)
@@ -1901,6 +1912,76 @@ function App({
       setAdminCrewLoadFailed(empLoadFailed);
     } catch (_) {
       setAdminCrewLoadFailed(true);
+    }
+  }
+  async function loadAttendance() {
+    try {
+      const from = attWeekStart,
+        to = addDays(attWeekStart, 6);
+      const [locs, cats, sh, st] = await Promise.all([selectRows('locations', '*', '&order=name.asc'), selectRows('shift_categories', '*', '&order=sort_order.asc'), selectAllRows('shifts', '*', `&is_void=eq.false&shift_date=gte.${from}&shift_date=lte.${to}&order=shift_date.asc,start_time.asc`), selectRows('attendance_settings', '*').catch(() => [])]);
+      setAttLocations(locs || []);
+      setAttCategories(cats || []);
+      setAttShifts(sh || []);
+      setAttSettings((st || [])[0] || null);
+      setAttBlocked(false);
+    } catch (_) {
+      // Most likely cause: no Supabase JWT yet, so RLS denies every table.
+      setAttLocations([]);
+      setAttCategories([]);
+      setAttShifts([]);
+      setAttBlocked(true);
+    }
+  }
+  useEffect(() => {
+    if (view === 'attendance') loadAttendance();
+  }, [view, attWeekStart]);
+  async function attSaveLocation(data, id) {
+    try {
+      if (id) await patchRows('locations', {
+        id
+      }, data);else await insertRows('locations', data);
+      await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Failed to save location');
+    }
+  }
+  // Void-not-delete: retiring keeps the row so past sessions still resolve.
+  async function attRetireLocation(id) {
+    try {
+      await patchRows('locations', {
+        id
+      }, {
+        is_active: false
+      });
+      await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Failed to retire location');
+    }
+  }
+  async function attSaveShift(data, id) {
+    try {
+      if (id) await patchRows('shifts', {
+        id
+      }, data);else await insertRows('shifts', data);
+      await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Failed to save session');
+    }
+  }
+  async function attVoidShift(id) {
+    try {
+      await patchRows('shifts', {
+        id
+      }, {
+        is_void: true
+      });
+      await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Failed to void session');
     }
   }
   async function loadStudents() {
@@ -5743,7 +5824,13 @@ function App({
     title: "Website Promotions"
   }, "📢 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
-  }, "Promotions")))), canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && /*#__PURE__*/React.createElement("button", {
+  }, "Promotions")), /*#__PURE__*/React.createElement("button", {
+    className: `nav-btn ${view === 'attendance' ? 'active' : ''}`,
+    onClick: () => setView('attendance'),
+    title: "Attendance"
+  }, "⏱️ ", /*#__PURE__*/React.createElement("span", {
+    className: "nav-label"
+  }, "Attendance")))), canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "nav-btn",
     style: {
@@ -5845,7 +5932,12 @@ function App({
       setView('settings');
       setAdminSection('pools');
     }
-  }, "⚙️ Settings")), canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && /*#__PURE__*/React.createElement("button", {
+  }, "⚙️ Settings")), side === 'system' && /*#__PURE__*/React.createElement("button", {
+    className: "more-item",
+    onClick: () => {
+      setView('attendance');
+    }
+  }, "⏱️ Attendance"), canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && /*#__PURE__*/React.createElement("button", {
     className: "more-item",
     onClick: () => {
       switchSide(side === 'schedule' ? 'system' : 'schedule');
@@ -6148,7 +6240,44 @@ function App({
     saveEmployee: adminSaveEmployee,
     deleteEmployee: adminDeleteEmployee,
     onRefresh: loadAdminAll
-  }), !loading && side === 'system' && view === 'adminPromos' && canSystem && /*#__PURE__*/React.createElement(AdminPromosView, {
+  }), !loading && side === 'system' && view === 'attendance' && canSystem && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "sub-bar"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "sub-bar-inner"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `sub-tab ${attendanceSection === 'roster' ? 'active' : ''}`,
+    onClick: () => setAttendanceSection('roster')
+  }, "Roster"), /*#__PURE__*/React.createElement("button", {
+    className: `sub-tab ${attendanceSection === 'locations' ? 'active' : ''}`,
+    onClick: () => setAttendanceSection('locations')
+  }, "Locations"))), attBlocked && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      borderColor: '#FCD34D',
+      background: '#FFFBEB'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "Attendance data is not available for this login."), /*#__PURE__*/React.createElement("div", {
+    className: "small"
+  }, "These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated ", /*#__PURE__*/React.createElement("code", null, "login"), " function may not be deployed yet.")), !attBlocked && attendanceSection === 'locations' && /*#__PURE__*/React.createElement(AttendanceLocationsView, {
+    locations: attLocations,
+    settings: attSettings,
+    saveLocation: attSaveLocation,
+    retireLocation: attRetireLocation
+  }), !attBlocked && attendanceSection === 'roster' && /*#__PURE__*/React.createElement(AttendanceRosterView, {
+    shifts: attShifts,
+    locations: attLocations,
+    categories: attCategories,
+    employees: adminEmployees,
+    weekStart: attWeekStart,
+    setWeekStart: setAttWeekStart,
+    saveShift: attSaveShift,
+    voidShift: attVoidShift
+  })), !loading && side === 'system' && view === 'adminPromos' && canSystem && /*#__PURE__*/React.createElement(AdminPromosView, {
     promos: promos,
     savePromo: adminSavePromo,
     deletePromo: adminDeletePromo,
@@ -23118,6 +23247,643 @@ function AdminPayeesModal({
       onClick: () => deletePayee(p.id)
     }, "×")));
   })))));
+}
+
+// ── Attendance: Locations ────────────────────────────────────────────────
+// Geofence centres for the punch Edge Function. Radius is deliberately tight:
+// a circle wide enough to cover a worker's home defeats the whole point, and
+// overlapping branch circles let one punch satisfy two locations.
+function AttendanceLocationsView({
+  locations,
+  saveLocation,
+  retireLocation,
+  settings
+}) {
+  const [modal, setModal] = useState(null); // {id?, name, lat, lng, radius_m, notes, is_active}
+  const [busy, setBusy] = useState(false);
+  const [geoErr, setGeoErr] = useState('');
+  const defaultRadius = settings?.default_radius_m || 300;
+  function openNew() {
+    setGeoErr('');
+    setModal({
+      name: '',
+      lat: '',
+      lng: '',
+      radius_m: defaultRadius,
+      notes: '',
+      is_active: true
+    });
+  }
+  function openEdit(l) {
+    setGeoErr('');
+    setModal({
+      id: l.id,
+      name: l.name || '',
+      lat: String(l.lat ?? ''),
+      lng: String(l.lng ?? ''),
+      radius_m: l.radius_m || defaultRadius,
+      notes: l.notes || '',
+      is_active: l.is_active !== false
+    });
+  }
+
+  // Standing at the pool with a phone is by far the easiest way to get the
+  // coordinates right, so offer it rather than making someone copy from a map.
+  function useMyLocation() {
+    setGeoErr('');
+    if (!navigator.geolocation) {
+      setGeoErr('This device cannot provide a location.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(p => setModal(m => ({
+      ...m,
+      lat: p.coords.latitude.toFixed(6),
+      lng: p.coords.longitude.toFixed(6)
+    })), () => setGeoErr('Could not read your location. Check location permission for this site.'), {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
+    });
+  }
+  async function submit() {
+    const name = (modal.name || '').trim();
+    const lat = Number(modal.lat),
+      lng = Number(modal.lng),
+      radius = Number(modal.radius_m);
+    if (!name) {
+      alert('Give the location a name.');
+      return;
+    }
+    if (!isFinite(lat) || lat < -90 || lat > 90) {
+      alert('Latitude must be between -90 and 90.');
+      return;
+    }
+    if (!isFinite(lng) || lng < -180 || lng > 180) {
+      alert('Longitude must be between -180 and 180.');
+      return;
+    }
+    if (!isFinite(radius) || radius < 25 || radius > 2000) {
+      alert('Radius must be between 25 and 2000 metres.');
+      return;
+    }
+    setBusy(true);
+    await saveLocation({
+      name,
+      lat,
+      lng,
+      radius_m: Math.round(radius),
+      notes: (modal.notes || '').trim() || null,
+      is_active: !!modal.is_active
+    }, modal.id);
+    setBusy(false);
+    setModal(null);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 12,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "Locations"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Check-in is accepted only inside a location's radius."), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: openNew
+  }, "+ Add location")), !locations.length && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      padding: '18px 0'
+    }
+  }, "No locations yet. Add the pools your instructors work at."), !!locations.length && /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", null, "Coordinates"), /*#__PURE__*/React.createElement("th", null, "Radius"), /*#__PURE__*/React.createElement("th", null, "Status"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, locations.map(l => /*#__PURE__*/React.createElement("tr", {
+    key: l.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, l.name), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, Number(l.lat).toFixed(5), ", ", Number(l.lng).toFixed(5)), /*#__PURE__*/React.createElement("td", null, l.radius_m, " m"), /*#__PURE__*/React.createElement("td", null, l.is_active === false ? /*#__PURE__*/React.createElement("span", {
+    className: "small",
+    style: {
+      color: 'var(--slate-tx,#475569)'
+    }
+  }, "Retired") : /*#__PURE__*/React.createElement("span", {
+    className: "small",
+    style: {
+      color: '#059669',
+      fontWeight: 700
+    }
+  }, "Active")), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      whiteSpace: 'nowrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => openEdit(l)
+  }, "Edit"), l.is_active !== false && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      marginLeft: 6
+    },
+    onClick: () => {
+      if (confirm(`Retire ${l.name}? Existing sessions keep their history.`)) retireLocation(l.id);
+    }
+  }, "Retire"))))))), modal && /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      lineHeight: 1.1
+    }
+  }, modal.id ? 'Edit' : 'Add', " location")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setModal(null),
+    "aria-label": "Close"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Name"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    autoFocus: true,
+    value: modal.name,
+    placeholder: "Botani Pool",
+    onChange: e => setModal({
+      ...modal,
+      name: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Latitude"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    inputMode: "decimal",
+    value: modal.lat,
+    placeholder: "4.597500",
+    onChange: e => setModal({
+      ...modal,
+      lat: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Longitude"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    inputMode: "decimal",
+    value: modal.lng,
+    placeholder: "101.090100",
+    onChange: e => setModal({
+      ...modal,
+      lng: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: useMyLocation
+  }, "📍 Use my current location"), geoErr && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      fontWeight: 600,
+      marginTop: 6
+    }
+  }, geoErr), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Radius (metres)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    inputMode: "numeric",
+    value: modal.radius_m,
+    onChange: e => setModal({
+      ...modal,
+      radius_m: e.target.value
+    })
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "300 m suits most pools. Too wide and a worker could check in from home.")), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Notes"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: modal.notes,
+    onChange: e => setModal({
+      ...modal,
+      notes: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement("label", {
+    className: "small",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!modal.is_active,
+    onChange: e => setModal({
+      ...modal,
+      is_active: e.target.checked
+    })
+  }), "Active"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy,
+    onClick: submit
+  }, busy ? 'Saving…' : 'Save'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: () => setModal(null)
+  }, "Cancel"))))));
+}
+
+// ── Attendance: Roster ───────────────────────────────────────────────────
+// One week at a time, a row per worker. Sessions are dated rows (shifts);
+// recurring patterns come in Phase 4, so everything here is an explicit date.
+function AttendanceRosterView({
+  shifts,
+  locations,
+  categories,
+  employees,
+  weekStart,
+  setWeekStart,
+  saveShift,
+  voidShift
+}) {
+  const [modal, setModal] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const days = useMemo(() => Array.from({
+    length: 7
+  }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const activeLocations = (locations || []).filter(l => l.is_active !== false);
+
+  // Only show workers who are rostered this week, plus a picker to add anyone
+  // else — a full staff list with mostly empty rows is harder to read.
+  const byCrew = useMemo(() => {
+    const m = {};
+    (shifts || []).forEach(s => {
+      (m[s.crew_id] = m[s.crew_id] || []).push(s);
+    });
+    return m;
+  }, [shifts]);
+  const rosteredIds = Object.keys(byCrew);
+  const empById = useMemo(() => {
+    const m = {};
+    (employees || []).forEach(e => {
+      m[e.id] = e;
+    });
+    return m;
+  }, [employees]);
+  function openNew(crewId, date) {
+    setModal({
+      crew_id: crewId || '',
+      shift_date: date || weekStart,
+      start_time: '09:00',
+      end_time: '11:00',
+      location_id: activeLocations[0]?.id || '',
+      category_id: (categories[0] || {}).id || ''
+    });
+  }
+  function openEdit(s) {
+    setModal({
+      id: s.id,
+      crew_id: s.crew_id,
+      shift_date: s.shift_date,
+      start_time: String(s.start_time).slice(0, 5),
+      end_time: String(s.end_time).slice(0, 5),
+      location_id: s.location_id,
+      category_id: s.category_id
+    });
+  }
+  async function submit() {
+    if (!modal.crew_id) {
+      alert('Choose a worker.');
+      return;
+    }
+    if (!modal.location_id) {
+      alert('Choose a location.');
+      return;
+    }
+    if (!modal.category_id) {
+      alert('Choose a category.');
+      return;
+    }
+    if (!(modal.end_time > modal.start_time)) {
+      alert('The end time must be after the start time.');
+      return;
+    }
+    setBusy(true);
+    await saveShift({
+      crew_id: modal.crew_id,
+      shift_date: modal.shift_date,
+      start_time: modal.start_time,
+      end_time: modal.end_time,
+      location_id: modal.location_id,
+      category_id: modal.category_id
+    }, modal.id);
+    setBusy(false);
+    setModal(null);
+  }
+  const locName = id => (locations.find(l => l.id === id) || {}).name || '—';
+  const catName = id => (categories.find(c => c.id === id) || {}).name || '';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 12,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "Roster"), /*#__PURE__*/React.createElement("div", {
+    className: "period-stepper",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "step-btn",
+    onClick: () => setWeekStart(addDays(weekStart, -7)),
+    "aria-label": "Previous week"
+  }, "‹"), /*#__PURE__*/React.createElement("div", {
+    className: "period-label",
+    style: {
+      fontSize: 12
+    }
+  }, weekRangeLabel(weekStart)), /*#__PURE__*/React.createElement("button", {
+    className: "step-btn",
+    onClick: () => setWeekStart(addDays(weekStart, 7)),
+    "aria-label": "Next week"
+  }, "›")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setWeekStart(weekStartStr(todayStr()))
+  }, "This week"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    style: {
+      marginLeft: 'auto'
+    },
+    disabled: !activeLocations.length,
+    title: activeLocations.length ? '' : 'Add a location first',
+    onClick: () => openNew('', weekStart)
+  }, "+ Add session")), !activeLocations.length && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 600,
+      marginBottom: 10
+    }
+  }, "Add at least one location before rostering — a session needs somewhere to check in."), !rosteredIds.length && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      padding: '18px 0'
+    }
+  }, "No sessions rostered for this week."), !!rosteredIds.length && /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      minWidth: 140
+    }
+  }, "Worker"), days.map((d, i) => /*#__PURE__*/React.createElement("th", {
+    key: d,
+    style: {
+      minWidth: 120
+    }
+  }, DAY_NAMES[i], /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontWeight: 400
+    }
+  }, d.slice(8), "/", d.slice(5, 7)))))), /*#__PURE__*/React.createElement("tbody", null, rosteredIds.map(cid => /*#__PURE__*/React.createElement("tr", {
+    key: cid
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, (empById[cid] || {}).full_name || 'Unknown worker'), days.map(d => {
+    const cell = (byCrew[cid] || []).filter(s => s.shift_date === d).sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+    return /*#__PURE__*/React.createElement("td", {
+      key: d,
+      style: {
+        verticalAlign: 'top'
+      }
+    }, cell.map(s => /*#__PURE__*/React.createElement("div", {
+      key: s.id,
+      style: {
+        border: '1px solid var(--border)',
+        borderRadius: 8,
+        padding: '5px 7px',
+        marginBottom: 5,
+        background: 'var(--surface)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        fontWeight: 700
+      }
+    }, String(s.start_time).slice(0, 5), "–", String(s.end_time).slice(0, 5)), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, locName(s.location_id)), catName(s.category_id) && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontSize: 10
+      }
+    }, catName(s.category_id)), /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 3
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10
+      },
+      onClick: () => openEdit(s)
+    }, "Edit"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10,
+        marginLeft: 4
+      },
+      onClick: () => {
+        if (confirm('Void this session? It stays in the record.')) voidShift(s.id);
+      }
+    }, "Void")))), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10
+      },
+      disabled: !activeLocations.length,
+      onClick: () => openNew(cid, d)
+    }, "+"));
+  })))))), modal && /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      fontWeight: 800,
+      lineHeight: 1.1
+    }
+  }, modal.id ? 'Edit' : 'Add', " session")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setModal(null),
+    "aria-label": "Close"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Worker"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: modal.crew_id,
+    onChange: e => setModal({
+      ...modal,
+      crew_id: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Choose…"), (employees || []).map(e => /*#__PURE__*/React.createElement("option", {
+    key: e.id,
+    value: e.id
+  }, e.full_name)))), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Date"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: modal.shift_date,
+    onChange: e => setModal({
+      ...modal,
+      shift_date: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Start"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "time",
+    value: modal.start_time,
+    onChange: e => setModal({
+      ...modal,
+      start_time: e.target.value
+    })
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "End"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "time",
+    value: modal.end_time,
+    onChange: e => setModal({
+      ...modal,
+      end_time: e.target.value
+    })
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Location"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: modal.location_id,
+    onChange: e => setModal({
+      ...modal,
+      location_id: e.target.value
+    })
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Choose…"), activeLocations.map(l => /*#__PURE__*/React.createElement("option", {
+    key: l.id,
+    value: l.id
+  }, l.name)))), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Category"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: modal.category_id,
+    onChange: e => setModal({
+      ...modal,
+      category_id: e.target.value
+    })
+  }, (categories || []).map(c => /*#__PURE__*/React.createElement("option", {
+    key: c.id,
+    value: c.id
+  }, c.name)))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy,
+    onClick: submit
+  }, busy ? 'Saving…' : 'Save'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: () => setModal(null)
+  }, "Cancel"))))));
 }
 
 // ── Crew (Employees) ─────────────────────────────────────────────────────
