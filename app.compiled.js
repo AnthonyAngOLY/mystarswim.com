@@ -791,13 +791,16 @@ function App({
   // Reads RLS-protected tables, so these calls only succeed once the signed-in
   // user carries a Supabase JWT (Phase 2). Before that they fail closed and
   // the section shows a plain explanation rather than an empty grid.
-  const [attendanceSection, setAttendanceSection] = useState('roster');
+  const [attendanceSection, setAttendanceSection] = useState('live');
   const [attLocations, setAttLocations] = useState([]);
   const [attCategories, setAttCategories] = useState([]);
   const [attShifts, setAttShifts] = useState([]);
   const [attSettings, setAttSettings] = useState(null);
   const [attWeekStart, setAttWeekStart] = useState(weekStartStr(todayStr()));
   const [attBlocked, setAttBlocked] = useState(false);
+  const [attToday, setAttToday] = useState([]);
+  const [attPunches, setAttPunches] = useState([]);
+  const [attLoadedAt, setAttLoadedAt] = useState(null);
   const [promos, setPromos] = useState([]);
   const [programmeModal, setProgrammeModal] = useState(null);
   const [programmeDate, setProgrammeDate] = useState(todayStr()); // own week cursor (independent of Schedule)
@@ -1978,6 +1981,34 @@ function App({
   useEffect(() => {
     if (view === 'attendance') loadAttendance();
   }, [view, attWeekStart]);
+
+  // Today only, with the punches attached. Kept separate from the weekly
+  // roster load because this one runs on a timer.
+  async function loadAttendanceLive() {
+    try {
+      const today = todayStr();
+      const sh = await selectAllRows('shifts', '*', `&is_void=eq.false&shift_date=eq.${today}&order=start_time.asc`);
+      const ids = (sh || []).map(r => r.id);
+      let pu = [];
+      if (ids.length) {
+        pu = await selectAllRows('punches', 'shift_id,type,punched_at,accepted,distance_m,inside_fence', `&shift_id=in.(${ids.join(',')})&order=punched_at.asc`);
+      }
+      setAttToday(sh || []);
+      setAttPunches(pu || []);
+      setAttLoadedAt(new Date().toISOString());
+      setAttBlocked(false);
+    } catch (_) {
+      setAttToday([]);
+      setAttPunches([]);
+      setAttBlocked(true);
+    }
+  }
+  useEffect(() => {
+    if (view !== 'attendance' || attendanceSection !== 'live') return;
+    loadAttendanceLive();
+    const t = setInterval(loadAttendanceLive, 45000);
+    return () => clearInterval(t);
+  }, [view, attendanceSection]);
   async function attSaveLocation(data, id) {
     try {
       if (id) await patchRows('locations', {
@@ -6292,6 +6323,9 @@ function App({
   }, /*#__PURE__*/React.createElement("div", {
     className: "sub-bar-inner"
   }, /*#__PURE__*/React.createElement("button", {
+    className: `sub-tab ${attendanceSection === 'live' ? 'active' : ''}`,
+    onClick: () => setAttendanceSection('live')
+  }, "Live"), /*#__PURE__*/React.createElement("button", {
     className: `sub-tab ${attendanceSection === 'roster' ? 'active' : ''}`,
     onClick: () => setAttendanceSection('roster')
   }, "Roster"), /*#__PURE__*/React.createElement("button", {
@@ -6310,7 +6344,15 @@ function App({
     }
   }, "Attendance data is not available for this login."), /*#__PURE__*/React.createElement("div", {
     className: "small"
-  }, "These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated ", /*#__PURE__*/React.createElement("code", null, "login"), " function may not be deployed yet.")), !attBlocked && attendanceSection === 'locations' && /*#__PURE__*/React.createElement(AttendanceLocationsView, {
+  }, "These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated ", /*#__PURE__*/React.createElement("code", null, "login"), " function may not be deployed yet.")), !attBlocked && attendanceSection === 'live' && /*#__PURE__*/React.createElement(AttendanceLiveView, {
+    shifts: attToday,
+    punches: attPunches,
+    locations: attLocations,
+    categories: attCategories,
+    employees: adminEmployees,
+    lastLoaded: attLoadedAt,
+    onRefresh: loadAttendanceLive
+  }), !attBlocked && attendanceSection === 'locations' && /*#__PURE__*/React.createElement(AttendanceLocationsView, {
     locations: attLocations,
     settings: attSettings,
     saveLocation: attSaveLocation,
@@ -23294,6 +23336,282 @@ function AdminPayeesModal({
       onClick: () => deletePayee(p.id)
     }, "×")));
   })))));
+}
+
+// ── Attendance: Live board ───────────────────────────────────────────────
+// Today across every location, refreshed on a timer. The question this screen
+// answers is "is the right instructor at the right pool right now", so each
+// card leads with the worker and shows the distance recorded at check-in —
+// the geofence decision the server actually made, not a claim from the phone.
+//
+// Rejected attempts are shown too. Someone trying to check in from 2 km away
+// is exactly what an admin wants to see, and it never reaches the punch list
+// as an accepted row.
+function AttendanceLiveView({
+  shifts,
+  punches,
+  locations,
+  categories,
+  employees,
+  onRefresh,
+  lastLoaded
+}) {
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const toMin = t => {
+    const p = String(t).split(':');
+    return +p[0] * 60 + +p[1];
+  };
+  const empById = useMemo(() => {
+    const m = {};
+    (employees || []).forEach(e => {
+      m[e.id] = e;
+    });
+    return m;
+  }, [employees]);
+  const locById = useMemo(() => {
+    const m = {};
+    (locations || []).forEach(l => {
+      m[l.id] = l;
+    });
+    return m;
+  }, [locations]);
+  const catById = useMemo(() => {
+    const m = {};
+    (categories || []).forEach(c => {
+      m[c.id] = c;
+    });
+    return m;
+  }, [categories]);
+
+  // Group punches per shift: the accepted in/out, plus any rejected attempts.
+  const byShift = useMemo(() => {
+    const m = {};
+    (punches || []).forEach(p => {
+      const b = m[p.shift_id] = m[p.shift_id] || {
+        rejected: []
+      };
+      if (p.accepted) b[p.type] = p;else b.rejected.push(p);
+    });
+    return m;
+  }, [punches]);
+  const rows = useMemo(() => (shifts || []).map(s => {
+    const p = byShift[s.id] || {
+      rejected: []
+    };
+    const startMin = toMin(s.start_time),
+      endMin = toMin(s.end_time);
+    const phase = nowMin < startMin ? 'upcoming' : nowMin > endMin ? 'finished' : 'running';
+    const state = p.out ? 'done' : p.in ? 'in' : phase === 'upcoming' ? 'waiting' : 'missing'; // started (or over) with no check-in
+    return {
+      s,
+      p,
+      phase,
+      state,
+      startMin
+    };
+  }).sort((a, b) => a.startMin - b.startMin), [shifts, byShift, nowMin]);
+  const count = k => rows.filter(r => r.state === k).length;
+  const flagged = rows.filter(r => r.p.rejected.length).length;
+  const fmt = iso => new Date(iso).toLocaleTimeString('en-GB', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  const hhmm = t => String(t).slice(0, 5);
+  const metres = d => d == null ? '' : d >= 1000 ? (d / 1000).toFixed(1) + ' km' : Math.round(d) + ' m';
+  const TILES = [{
+    k: 'in',
+    label: 'Checked in',
+    color: '#059669',
+    bg: '#ECFDF5',
+    bd: '#A7F3D0'
+  }, {
+    k: 'missing',
+    label: 'Not arrived',
+    color: '#DC2626',
+    bg: '#FFF1F1',
+    bd: '#FCA5A5'
+  }, {
+    k: 'waiting',
+    label: 'Later today',
+    color: '#475569',
+    bg: '#F1F5F9',
+    bd: '#CBD5E1'
+  }, {
+    k: 'done',
+    label: 'Finished',
+    color: '#0369A1',
+    bg: '#E0F2FE',
+    bd: '#BAE6FD'
+  }];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 14,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "Live — today"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, lastLoaded ? `as of ${fmt(lastLoaded)}` : '', " · refreshes every 45s"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: onRefresh
+  }, "↻ Refresh")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap',
+      marginBottom: 16
+    }
+  }, TILES.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.k,
+    style: {
+      flex: '1 1 120px',
+      minWidth: 120,
+      background: t.bg,
+      border: `1px solid ${t.bd}`,
+      borderRadius: 10,
+      padding: '10px 12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 24,
+      fontWeight: 800,
+      color: t.color,
+      lineHeight: 1.1
+    }
+  }, count(t.k)), /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: t.color,
+      fontWeight: 600
+    }
+  }, t.label))), flagged > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: '1 1 120px',
+      minWidth: 120,
+      background: '#FFFBEB',
+      border: '1px solid #FCD34D',
+      borderRadius: 10,
+      padding: '10px 12px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 24,
+      fontWeight: 800,
+      color: '#B45309',
+      lineHeight: 1.1
+    }
+  }, flagged), /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 600
+    }
+  }, "Location flagged"))), !rows.length && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      padding: '24px 0'
+    }
+  }, "No sessions scheduled today."), rows.map(({
+    s,
+    p,
+    phase,
+    state
+  }) => {
+    const emp = empById[s.crew_id] || {};
+    const loc = locById[s.location_id] || {};
+    const cat = catById[s.category_id] || {};
+    const edge = state === 'in' ? '#059669' : state === 'missing' ? '#DC2626' : state === 'done' ? '#0369A1' : '#CBD5E1';
+    return /*#__PURE__*/React.createElement("div", {
+      key: s.id,
+      style: {
+        border: '1px solid var(--border)',
+        borderLeft: `5px solid ${edge}`,
+        borderRadius: 10,
+        padding: '11px 13px',
+        marginBottom: 9,
+        background: phase === 'running' ? '#FCFEFF' : 'var(--surface)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: 8,
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 700
+      }
+    }, emp.full_name || 'Unknown worker'), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, hhmm(s.start_time), "–", hhmm(s.end_time), " · ", loc.name || '—'), cat.name && /*#__PURE__*/React.createElement("span", {
+      className: "small subtle",
+      style: {
+        fontSize: 10.5
+      }
+    }, cat.name), phase === 'running' && /*#__PURE__*/React.createElement("span", {
+      className: "small",
+      style: {
+        marginLeft: 'auto',
+        color: '#0369A1',
+        fontWeight: 700
+      }
+    }, "in session now")), /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        marginTop: 5
+      }
+    }, state === 'in' && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#059669',
+        fontWeight: 600
+      }
+    }, "✓ Checked in ", fmt(p.in.punched_at), p.in.distance_m != null && ` · ${metres(p.in.distance_m)} from ${loc.name || 'the pool'}`, s.late_min > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626'
+      }
+    }, " · ", s.late_min, " min late")), state === 'done' && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#0369A1',
+        fontWeight: 600
+      }
+    }, "Checked in ", fmt(p.in.punched_at), " · out ", fmt(p.out.punched_at), s.late_min > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626'
+      }
+    }, " · ", s.late_min, " min late"), s.early_min > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626'
+      }
+    }, " · left ", s.early_min, " min early")), state === 'missing' && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626',
+        fontWeight: 600
+      }
+    }, phase === 'finished' ? 'No check-in — session has ended' : 'Not checked in yet'), state === 'waiting' && /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, "Starts later today")), p.rejected.map((r, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      className: "small",
+      style: {
+        marginTop: 4,
+        color: '#B45309'
+      }
+    }, "⚠ Tried to check in ", fmt(r.punched_at), " from ", metres(r.distance_m), " away — refused")));
+  }));
 }
 
 // ── Attendance: Locations ────────────────────────────────────────────────
