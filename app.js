@@ -1417,8 +1417,15 @@ function App({ currentUser, onLogout }){
     } catch(err){ handleErr(err); alert(err.message||'Failed to add the sessions'); }
   }
   async function attVoidShift(id){
-    try{ await patchRows('shifts',{id},{is_void:true}); await loadAttendance(); }
-    catch(err){ handleErr(err); alert(err.message||'Failed to void session'); }
+    try{
+      await patchRows('shifts',{id},{is_void:true});
+      // A removed session closes its own alerts (DB trigger), so the badge
+      // and any open list on screen are now stale.
+      await loadAttendance();
+      await refreshOpenAlertCount();
+      if(attendanceSection==='alerts') await loadAttendanceAlerts();
+    }
+    catch(err){ handleErr(err); alert(err.message||'Failed to remove session'); }
   }
 
   async function loadStudents(){
@@ -12591,54 +12598,65 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
                        : 'Nothing resolved yet.'}
     </div>}
 
-    {(alerts||[]).map(a=>{
-      const s = shiftById[a.shift_id] || {};
-      const emp = empById[a.crew_id] || {};
-      const loc = locById[s.location_id] || {};
-      const bad = a.type==='absent' || a.type==='no_checkin';
-      return <div key={a.id} style={{border:'1px solid var(--border)',
-                   borderLeft:`5px solid ${bad?'#DC2626':'#B45309'}`,borderRadius:9,
-                   padding:'10px 12px',marginBottom:8,background:'var(--surface)'}}>
-        <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
-          <b>{emp.full_name || 'Unknown worker'}</b>
-          <span className="small" style={{fontWeight:700,color:bad?'#DC2626':'#B45309'}}>{LABEL[a.type]||a.type}</span>
-          <span className="small subtle">
-            {snap(a).shift_date||s.shift_date||''} · {hhmm(snap(a).start_time||s.start_time)}–{hhmm(snap(a).end_time||s.end_time)} · {snap(a).location_name||loc.name||'—'}
-          </span>
-          {s.is_void && <span className="small" style={{fontWeight:700,color:'#475569',
-            background:'#F1F5F9',border:'1px solid #CBD5E1',borderRadius:999,padding:'0 7px'}}>
-            session removed</span>}
-          <span className="small subtle" style={{marginLeft:'auto'}}>raised {fmt(a.raised_at)}</span>
-        </div>
-
-        <div className="small" style={{marginTop:4}}>
-          {s.late_min>0 && <span style={{color:'#DC2626',fontWeight:600}}>Late {s.late_min} min</span>}
-          {s.late_min>0 && s.early_min>0 && <span className="subtle"> · </span>}
-          {s.early_min>0 && <span style={{color:'#DC2626',fontWeight:600}}>Left {s.early_min} min early</span>}
-        </div>
-
-        {/* What the worker said. This is the thing being judged, so it leads. */}
-        {a.worker_reason
-          ? <div className="small" style={{marginTop:6,padding:'6px 9px',background:'#F8FAFC',
-                 border:'1px solid var(--border)',borderRadius:7}}>
-              <span className="subtle">{(emp.full_name||'They').split(' ')[0]} said:</span> <i>{a.worker_reason}</i>
-            </div>
-          : a.status==='open' && <div className="small subtle" style={{marginTop:6,fontStyle:'italic'}}>
-              No reason given yet — they can add one from their app.
-            </div>}
-
-        {a.status==='open'
-          ? <button className="btn btn-primary small" style={{marginTop:8}} onClick={()=>open(a)}>Review…</button>
-          : <div className="small" style={{marginTop:6,color:'#059669'}}>
-              ✓ {a.resolution_action==='time_entered' ? 'Time entered by admin'
-                : a.resolution_action==='marked_absent' ? 'Marked absent' : 'Reviewed'}
-              {a.pay_treatment && <> · {a.pay_treatment==='full' ? 'Full deduction'
-                : a.pay_treatment==='half' ? 'Half deduction' : 'No deduction'}</>}
-              {a.remark && <> · <i>{a.remark}</i></>}
-              {s.is_void && <> · session removed</>}
-            </div>}
-      </div>;
-    })}
+    {!!(alerts||[]).length && <div className="table-wrap"><table className="table">
+      <thead><tr>
+        <th style={{width:150}}>Worker</th>
+        <th style={{width:130}}>Alert</th>
+        <th style={{width:235}}>Session</th>
+        <th>Reason given</th>
+        <th style={{width:200}}>Outcome</th>
+      </tr></thead>
+      <tbody>{(alerts||[]).map(a=>{
+        const sh  = shiftById[a.shift_id] || {};
+        const emp = empById[a.crew_id] || {};
+        const loc = locById[sh.location_id] || {};
+        const sn  = snap(a);
+        const bad = a.type==='absent' || a.type==='no_checkin';
+        // The minutes belong next to the label, not on their own line.
+        const mins = sh.late_min>0 && sh.early_min>0 ? ` ${sh.late_min}m/${sh.early_min}m`
+                   : sh.late_min>0  ? ` ${sh.late_min}m`
+                   : sh.early_min>0 ? ` ${sh.early_min}m` : '';
+        const reason = a.worker_reason || '';
+        const note   = a.remark || '';
+        return <tr key={a.id} style={a.status==='open'&&bad?{background:'#FFF7F7'}:undefined}>
+          <td style={{fontWeight:600,borderLeft:`3px solid ${bad?'#DC2626':'#B45309'}`}}>
+            {emp.full_name || 'Unknown worker'}</td>
+          <td><span style={{display:'inline-block',padding:'1px 7px',borderRadius:999,
+                 fontWeight:800,fontSize:11.5,whiteSpace:'nowrap',
+                 color:bad?'#DC2626':'#B45309', background:bad?'#FFF1F1':'#FFFBEB',
+                 border:`1px solid ${bad?'#FCA5A5':'#FCD34D'}`}}>
+                 {(LABEL[a.type]||a.type)+mins}</span></td>
+          <td className="small subtle" style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}
+              title={`${sn.shift_date||sh.shift_date||''} ${hhmm(sn.start_time||sh.start_time)}–${hhmm(sn.end_time||sh.end_time)} · ${sn.location_name||loc.name||''}`}>
+            {(sn.shift_date||sh.shift_date||'').slice(5)} · {hhmm(sn.start_time||sh.start_time)}–{hhmm(sn.end_time||sh.end_time)} · {sn.location_name||loc.name||'—'}
+            {sh.is_void && <span style={{marginLeft:6,fontSize:10,fontWeight:700,color:'#475569',
+              background:'#F1F5F9',border:'1px solid #CBD5E1',borderRadius:999,padding:'0 5px'}}>removed</span>}
+          </td>
+          {/* Clamped to two lines, with the full text on hover. */}
+          <td className="small" title={[reason,note&&('Note: '+note)].filter(Boolean).join('\n')}
+              style={{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',
+                      overflow:'hidden',lineHeight:1.35}}>
+            {reason ? <i>{reason}</i>
+              : a.status==='open'
+                ? <span className="subtle">{sh.is_void ? '—' : 'none yet'}</span>
+                : <span className="subtle">—</span>}
+            {note && <span className="subtle"> · {note}</span>}
+          </td>
+          <td className="small" style={{whiteSpace:'nowrap'}}>
+            {a.status==='open'
+              ? <button className="btn btn-primary small" style={{padding:'2px 10px'}}
+                  onClick={()=>open(a)}>Review…</button>
+              : <span style={{color:'#059669'}}>✓ {
+                  a.resolution_action==='time_entered'   ? 'Time entered'
+                : a.resolution_action==='marked_absent'  ? 'Marked absent'
+                : a.resolution_action==='session_removed'? 'Session removed'
+                : 'Reviewed'}{a.pay_treatment && <> · {
+                  a.pay_treatment==='full' ? 'Full deduction'
+                : a.pay_treatment==='half' ? 'Half deduction' : 'No deduction'}</>}</span>}
+          </td>
+        </tr>;
+      })}</tbody>
+    </table></div>}
 
     {modal && (()=>{
       const t = modal.a.type, needsTime = NEEDS_TIME[t] && !modal.markAbsent;

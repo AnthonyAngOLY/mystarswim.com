@@ -2233,10 +2233,14 @@ function App({
       }, {
         is_void: true
       });
+      // A removed session closes its own alerts (DB trigger), so the badge
+      // and any open list on screen are now stale.
       await loadAttendance();
+      await refreshOpenAlertCount();
+      if (attendanceSection === 'alerts') await loadAttendanceAlerts();
     } catch (err) {
       handleErr(err);
-      alert(err.message || 'Failed to void session');
+      alert(err.message || 'Failed to remove session');
     }
   }
   async function loadStudents() {
@@ -24544,99 +24548,110 @@ function AttendanceAlertsView({
     style: {
       padding: '22px 0'
     }
-  }, filter === 'open' ? 'Nothing needs attention. Alerts appear here when someone is late, leaves early, misses a punch or checks in from the wrong place.' : 'Nothing resolved yet.'), (alerts || []).map(a => {
-    const s = shiftById[a.shift_id] || {};
+  }, filter === 'open' ? 'Nothing needs attention. Alerts appear here when someone is late, leaves early, misses a punch or checks in from the wrong place.' : 'Nothing resolved yet.'), !!(alerts || []).length && /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 150
+    }
+  }, "Worker"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 130
+    }
+  }, "Alert"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 235
+    }
+  }, "Session"), /*#__PURE__*/React.createElement("th", null, "Reason given"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 200
+    }
+  }, "Outcome"))), /*#__PURE__*/React.createElement("tbody", null, (alerts || []).map(a => {
+    const sh = shiftById[a.shift_id] || {};
     const emp = empById[a.crew_id] || {};
-    const loc = locById[s.location_id] || {};
+    const loc = locById[sh.location_id] || {};
+    const sn = snap(a);
     const bad = a.type === 'absent' || a.type === 'no_checkin';
-    return /*#__PURE__*/React.createElement("div", {
+    // The minutes belong next to the label, not on their own line.
+    const mins = sh.late_min > 0 && sh.early_min > 0 ? ` ${sh.late_min}m/${sh.early_min}m` : sh.late_min > 0 ? ` ${sh.late_min}m` : sh.early_min > 0 ? ` ${sh.early_min}m` : '';
+    const reason = a.worker_reason || '';
+    const note = a.remark || '';
+    return /*#__PURE__*/React.createElement("tr", {
       key: a.id,
+      style: a.status === 'open' && bad ? {
+        background: '#FFF7F7'
+      } : undefined
+    }, /*#__PURE__*/React.createElement("td", {
       style: {
-        border: '1px solid var(--border)',
-        borderLeft: `5px solid ${bad ? '#DC2626' : '#B45309'}`,
-        borderRadius: 9,
-        padding: '10px 12px',
-        marginBottom: 8,
-        background: 'var(--surface)'
+        fontWeight: 600,
+        borderLeft: `3px solid ${bad ? '#DC2626' : '#B45309'}`
       }
-    }, /*#__PURE__*/React.createElement("div", {
+    }, emp.full_name || 'Unknown worker'), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
       style: {
-        display: 'flex',
-        alignItems: 'baseline',
-        gap: 8,
-        flexWrap: 'wrap'
+        display: 'inline-block',
+        padding: '1px 7px',
+        borderRadius: 999,
+        fontWeight: 800,
+        fontSize: 11.5,
+        whiteSpace: 'nowrap',
+        color: bad ? '#DC2626' : '#B45309',
+        background: bad ? '#FFF1F1' : '#FFFBEB',
+        border: `1px solid ${bad ? '#FCA5A5' : '#FCD34D'}`
       }
-    }, /*#__PURE__*/React.createElement("b", null, emp.full_name || 'Unknown worker'), /*#__PURE__*/React.createElement("span", {
-      className: "small",
+    }, (LABEL[a.type] || a.type) + mins)), /*#__PURE__*/React.createElement("td", {
+      className: "small subtle",
       style: {
-        fontWeight: 700,
-        color: bad ? '#DC2626' : '#B45309'
-      }
-    }, LABEL[a.type] || a.type), /*#__PURE__*/React.createElement("span", {
-      className: "small subtle"
-    }, snap(a).shift_date || s.shift_date || '', " · ", hhmm(snap(a).start_time || s.start_time), "–", hhmm(snap(a).end_time || s.end_time), " · ", snap(a).location_name || loc.name || '—'), s.is_void && /*#__PURE__*/React.createElement("span", {
-      className: "small",
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis'
+      },
+      title: `${sn.shift_date || sh.shift_date || ''} ${hhmm(sn.start_time || sh.start_time)}–${hhmm(sn.end_time || sh.end_time)} · ${sn.location_name || loc.name || ''}`
+    }, (sn.shift_date || sh.shift_date || '').slice(5), " · ", hhmm(sn.start_time || sh.start_time), "–", hhmm(sn.end_time || sh.end_time), " · ", sn.location_name || loc.name || '—', sh.is_void && /*#__PURE__*/React.createElement("span", {
       style: {
+        marginLeft: 6,
+        fontSize: 10,
         fontWeight: 700,
         color: '#475569',
         background: '#F1F5F9',
         border: '1px solid #CBD5E1',
         borderRadius: 999,
-        padding: '0 7px'
+        padding: '0 5px'
       }
-    }, "session removed"), /*#__PURE__*/React.createElement("span", {
-      className: "small subtle",
+    }, "removed")), /*#__PURE__*/React.createElement("td", {
+      className: "small",
+      title: [reason, note && 'Note: ' + note].filter(Boolean).join('\n'),
       style: {
-        marginLeft: 'auto'
+        display: '-webkit-box',
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: 'vertical',
+        overflow: 'hidden',
+        lineHeight: 1.35
       }
-    }, "raised ", fmt(a.raised_at))), /*#__PURE__*/React.createElement("div", {
+    }, reason ? /*#__PURE__*/React.createElement("i", null, reason) : a.status === 'open' ? /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, sh.is_void ? '—' : 'none yet') : /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, "—"), note && /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, " · ", note)), /*#__PURE__*/React.createElement("td", {
       className: "small",
       style: {
-        marginTop: 4
+        whiteSpace: 'nowrap'
       }
-    }, s.late_min > 0 && /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: '#DC2626',
-        fontWeight: 600
-      }
-    }, "Late ", s.late_min, " min"), s.late_min > 0 && s.early_min > 0 && /*#__PURE__*/React.createElement("span", {
-      className: "subtle"
-    }, " · "), s.early_min > 0 && /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: '#DC2626',
-        fontWeight: 600
-      }
-    }, "Left ", s.early_min, " min early")), a.worker_reason ? /*#__PURE__*/React.createElement("div", {
-      className: "small",
-      style: {
-        marginTop: 6,
-        padding: '6px 9px',
-        background: '#F8FAFC',
-        border: '1px solid var(--border)',
-        borderRadius: 7
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      className: "subtle"
-    }, (emp.full_name || 'They').split(' ')[0], " said:"), " ", /*#__PURE__*/React.createElement("i", null, a.worker_reason)) : a.status === 'open' && /*#__PURE__*/React.createElement("div", {
-      className: "small subtle",
-      style: {
-        marginTop: 6,
-        fontStyle: 'italic'
-      }
-    }, "No reason given yet — they can add one from their app."), a.status === 'open' ? /*#__PURE__*/React.createElement("button", {
+    }, a.status === 'open' ? /*#__PURE__*/React.createElement("button", {
       className: "btn btn-primary small",
       style: {
-        marginTop: 8
+        padding: '2px 10px'
       },
       onClick: () => open(a)
-    }, "Review…") : /*#__PURE__*/React.createElement("div", {
-      className: "small",
+    }, "Review…") : /*#__PURE__*/React.createElement("span", {
       style: {
-        marginTop: 6,
         color: '#059669'
       }
-    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered by admin' : a.resolution_action === 'marked_absent' ? 'Marked absent' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'), a.remark && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", /*#__PURE__*/React.createElement("i", null, a.remark)), s.is_void && /*#__PURE__*/React.createElement(React.Fragment, null, " · session removed")));
-  }), modal && (() => {
+    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered' : a.resolution_action === 'marked_absent' ? 'Marked absent' : a.resolution_action === 'session_removed' ? 'Session removed' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'))));
+  })))), modal && (() => {
     const t = modal.a.type,
       needsTime = NEEDS_TIME[t] && !modal.markAbsent;
     return /*#__PURE__*/React.createElement("div", {
