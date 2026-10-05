@@ -24650,7 +24650,7 @@ function AttendanceAlertsView({
       style: {
         color: '#059669'
       }
-    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered' : a.resolution_action === 'marked_absent' ? 'Marked absent' : a.resolution_action === 'session_removed' ? 'Session removed' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'))));
+    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered' : a.resolution_action === 'marked_absent' ? 'Marked absent' : a.resolution_action === 'session_removed' ? 'Session removed' : a.resolution_action === 'superseded_by_absence' ? 'Became an absence' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'))));
   })))), modal && (() => {
     const t = modal.a.type,
       needsTime = NEEDS_TIME[t] && !modal.markAbsent;

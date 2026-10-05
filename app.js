@@ -12647,9 +12647,10 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
               ? <button className="btn btn-primary small" style={{padding:'2px 10px'}}
                   onClick={()=>open(a)}>Review…</button>
               : <span style={{color:'#059669'}}>✓ {
-                  a.resolution_action==='time_entered'   ? 'Time entered'
-                : a.resolution_action==='marked_absent'  ? 'Marked absent'
-                : a.resolution_action==='session_removed'? 'Session removed'
+                  a.resolution_action==='time_entered'          ? 'Time entered'
+                : a.resolution_action==='marked_absent'         ? 'Marked absent'
+                : a.resolution_action==='session_removed'       ? 'Session removed'
+                : a.resolution_action==='superseded_by_absence' ? 'Became an absence'
                 : 'Reviewed'}{a.pay_treatment && <> · {
                   a.pay_treatment==='full' ? 'Full deduction'
                 : a.pay_treatment==='half' ? 'Half deduction' : 'No deduction'}</>}</span>}
