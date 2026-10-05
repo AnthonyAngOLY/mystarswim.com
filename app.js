@@ -80,10 +80,53 @@ const BASE_HEADERS = {
   Authorization: `Bearer ${cfg.supabaseAnonKey || ''}`,
   'Content-Type': 'application/json'
 };
+// ── Phase 2: request as `authenticated`, not as the shared anon key ────────
+// The login function mirrors each scheduler login into Supabase Auth and
+// returns a real session. When we hold one we send it, so PostgREST evaluates
+// RLS with actual claims; without one we send the anon key exactly as before.
+//
+// Safety: RLS is still OFF on the legacy tables, so both credentials reach the
+// same rows today. That means a problem with the JWT can always degrade to the
+// anon key rather than taking the app down — see the 401 handling in rest().
+let sbSession = null;   // { access_token, refresh_token } | null
+function setSbSession(s){ sbSession = (s && s.access_token) ? s : null; }
+function authHeadersFor(){
+  if(!sbSession) return BASE_HEADERS;
+  return { ...BASE_HEADERS, Authorization: `Bearer ${sbSession.access_token}` };
+}
+// Swap an expired access token for a fresh one. Returns true on success.
+async function refreshSbSession(){
+  if(!sbSession || !sbSession.refresh_token) return false;
+  try{
+    const res = await fetch(`${cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+      method:'POST',
+      headers:{ apikey: cfg.supabaseAnonKey, 'Content-Type':'application/json' },
+      body: JSON.stringify({ refresh_token: sbSession.refresh_token })
+    });
+    if(!res.ok) return false;
+    const d = await res.json();
+    if(!d.access_token) return false;
+    sbSession = { access_token:d.access_token, refresh_token:d.refresh_token || sbSession.refresh_token };
+    // Keep the stored session in step so a reload does not start out stale.
+    try{
+      const raw = localStorage.getItem('ssb.auth');
+      if(raw){ const a = JSON.parse(raw); a.supabase = sbSession; localStorage.setItem('ssb.auth', JSON.stringify(a)); }
+    }catch(_){}
+    return true;
+  }catch(_){ return false; }
+}
 function apiUrl(path){ return `${cfg.supabaseUrl}/rest/v1/${path}`; }
 async function rest(path, opts={}){
-  const mergedHeaders = { ...BASE_HEADERS, ...(opts.headers || {}) };
-  const res = await fetch(apiUrl(path), { ...opts, headers: mergedHeaders });
+  const mergedHeaders = { ...authHeadersFor(), ...(opts.headers || {}) };
+  let res = await fetch(apiUrl(path), { ...opts, headers: mergedHeaders });
+  // A 401 while carrying a JWT means the token expired or went bad. Try a
+  // refresh; if that fails, drop back to the anon key rather than leaving the
+  // user staring at a broken app. Only the RLS-protected screens need the JWT.
+  if(res.status === 401 && sbSession && !opts.headers?.Authorization){
+    const refreshed = await refreshSbSession();
+    if(!refreshed) sbSession = null;
+    res = await fetch(apiUrl(path), { ...opts, headers: { ...authHeadersFor(), ...(opts.headers || {}) } });
+  }
   const txt = await res.text();
   if(!res.ok) throw new Error(txt || `HTTP ${res.status}`);
   return txt ? JSON.parse(txt) : null;
@@ -13000,10 +13043,15 @@ function readAuth(){
     if(!raw) return null;
     const a=JSON.parse(raw);
     if(!a || !a.id || !a.ts || (Date.now()-a.ts)>AUTH_TTL_MS){ localStorage.removeItem(AUTH_KEY); return null; }
+    // Restore the Supabase session on reload so requests keep going out as
+    // `authenticated`. Sessions stored before Phase 2 simply have no
+    // `supabase` key, and those users fall back to the anon key until their
+    // next sign-in mints one.
+    setSbSession(a.supabase || null);
     return a;
   }catch(_){ return null; }
 }
-function clearAuth(){ try{ localStorage.removeItem(AUTH_KEY); }catch(_){} }
+function clearAuth(){ setSbSession(null); try{ localStorage.removeItem(AUTH_KEY); }catch(_){} }
 
 function LoginView({ onLogin }){
   const [username,setUsername]=useState('');
@@ -13018,7 +13066,7 @@ function LoginView({ onLogin }){
       // Phase 0 (RLS hardening): credentials are verified server-side by the
       // `login` edge function (service role). The browser never reads password
       // material; it receives a safe profile + a signed session token.
-      let user=null, token=null, viaFn=false;
+      let user=null, token=null, viaFn=false, sb=null;
       try{
         const res=await fetch(`${cfg.supabaseUrl}/functions/v1/login`, {
           method:'POST',
@@ -13026,7 +13074,7 @@ function LoginView({ onLogin }){
           body: JSON.stringify({ username:u, password })
         });
         if(res.status===401){ setErr('Invalid username or password.'); setBusy(false); return; }
-        if(res.ok){ const d=await res.json(); user=d.user; token=d.token; viaFn=true; }
+        if(res.ok){ const d=await res.json(); user=d.user; token=d.token; sb=d.supabase||null; viaFn=true; }
         // Any other status (e.g. 404 before the function is deployed) falls
         // through to the legacy path below.
       }catch(_){ /* function unreachable — fall through to legacy path */ }
@@ -13054,7 +13102,10 @@ function LoginView({ onLogin }){
         setBusy(false);
         return;
       }
-      const auth={ id:user.id, username:user.username, displayName:user.displayName||user.username, role, token:token||null, ts:Date.now() };
+      const auth={ id:user.id, username:user.username, displayName:user.displayName||user.username, role, token:token||null, supabase:sb, ts:Date.now() };
+      // Start sending the JWT immediately; the legacy login path leaves this
+      // null and the app keeps using the anon key, exactly as before.
+      setSbSession(sb);
       try{ localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); }catch(_){}
       onLogin(auth);
       return;

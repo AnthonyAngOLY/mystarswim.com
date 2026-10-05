@@ -17,8 +17,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SESSION_SECRET = Deno.env.get("SESSION_JWT_SECRET")!;
 const SESSION_TTL_S = 7 * 24 * 60 * 60; // 7 days — matches AUTH_TTL_MS in app.js
+
+// Phase 2: scheduler logins are mirrored into Supabase Auth so the app can
+// send a real JWT instead of the shared anon key. Usernames map to the same
+// unroutable internal domain the worker app uses; no mail is ever sent there.
+const EMAIL_DOMAIN = "staff.mystarswim.internal";
+const ADMIN_ROLES = ["sysadmin", "schedule_admin", "admin"];
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -62,6 +69,113 @@ async function signSession(claims: Record<string, unknown>): Promise<string> {
   return `${data}.${b64url(sig)}`;
 }
 
+// ── Phase 2: mirror this login into Supabase Auth ────────────────────────
+//
+// Called only AFTER the app_users credentials have already been verified, so
+// the password handed in here is known-good. That is what makes a lazy
+// migration possible: existing hashes cannot be reversed, but at this exact
+// moment we hold the plaintext the user just typed, so we can stand up their
+// Auth user without resetting anything.
+//
+// Self-healing: if an admin changes the app_users password through the
+// user-management panel, the two drift apart. The next successful login
+// detects the failed Auth sign-in and resets the Auth password to match.
+//
+// Every failure path returns null. A login must NEVER fail because the Auth
+// mirror had a problem — the caller falls back to a session without a JWT,
+// and only the newer RLS-protected screens are unavailable.
+async function mirrorToSupabaseAuth(
+  admin: ReturnType<typeof createClient>,
+  user: { id: string; username: string; role: string; auth_user_id?: string | null },
+  password: string,
+): Promise<{ access_token: string; refresh_token: string } | null> {
+  try {
+    const email = `${user.username.toLowerCase().replace(/\s+/g, "")}@${EMAIL_DOMAIN}`;
+    const appMeta = { ssb_role: user.role, app_user_id: user.id };
+    const anon = createClient(SUPABASE_URL, ANON_KEY, { auth: { persistSession: false } });
+
+    // Fast path: the Auth user already exists and the passwords still agree.
+    if (user.auth_user_id) {
+      const first = await anon.auth.signInWithPassword({ email, password: password });
+      if (first.data?.session) {
+        // Keep the role claim current; a promotion must reach the JWT.
+        await admin.auth.admin.updateUserById(user.auth_user_id, { app_metadata: appMeta });
+        return {
+          access_token: first.data.session.access_token,
+          refresh_token: first.data.session.refresh_token,
+        };
+      }
+      // Passwords drifted — realign Auth to app_users, then retry once.
+      await admin.auth.admin.updateUserById(user.auth_user_id, {
+        password: password,
+        app_metadata: appMeta,
+      });
+      const retry = await anon.auth.signInWithPassword({ email, password: password });
+      return retry.data?.session
+        ? {
+          access_token: retry.data.session.access_token,
+          refresh_token: retry.data.session.refresh_token,
+        }
+        : null;
+    }
+
+    // First login since Phase 2 shipped: create the Auth user now.
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password: password,
+      email_confirm: true, // the address is unroutable; there is no inbox to confirm
+      app_metadata: appMeta,
+      user_metadata: { username: user.username },
+    });
+
+    let authUserId = created?.user?.id ?? null;
+
+    // An Auth user may already exist from an earlier partial run even though
+    // app_users never recorded it. Recover by finding and realigning it
+    // rather than leaving this person permanently unable to get a JWT.
+    if (createErr || !authUserId) {
+      const found = await findAuthUserByEmail(admin, email);
+      if (!found) return null;
+      authUserId = found;
+      await admin.auth.admin.updateUserById(authUserId, {
+        password: password,
+        app_metadata: appMeta,
+      });
+    }
+
+    await admin.from("app_users").update({ auth_user_id: authUserId }).eq("id", user.id);
+
+    const { data: signed } = await anon.auth.signInWithPassword({
+      email,
+      password: password,
+    });
+    return signed?.session
+      ? {
+        access_token: signed.session.access_token,
+        refresh_token: signed.session.refresh_token,
+      }
+      : null;
+  } catch (_e) {
+    return null; // never block the login
+  }
+}
+
+// listUsers is paginated and has no email filter in supabase-js v2, so page
+// through it. Staff counts are in the dozens; this stops well short of abuse.
+async function findAuthUserByEmail(
+  admin: ReturnType<typeof createClient>,
+  email: string,
+): Promise<string | null> {
+  for (let page = 1; page <= 10; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error || !data?.users?.length) return null;
+    const hit = data.users.find((u) => (u.email ?? "").toLowerCase() === email);
+    if (hit) return hit.id;
+    if (data.users.length < 200) return null;
+  }
+  return null;
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -74,7 +188,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
     const { data: rows } = await admin
       .from("app_users")
-      .select("id, username, display_name, role, is_active, password_salt, password_hash")
+      .select("id, username, display_name, role, is_active, password_salt, password_hash, auth_user_id")
       .eq("username", u)
       .eq("is_active", true)
       .limit(1);
@@ -101,7 +215,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       role: user.role || "staff",
     };
     const token = await signSession({ sub: user.id, username: user.username, role: profile.role });
-    return json({ user: profile, token }, 200);
+
+    // Phase 2: hand back a real Supabase session alongside the legacy one, so
+    // the app can talk to RLS-protected tables as `authenticated` instead of
+    // as the shared anon key. `supabase` is null when the mirror could not be
+    // completed; the app treats that as "logged in, newer screens disabled"
+    // rather than as a failed login.
+    const supabase = await mirrorToSupabaseAuth(
+      admin,
+      {
+        id: user.id,
+        username: user.username,
+        role: profile.role,
+        auth_user_id: user.auth_user_id,
+      },
+      password,
+    );
+
+    return json({ user: profile, token, supabase, isAdmin: ADMIN_ROLES.includes(profile.role) }, 200);
   } catch (_e) {
     return json({ error: "Login failed." }, 500);
   }

@@ -340,8 +340,24 @@ create or replace function attendance_is_admin()
 returns boolean
 language plpgsql stable security definer set search_path = public
 as $$
-declare v_tbl text; v_flag boolean;
+declare v_tbl text; v_flag boolean; v_role text;
 begin
+  -- Two independent ways to be an admin here, because the two populations
+  -- only partly overlap: scheduler admins live in app_users and may have no
+  -- worker row at all, while an instructor who supervises has a worker row
+  -- but no scheduler login.
+  --
+  -- 1. A role claim minted into the JWT by the login function.
+  begin
+    v_role := auth.jwt() -> 'app_metadata' ->> 'ssb_role';
+  exception when others then
+    v_role := null;   -- no JWT (service role, or a direct SQL session)
+  end;
+  if coalesce(v_role, '') in ('sysadmin', 'schedule_admin', 'admin') then
+    return true;
+  end if;
+
+  -- 2. Or an explicit is_admin flag on the caller's own worker row.
   select c.relname into v_tbl from pg_class c join pg_namespace n on n.oid=c.relnamespace
   where n.nspname='public' and c.relname in ('crew','admin_employees')
   order by case c.relname when 'crew' then 1 else 2 end limit 1;
