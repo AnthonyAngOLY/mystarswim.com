@@ -461,6 +461,7 @@ function App({ currentUser, onLogout }){
   const [attReportMode,setAttReportMode] = useState('month');
   const [attReportAnchor,setAttReportAnchor] = useState(todayStr());
   const [attReportShifts,setAttReportShifts] = useState([]);
+  const [attReportAlerts,setAttReportAlerts] = useState([]);
   const [attAlerts,setAttAlerts] = useState([]);
   const [attAlertShifts,setAttAlertShifts] = useState([]);
   const [attAlertFilter,setAttAlertFilter] = useState('open');
@@ -1288,8 +1289,13 @@ function App({ currentUser, onLogout }){
     try{
       const rows = await selectAllRows('shifts','*',
         `&is_void=eq.false&shift_date=gte.${attReportRange.from}&shift_date=lte.${attReportRange.to}&order=shift_date.asc`);
-      setAttReportShifts(rows||[]); setAttBlocked(false);
-    } catch(_){ setAttReportShifts([]); setAttBlocked(true); }
+      // Reasons live on the alerts, and payroll wants to read them next to
+      // the exception rather than hunting for them in another tab.
+      const ids = (rows||[]).map(r=>r.id);
+      let al = [];
+      if(ids.length) al = await selectAllRows('alerts','*',`&shift_id=in.(${ids.join(',')})`);
+      setAttReportShifts(rows||[]); setAttReportAlerts(al||[]); setAttBlocked(false);
+    } catch(_){ setAttReportShifts([]); setAttReportAlerts([]); setAttBlocked(true); }
   }
   useEffect(()=>{
     if(view==='attendance' && attendanceSection==='report') loadAttendanceReport();
@@ -4254,6 +4260,8 @@ function App({ currentUser, onLogout }){
         />}
         {!attBlocked && attendanceSection==='report' && <AttendanceReportView
           shifts={attReportShifts}
+          alerts={attReportAlerts}
+          locations={attLocations}
           categories={attCategories}
           employees={adminEmployees}
           mode={attReportMode} setMode={setAttReportMode}
@@ -12247,9 +12255,16 @@ function AttendanceLiveView({ shifts, punches, locations, categories, employees,
 // Rates themselves are Phase 5. Until they are configured this reports the
 // inputs, which is deliberately where the money question stops: a payout
 // figure computed from a rate nobody has entered would be worse than none.
-function AttendanceReportView({ shifts, categories, employees, mode, setMode, anchor, setAnchor, rangeLabel, from, to }){
+function AttendanceReportView({ shifts, alerts, locations, categories, employees, mode, setMode, anchor, setAnchor, rangeLabel, from, to }){
   const empById = useMemo(()=>{ const m={}; (employees||[]).forEach(e=>{m[e.id]=e;}); return m; }, [employees]);
   const catById = useMemo(()=>{ const m={}; (categories||[]).forEach(c=>{m[c.id]=c;}); return m; }, [categories]);
+
+  function Chip({ tone, children }){
+    const t = tone==='red'   ? { c:'#DC2626', bg:'#FFF1F1', bd:'#FCA5A5' }
+            :                  { c:'#B45309', bg:'#FFFBEB', bd:'#FCD34D' };
+    return <span style={{display:'inline-block',padding:'1px 7px',borderRadius:999,
+      fontWeight:800,fontSize:12,color:t.c,background:t.bg,border:`1px solid ${t.bd}`}}>{children}</span>;
+  }
 
   const hoursOf = s => {
     const p=t=>{const a=String(t).split(':');return (+a[0])*60+(+a[1]);};
@@ -12283,6 +12298,42 @@ function AttendanceReportView({ shifts, categories, employees, mode, setMode, an
 
   const tot = k => rows.reduce((n,r)=>n+r[k],0);
 
+  // One line per session that went wrong, with whatever the worker said and
+  // whatever was decided. This is the part a payroll argument actually turns
+  // on, so it belongs in the same export-ready view as the totals.
+  const exceptions = useMemo(()=>{
+    const byShift = {};
+    (alerts||[]).forEach(a=>{
+      const b = byShift[a.shift_id] = byShift[a.shift_id] || [];
+      b.push(a);
+    });
+    const locName = id => ((locations||[]).find(l=>l.id===id)||{}).name || '—';
+    const DEC = { full:'Deduct full', half:'Deduct half', none:'No deduction' };
+    return (shifts||[]).filter(x=>
+        x.status==='absent' || x.late_min>0 || x.early_min>0 ||
+        x.status==='incomplete' || x.is_unpaid_leave)
+      .map(x=>{
+        const as = byShift[x.id] || [];
+        const withReason = as.find(a=>a.worker_reason) || {};
+        const resolved   = as.find(a=>a.status==='resolved') || {};
+        let what='', tone='red';
+        if(x.status==='absent')            what = x.is_unpaid_leave ? 'Absent · unpaid leave' : 'Absent';
+        else if(x.late_min>0 && x.early_min>0) what = `Late ${x.late_min}m · early ${x.early_min}m`;
+        else if(x.late_min>0)              what = `Late ${x.late_min}m`;
+        else if(x.early_min>0)             what = `Left ${x.early_min}m early`;
+        else if(x.status==='incomplete') { what = 'No check-out'; tone='amber'; }
+        if(x.is_unpaid_leave && x.status!=='absent'){ what += ' · unpaid leave'; }
+        return {
+          id:x.id, date:x.shift_date, worker:(empById[x.crew_id]||{}).full_name || 'Unknown worker',
+          what, tone, location:locName(x.location_id),
+          workerReason: withReason.worker_reason || null,
+          adminNote: resolved.remark || null,
+          decision: DEC[x.pay_treatment || resolved.pay_treatment] || null
+        };
+      })
+      .sort((a,b)=> a.date.localeCompare(b.date) || a.worker.localeCompare(b.worker));
+  }, [shifts, alerts, locations, empById]);
+
   const FIELDS = [
     ['worker','Worker'],['category','Category'],['scheduled','Scheduled'],
     ['attended','Attended'],['absent','Absent'],['lateCount','Late'],
@@ -12296,11 +12347,21 @@ function AttendanceReportView({ shifts, categories, employees, mode, setMode, an
   function exportCSV(){
     const head = FIELDS.map(f=>f[1]);
     const esc = v => { const t=String(v??''); return /[",\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t; };
-    const csv = [head.join(',')].concat(exportRows().map(o=>head.map(h=>esc(o[h])).join(','))).join('\n');
+    let csv = [head.join(',')].concat(exportRows().map(o=>head.map(h=>esc(o[h])).join(','))).join('\n');
+    if(exceptions.length){
+      csv += '\n\nEXCEPTIONS\n' + EXC_HEAD.join(',') + '\n'
+           + excRows().map(o=>EXC_HEAD.map(h=>esc(o[h])).join(',')).join('\n');
+    }
     const blob = new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
     a.download=`attendance_${from}_to_${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
   }
+  const EXC_HEAD = ['Date','Worker','What happened','Location','Reason given','Admin note','Decision'];
+  const excRows = () => exceptions.map(x=>({
+    'Date':x.date, 'Worker':x.worker, 'What happened':x.what, 'Location':x.location,
+    'Reason given':x.workerReason||'', 'Admin note':x.adminNote||'',
+    'Decision':x.decision||'Not reviewed'
+  }));
   function exportXLSX(){
     if(typeof XLSX==='undefined'){ alert('Excel library not loaded — use CSV export.'); return; }
     const head = FIELDS.map(f=>f[1]);
@@ -12308,6 +12369,13 @@ function AttendanceReportView({ shifts, categories, employees, mode, setMode, an
     ws['!cols'] = head.map(h=>({wch:Math.max(11,h.length+2)}));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    // Exceptions ride along as their own sheet — the totals say how much, this
+    // says why, and payroll needs both in the same file.
+    if(exceptions.length){
+      const ws2 = XLSX.utils.json_to_sheet(excRows(),{header:EXC_HEAD});
+      ws2['!cols'] = EXC_HEAD.map(h=>({wch:h==='Reason given'?38:Math.max(12,h.length+2)}));
+      XLSX.utils.book_append_sheet(wb, ws2, 'Exceptions');
+    }
     XLSX.writeFile(wb, `attendance_${from}_to_${to}.xlsx`);
   }
 
@@ -12353,19 +12421,26 @@ function AttendanceReportView({ shifts, categories, employees, mode, setMode, an
           <th className="num" style={{textAlign:'right'}}>Hours</th>
           <th className="num" style={{textAlign:'right'}}>Unpaid leave</th>
         </tr></thead>
-        <tbody>{rows.map(r=><tr key={r.crew_id+r.category_id}>
-          <td style={{fontWeight:600}}>{r.worker}</td>
-          <td>{r.category}</td>
-          <td style={{textAlign:'right'}}>{r.scheduled}</td>
-          <td style={{textAlign:'right',fontWeight:700}}>{r.attended}</td>
-          <td style={{textAlign:'right',color:r.absent?'#DC2626':'inherit'}}>{r.absent||'—'}</td>
-          <td style={{textAlign:'right',color:r.lateCount?'#DC2626':'inherit'}}>
-            {r.lateCount ? `${r.lateCount} (${r.lateMin}m)` : '—'}</td>
-          <td style={{textAlign:'right',color:r.earlyCount?'#DC2626':'inherit'}}>
-            {r.earlyCount ? `${r.earlyCount} (${r.earlyMin}m)` : '—'}</td>
-          <td style={{textAlign:'right'}}>{r.hours.toFixed(1)}</td>
-          <td style={{textAlign:'right',color:r.unpaidLeave?'#B45309':'inherit'}}>{r.unpaidLeave||'—'}</td>
-        </tr>)}</tbody>
+        <tbody>{rows.map(r=>{
+          // A row that affects pay is tinted, so a payroll run finds the
+          // people who need a decision without reading every number.
+          const costly = r.absent>0 || r.unpaidLeave>0;
+          return <tr key={r.crew_id+r.category_id}
+                     style={costly?{background:'#FFF7F7'}:undefined}>
+            <td style={{fontWeight:600}}>{r.worker}</td>
+            <td>{r.category}</td>
+            <td style={{textAlign:'right'}}>{r.scheduled}</td>
+            <td style={{textAlign:'right',fontWeight:700}}>{r.attended}</td>
+            <td style={{textAlign:'right'}}>{r.absent ? <Chip tone="red">{r.absent}</Chip> : '—'}</td>
+            <td style={{textAlign:'right'}}>
+              {r.lateCount ? <Chip tone="red">{r.lateCount} · {r.lateMin}m</Chip> : '—'}</td>
+            <td style={{textAlign:'right'}}>
+              {r.earlyCount ? <Chip tone="red">{r.earlyCount} · {r.earlyMin}m</Chip> : '—'}</td>
+            <td style={{textAlign:'right'}}>{r.hours.toFixed(1)}</td>
+            <td style={{textAlign:'right'}}>
+              {r.unpaidLeave ? <Chip tone="amber">{r.unpaidLeave}</Chip> : '—'}</td>
+          </tr>;
+        })}</tbody>
         <tfoot><tr style={{fontWeight:800,borderTop:'2px solid var(--border)'}}>
           <td colSpan={2}>Total</td>
           <td style={{textAlign:'right'}}>{tot('scheduled')}</td>
@@ -12377,6 +12452,34 @@ function AttendanceReportView({ shifts, categories, employees, mode, setMode, an
           <td style={{textAlign:'right'}}>{tot('unpaidLeave')||'—'}</td>
         </tr></tfoot>
       </table></div>
+
+      {!!exceptions.length && <>
+        <div style={{fontWeight:800,margin:'22px 0 8px'}}>
+          Exceptions <span className="small subtle" style={{fontWeight:400}}>
+            — every session that went wrong, with the reason given</span>
+        </div>
+        <div className="table-wrap"><table className="table">
+          <thead><tr>
+            <th style={{width:95}}>Date</th><th>Worker</th><th style={{width:150}}>What happened</th>
+            <th style={{width:120}}>Location</th><th>Reason given</th>
+            <th style={{width:120}}>Decision</th>
+          </tr></thead>
+          <tbody>{exceptions.map(x=><tr key={x.id}>
+            <td className="small">{x.date}</td>
+            <td style={{fontWeight:600}}>{x.worker}</td>
+            <td><Chip tone={x.tone}>{x.what}</Chip></td>
+            <td className="small subtle">{x.location}</td>
+            <td className="small">
+              {x.workerReason ? <i>{x.workerReason}</i>
+                              : <span className="subtle">— none given —</span>}
+              {x.adminNote && <div className="subtle" style={{marginTop:2}}>Note: {x.adminNote}</div>}
+            </td>
+            <td className="small">{x.decision
+              ? <span style={{fontWeight:600}}>{x.decision}</span>
+              : <span style={{color:'#B45309',fontWeight:700}}>Not reviewed</span>}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </>}
 
       <div className="small subtle" style={{marginTop:14,lineHeight:1.6}}>
         <b>Reading this for payroll.</b> Regular staff are on a fixed monthly
@@ -12768,15 +12871,21 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
     return (now.getHours()*60 + now.getMinutes()) >= ((+p[0])*60 + (+p[1]));
   }
   // What actually happened, short enough to sit on one line.
+  // Anything that costs money or needs a decision is filled, not merely
+  // outlined — a thin coloured edge is invisible when you are scanning a
+  // seven-column grid for the one session that went wrong.
+  const RED   = { c:'#DC2626', bg:'#FFF1F1', bd:'#FCA5A5' };
+  const AMBER = { c:'#B45309', bg:'#FFFBEB', bd:'#FCD34D' };
+  const OK    = { c:'#059669', bg:'var(--surface)', bd:'var(--border)' };
   function outcome(x){
-    if(x.late_min>0 && x.early_min>0) return { t:`Late ${x.late_min}m, early ${x.early_min}m`, c:'#DC2626' };
-    if(x.late_min>0)  return { t:`Late ${x.late_min}m`, c:'#DC2626' };
-    if(x.early_min>0) return { t:`Early ${x.early_min}m`, c:'#DC2626' };
+    if(x.late_min>0 && x.early_min>0) return { t:`Late ${x.late_min}m · early ${x.early_min}m`, ...RED };
+    if(x.late_min>0)  return { t:`Late ${x.late_min}m`,  ...RED };
+    if(x.early_min>0) return { t:`Early ${x.early_min}m`, ...RED };
     switch(x.status){
-      case 'absent':        return { t:'Absent',       c:'#DC2626' };
-      case 'incomplete':    return { t:'No check-out', c:'#B45309' };
-      case 'geofence_flag': return { t:'Flagged',      c:'#B45309' };
-      case 'on_time':       return { t:'On time',      c:'#059669' };
+      case 'absent':        return { t:'ABSENT',       ...RED };
+      case 'incomplete':    return { t:'No check-out', ...AMBER };
+      case 'geofence_flag': return { t:'Flagged',      ...AMBER };
+      case 'on_time':       return { t:'On time',      ...OK };
       default:              return null;
     }
   }
@@ -12831,19 +12940,20 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
               const lk = { background:'none', border:0, padding:0, font:'inherit',
                            cursor:'pointer', textDecoration:'underline' };
               const out = outcome(s), started = hasStarted(s);
-              const edge = out ? out.c : 'var(--border)';
+              const bad = out && out.bg !== 'var(--surface)';
               return <div key={s.id}
                            onClick={ev=>{ ev.stopPropagation(); if(!started) openEdit(s); }}
-                           style={{border:'1px solid var(--border)',borderLeft:`3px solid ${edge}`,
+                           style={{border:`1px solid ${out?out.bd:'var(--border)'}`,
+                           borderLeft:`4px solid ${out?out.c:'var(--border)'}`,
                            borderRadius:6,padding:'2px 6px',marginBottom:3,
-                           background:'var(--surface)',lineHeight:1.35}}>
+                           background:out?out.bg:'var(--surface)',lineHeight:1.35}}>
                 <div className="small" title={locName(s.location_id)}
                      style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
                   <b>{String(s.start_time).slice(0,5)}–{String(s.end_time).slice(0,5)}</b>
                   <span className="subtle"> | </span>{locName(s.location_id)}
                 </div>
                 <div className="small subtle" style={{fontSize:10.5,whiteSpace:'nowrap'}}>
-                  {out ? <><span style={{color:out.c,fontWeight:700}}>{out.t}</span> · </>
+                  {out ? <><span style={{color:out.c,fontWeight:bad?800:700}}>{out.t}</span> · </>
                        : (catName(s.category_id) && <><i>{catName(s.category_id)}</i> · </>)}
                   {!started && <>
                     <button style={{...lk,color:'var(--primary-on-soft,#0369A1)'}}

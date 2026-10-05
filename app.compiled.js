@@ -804,6 +804,7 @@ function App({
   const [attReportMode, setAttReportMode] = useState('month');
   const [attReportAnchor, setAttReportAnchor] = useState(todayStr());
   const [attReportShifts, setAttReportShifts] = useState([]);
+  const [attReportAlerts, setAttReportAlerts] = useState([]);
   const [attAlerts, setAttAlerts] = useState([]);
   const [attAlertShifts, setAttAlertShifts] = useState([]);
   const [attAlertFilter, setAttAlertFilter] = useState('open');
@@ -2042,10 +2043,17 @@ function App({
   async function loadAttendanceReport() {
     try {
       const rows = await selectAllRows('shifts', '*', `&is_void=eq.false&shift_date=gte.${attReportRange.from}&shift_date=lte.${attReportRange.to}&order=shift_date.asc`);
+      // Reasons live on the alerts, and payroll wants to read them next to
+      // the exception rather than hunting for them in another tab.
+      const ids = (rows || []).map(r => r.id);
+      let al = [];
+      if (ids.length) al = await selectAllRows('alerts', '*', `&shift_id=in.(${ids.join(',')})`);
       setAttReportShifts(rows || []);
+      setAttReportAlerts(al || []);
       setAttBlocked(false);
     } catch (_) {
       setAttReportShifts([]);
+      setAttReportAlerts([]);
       setAttBlocked(true);
     }
   }
@@ -6548,6 +6556,8 @@ function App({
     onRefresh: loadAttendanceAlerts
   }), !attBlocked && attendanceSection === 'report' && /*#__PURE__*/React.createElement(AttendanceReportView, {
     shifts: attReportShifts,
+    alerts: attReportAlerts,
+    locations: attLocations,
     categories: attCategories,
     employees: adminEmployees,
     mode: attReportMode,
@@ -23882,6 +23892,8 @@ function AttendanceLiveView({
 // figure computed from a rate nobody has entered would be worse than none.
 function AttendanceReportView({
   shifts,
+  alerts,
+  locations,
   categories,
   employees,
   mode,
@@ -23906,6 +23918,32 @@ function AttendanceReportView({
     });
     return m;
   }, [categories]);
+  function Chip({
+    tone,
+    children
+  }) {
+    const t = tone === 'red' ? {
+      c: '#DC2626',
+      bg: '#FFF1F1',
+      bd: '#FCA5A5'
+    } : {
+      c: '#B45309',
+      bg: '#FFFBEB',
+      bd: '#FCD34D'
+    };
+    return /*#__PURE__*/React.createElement("span", {
+      style: {
+        display: 'inline-block',
+        padding: '1px 7px',
+        borderRadius: 999,
+        fontWeight: 800,
+        fontSize: 12,
+        color: t.c,
+        background: t.bg,
+        border: `1px solid ${t.bd}`
+      }
+    }, children);
+  }
   const hoursOf = s => {
     const p = t => {
       const a = String(t).split(':');
@@ -23957,6 +23995,48 @@ function AttendanceReportView({
     return Object.values(acc).sort((a, b) => a.worker.localeCompare(b.worker) || a.category.localeCompare(b.category));
   }, [shifts, empById, catById]);
   const tot = k => rows.reduce((n, r) => n + r[k], 0);
+
+  // One line per session that went wrong, with whatever the worker said and
+  // whatever was decided. This is the part a payroll argument actually turns
+  // on, so it belongs in the same export-ready view as the totals.
+  const exceptions = useMemo(() => {
+    const byShift = {};
+    (alerts || []).forEach(a => {
+      const b = byShift[a.shift_id] = byShift[a.shift_id] || [];
+      b.push(a);
+    });
+    const locName = id => ((locations || []).find(l => l.id === id) || {}).name || '—';
+    const DEC = {
+      full: 'Deduct full',
+      half: 'Deduct half',
+      none: 'No deduction'
+    };
+    return (shifts || []).filter(x => x.status === 'absent' || x.late_min > 0 || x.early_min > 0 || x.status === 'incomplete' || x.is_unpaid_leave).map(x => {
+      const as = byShift[x.id] || [];
+      const withReason = as.find(a => a.worker_reason) || {};
+      const resolved = as.find(a => a.status === 'resolved') || {};
+      let what = '',
+        tone = 'red';
+      if (x.status === 'absent') what = x.is_unpaid_leave ? 'Absent · unpaid leave' : 'Absent';else if (x.late_min > 0 && x.early_min > 0) what = `Late ${x.late_min}m · early ${x.early_min}m`;else if (x.late_min > 0) what = `Late ${x.late_min}m`;else if (x.early_min > 0) what = `Left ${x.early_min}m early`;else if (x.status === 'incomplete') {
+        what = 'No check-out';
+        tone = 'amber';
+      }
+      if (x.is_unpaid_leave && x.status !== 'absent') {
+        what += ' · unpaid leave';
+      }
+      return {
+        id: x.id,
+        date: x.shift_date,
+        worker: (empById[x.crew_id] || {}).full_name || 'Unknown worker',
+        what,
+        tone,
+        location: locName(x.location_id),
+        workerReason: withReason.worker_reason || null,
+        adminNote: resolved.remark || null,
+        decision: DEC[x.pay_treatment || resolved.pay_treatment] || null
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date) || a.worker.localeCompare(b.worker));
+  }, [shifts, alerts, locations, empById]);
   const FIELDS = [['worker', 'Worker'], ['category', 'Category'], ['scheduled', 'Scheduled'], ['attended', 'Attended'], ['absent', 'Absent'], ['lateCount', 'Late'], ['lateMin', 'Late min'], ['earlyCount', 'Left early'], ['earlyMin', 'Early min'], ['hours', 'Hours'], ['unpaidLeave', 'Unpaid leave']];
   function exportRows() {
     return rows.map(r => {
@@ -23973,7 +24053,10 @@ function AttendanceReportView({
       const t = String(v ?? '');
       return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
     };
-    const csv = [head.join(',')].concat(exportRows().map(o => head.map(h => esc(o[h])).join(','))).join('\n');
+    let csv = [head.join(',')].concat(exportRows().map(o => head.map(h => esc(o[h])).join(','))).join('\n');
+    if (exceptions.length) {
+      csv += '\n\nEXCEPTIONS\n' + EXC_HEAD.join(',') + '\n' + excRows().map(o => EXC_HEAD.map(h => esc(o[h])).join(',')).join('\n');
+    }
     const blob = new Blob(['﻿' + csv], {
       type: 'text/csv;charset=utf-8'
     });
@@ -23983,6 +24066,16 @@ function AttendanceReportView({
     a.click();
     URL.revokeObjectURL(a.href);
   }
+  const EXC_HEAD = ['Date', 'Worker', 'What happened', 'Location', 'Reason given', 'Admin note', 'Decision'];
+  const excRows = () => exceptions.map(x => ({
+    'Date': x.date,
+    'Worker': x.worker,
+    'What happened': x.what,
+    'Location': x.location,
+    'Reason given': x.workerReason || '',
+    'Admin note': x.adminNote || '',
+    'Decision': x.decision || 'Not reviewed'
+  }));
   function exportXLSX() {
     if (typeof XLSX === 'undefined') {
       alert('Excel library not loaded — use CSV export.');
@@ -23997,6 +24090,17 @@ function AttendanceReportView({
     }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    // Exceptions ride along as their own sheet — the totals say how much, this
+    // says why, and payroll needs both in the same file.
+    if (exceptions.length) {
+      const ws2 = XLSX.utils.json_to_sheet(excRows(), {
+        header: EXC_HEAD
+      });
+      ws2['!cols'] = EXC_HEAD.map(h => ({
+        wch: h === 'Reason given' ? 38 : Math.max(12, h.length + 2)
+      }));
+      XLSX.utils.book_append_sheet(wb, ws2, 'Exceptions');
+    }
     XLSX.writeFile(wb, `attendance_${from}_to_${to}.xlsx`);
   }
   const step = n => {
@@ -24109,46 +24213,58 @@ function AttendanceReportView({
     style: {
       textAlign: 'right'
     }
-  }, "Unpaid leave"))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => /*#__PURE__*/React.createElement("tr", {
-    key: r.crew_id + r.category_id
-  }, /*#__PURE__*/React.createElement("td", {
-    style: {
-      fontWeight: 600
-    }
-  }, r.worker), /*#__PURE__*/React.createElement("td", null, r.category), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right'
-    }
-  }, r.scheduled), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right',
-      fontWeight: 700
-    }
-  }, r.attended), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right',
-      color: r.absent ? '#DC2626' : 'inherit'
-    }
-  }, r.absent || '—'), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right',
-      color: r.lateCount ? '#DC2626' : 'inherit'
-    }
-  }, r.lateCount ? `${r.lateCount} (${r.lateMin}m)` : '—'), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right',
-      color: r.earlyCount ? '#DC2626' : 'inherit'
-    }
-  }, r.earlyCount ? `${r.earlyCount} (${r.earlyMin}m)` : '—'), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right'
-    }
-  }, r.hours.toFixed(1)), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right',
-      color: r.unpaidLeave ? '#B45309' : 'inherit'
-    }
-  }, r.unpaidLeave || '—')))), /*#__PURE__*/React.createElement("tfoot", null, /*#__PURE__*/React.createElement("tr", {
+  }, "Unpaid leave"))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => {
+    // A row that affects pay is tinted, so a payroll run finds the
+    // people who need a decision without reading every number.
+    const costly = r.absent > 0 || r.unpaidLeave > 0;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: r.crew_id + r.category_id,
+      style: costly ? {
+        background: '#FFF7F7'
+      } : undefined
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600
+      }
+    }, r.worker), /*#__PURE__*/React.createElement("td", null, r.category), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.scheduled), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right',
+        fontWeight: 700
+      }
+    }, r.attended), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.absent ? /*#__PURE__*/React.createElement(Chip, {
+      tone: "red"
+    }, r.absent) : '—'), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.lateCount ? /*#__PURE__*/React.createElement(Chip, {
+      tone: "red"
+    }, r.lateCount, " · ", r.lateMin, "m") : '—'), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.earlyCount ? /*#__PURE__*/React.createElement(Chip, {
+      tone: "red"
+    }, r.earlyCount, " · ", r.earlyMin, "m") : '—'), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.hours.toFixed(1)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.unpaidLeave ? /*#__PURE__*/React.createElement(Chip, {
+      tone: "amber"
+    }, r.unpaidLeave) : '—'));
+  })), /*#__PURE__*/React.createElement("tfoot", null, /*#__PURE__*/React.createElement("tr", {
     style: {
       fontWeight: 800,
       borderTop: '2px solid var(--border)'
@@ -24183,7 +24299,69 @@ function AttendanceReportView({
     style: {
       textAlign: 'right'
     }
-  }, tot('unpaidLeave') || '—'))))), /*#__PURE__*/React.createElement("div", {
+  }, tot('unpaidLeave') || '—'))))), !!exceptions.length && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      margin: '22px 0 8px'
+    }
+  }, "Exceptions ", /*#__PURE__*/React.createElement("span", {
+    className: "small subtle",
+    style: {
+      fontWeight: 400
+    }
+  }, "— every session that went wrong, with the reason given")), /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 95
+    }
+  }, "Date"), /*#__PURE__*/React.createElement("th", null, "Worker"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 150
+    }
+  }, "What happened"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 120
+    }
+  }, "Location"), /*#__PURE__*/React.createElement("th", null, "Reason given"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 120
+    }
+  }, "Decision"))), /*#__PURE__*/React.createElement("tbody", null, exceptions.map(x => /*#__PURE__*/React.createElement("tr", {
+    key: x.id
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "small"
+  }, x.date), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, x.worker), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(Chip, {
+    tone: x.tone
+  }, x.what)), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, x.location), /*#__PURE__*/React.createElement("td", {
+    className: "small"
+  }, x.workerReason ? /*#__PURE__*/React.createElement("i", null, x.workerReason) : /*#__PURE__*/React.createElement("span", {
+    className: "subtle"
+  }, "— none given —"), x.adminNote && /*#__PURE__*/React.createElement("div", {
+    className: "subtle",
+    style: {
+      marginTop: 2
+    }
+  }, "Note: ", x.adminNote)), /*#__PURE__*/React.createElement("td", {
+    className: "small"
+  }, x.decision ? /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 600
+    }
+  }, x.decision) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: '#B45309',
+      fontWeight: 700
+    }
+  }, "Not reviewed")))))))), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginTop: 14,
@@ -24998,39 +25176,57 @@ function AttendanceRosterView({
     return now.getHours() * 60 + now.getMinutes() >= +p[0] * 60 + +p[1];
   }
   // What actually happened, short enough to sit on one line.
+  // Anything that costs money or needs a decision is filled, not merely
+  // outlined — a thin coloured edge is invisible when you are scanning a
+  // seven-column grid for the one session that went wrong.
+  const RED = {
+    c: '#DC2626',
+    bg: '#FFF1F1',
+    bd: '#FCA5A5'
+  };
+  const AMBER = {
+    c: '#B45309',
+    bg: '#FFFBEB',
+    bd: '#FCD34D'
+  };
+  const OK = {
+    c: '#059669',
+    bg: 'var(--surface)',
+    bd: 'var(--border)'
+  };
   function outcome(x) {
     if (x.late_min > 0 && x.early_min > 0) return {
-      t: `Late ${x.late_min}m, early ${x.early_min}m`,
-      c: '#DC2626'
+      t: `Late ${x.late_min}m · early ${x.early_min}m`,
+      ...RED
     };
     if (x.late_min > 0) return {
       t: `Late ${x.late_min}m`,
-      c: '#DC2626'
+      ...RED
     };
     if (x.early_min > 0) return {
       t: `Early ${x.early_min}m`,
-      c: '#DC2626'
+      ...RED
     };
     switch (x.status) {
       case 'absent':
         return {
-          t: 'Absent',
-          c: '#DC2626'
+          t: 'ABSENT',
+          ...RED
         };
       case 'incomplete':
         return {
           t: 'No check-out',
-          c: '#B45309'
+          ...AMBER
         };
       case 'geofence_flag':
         return {
           t: 'Flagged',
-          c: '#B45309'
+          ...AMBER
         };
       case 'on_time':
         return {
           t: 'On time',
-          c: '#059669'
+          ...OK
         };
       default:
         return null;
@@ -25161,7 +25357,7 @@ function AttendanceRosterView({
       };
       const out = outcome(s),
         started = hasStarted(s);
-      const edge = out ? out.c : 'var(--border)';
+      const bad = out && out.bg !== 'var(--surface)';
       return /*#__PURE__*/React.createElement("div", {
         key: s.id,
         onClick: ev => {
@@ -25169,12 +25365,12 @@ function AttendanceRosterView({
           if (!started) openEdit(s);
         },
         style: {
-          border: '1px solid var(--border)',
-          borderLeft: `3px solid ${edge}`,
+          border: `1px solid ${out ? out.bd : 'var(--border)'}`,
+          borderLeft: `4px solid ${out ? out.c : 'var(--border)'}`,
           borderRadius: 6,
           padding: '2px 6px',
           marginBottom: 3,
-          background: 'var(--surface)',
+          background: out ? out.bg : 'var(--surface)',
           lineHeight: 1.35
         }
       }, /*#__PURE__*/React.createElement("div", {
@@ -25196,7 +25392,7 @@ function AttendanceRosterView({
       }, out ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
         style: {
           color: out.c,
-          fontWeight: 700
+          fontWeight: bad ? 800 : 700
         }
       }, out.t), " · ") : catName(s.category_id) && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("i", null, catName(s.category_id)), " · "), !started && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
         style: {
