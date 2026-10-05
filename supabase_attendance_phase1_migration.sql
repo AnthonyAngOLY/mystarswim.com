@@ -684,6 +684,96 @@ group by 1, 2, 3;
 grant select on v_attendance_shift_facts, v_attendance_monthly to authenticated;
 revoke all on v_attendance_shift_facts, v_attendance_monthly from anon;
 
+-- ─── 15. Worker self-service: consent + profile ─────────────────────────────
+-- PDPA (Malaysia): location is captured only at punch time, and the worker
+-- consents once at first login. Consent lives in its own table rather than a
+-- column on the worker list, because the worker list is still read with the
+-- anon key by the legacy admin app — enabling RLS on it would lock that app
+-- out. A separate table can be locked down properly from day one.
+create table if not exists attendance_consents (
+  crew_id      uuid primary key,
+  consented_at timestamptz not null default now()
+);
+
+alter table attendance_consents enable row level security;
+
+-- FK to whichever worker list §8 resolved.
+do $$
+declare v_tbl text;
+begin
+  select c.relname into v_tbl from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname='public' and c.relname in ('crew','admin_employees')
+  order by case c.relname when 'crew' then 1 else 2 end limit 1;
+  if v_tbl is not null and not exists (
+    select 1 from pg_constraint where conname = 'attendance_consents_crew_id_fkey'
+  ) then
+    execute format('alter table attendance_consents add constraint attendance_consents_crew_id_fkey foreign key (crew_id) references public.%I(id)', v_tbl);
+  end if;
+end $$;
+
+grant select, insert on attendance_consents to authenticated;
+revoke all on attendance_consents from anon;
+
+drop policy if exists consents_admin_read on attendance_consents;
+create policy consents_admin_read on attendance_consents for select
+  using (attendance_is_admin());
+drop policy if exists consents_worker_read on attendance_consents;
+create policy consents_worker_read on attendance_consents for select
+  using (crew_id = attendance_my_crew_id());
+
+-- The caller's own profile. A SECURITY DEFINER function rather than a direct
+-- read of the worker list, so the worker app never needs SELECT on a table
+-- holding every colleague's IC number, bank account and phone.
+create or replace function get_my_profile()
+returns table (crew_id uuid, full_name text, staff_id text,
+               is_admin boolean, consented_at timestamptz)
+language plpgsql stable security definer set search_path = public
+as $$
+declare v_tbl text; v_namecol text;
+begin
+  select c.relname into v_tbl from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname='public' and c.relname in ('crew','admin_employees')
+  order by case c.relname when 'crew' then 1 else 2 end limit 1;
+  if v_tbl is null then return; end if;
+
+  select a.attname into v_namecol from pg_attribute a
+  where a.attrelid = format('public.%I', v_tbl)::regclass
+    and a.attname in ('full_name','display_name','name')
+  order by case a.attname when 'full_name' then 1 when 'display_name' then 2 else 3 end
+  limit 1;
+
+  return query execute format($q$
+    select e.id, e.%I::text, e.staff_id::text,
+           coalesce(e.is_admin, false), c.consented_at
+    from public.%I e
+    left join attendance_consents c on c.crew_id = e.id
+    where e.auth_user_id = auth.uid()
+    limit 1
+  $q$, v_namecol, v_tbl);
+end $$;
+
+-- Record the one-time consent. Re-consenting keeps the original timestamp:
+-- the date they first agreed is the one that matters for PDPA.
+create or replace function record_my_consent()
+returns timestamptz
+language plpgsql security definer set search_path = public
+as $$
+declare v_me uuid := attendance_my_crew_id(); v_at timestamptz;
+begin
+  if v_me is null then
+    raise exception 'Your login is not linked to a worker record.';
+  end if;
+  insert into attendance_consents (crew_id) values (v_me)
+  on conflict (crew_id) do nothing;
+  select consented_at into v_at from attendance_consents where crew_id = v_me;
+  return v_at;
+end $$;
+
+revoke all on function get_my_profile() from public;
+revoke all on function record_my_consent() from public;
+grant execute on function get_my_profile() to authenticated;
+grant execute on function record_my_consent() to authenticated;
+
 commit;
 
 -- ============================================================================

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Star Swim Attendance</title>
+<meta name="theme-color" content="#0EA5E9" />
+<link rel="icon" href="./icon-192.png" />
+<link rel="manifest" href="./manifest.json" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<style>
+  /* Palette lifted from the admin app so the final skin is a swap, not a rewrite. */
+  :root{
+    --bg:#EEF7FD; --surface:#fff; --border:#DAEDF8; --text:#0C1E2E; --muted:#5B7488;
+    --primary:#0EA5E9; --primary-press:#0284C7; --primary-soft:#E0F2FE; --primary-on-soft:#0369A1;
+    --green-bg:#ECFDF5; --green-tx:#059669; --green-bd:#A7F3D0;
+    --amber-bg:#FFFBEB; --amber-tx:#B45309; --amber-bd:#FCD34D;
+    --red-bg:#FFF1F1;   --red-tx:#DC2626;   --red-bd:#FCA5A5;
+    --slate-bg:#F1F5F9; --slate-tx:#475569; --slate-bd:#CBD5E1;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text); font-size:16px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    padding-bottom:calc(72px + env(safe-area-inset-bottom));
+  }
+  .hidden{display:none !important}
+
+  header{
+    background:var(--surface); border-bottom:1px solid var(--border);
+    padding:calc(12px + env(safe-area-inset-top)) 16px 12px;
+    display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:10;
+  }
+  header img{height:28px; width:auto}
+  header .who{margin-left:auto; text-align:right; font-size:13px; color:var(--muted); line-height:1.3}
+  header .who b{display:block; color:var(--text); font-size:14px}
+
+  main{padding:16px; max-width:640px; margin:0 auto}
+  h1{font-size:20px; margin:0 0 4px}
+  h2{font-size:16px; margin:20px 0 10px}
+  .sub{color:var(--muted); font-size:14px; margin:0 0 16px}
+
+  label{display:block; font-size:14px; font-weight:600; margin:14px 0 6px}
+  input[type=text],input[type=password]{
+    width:100%; padding:13px 14px; font-size:16px; /* 16px stops iOS zooming on focus */
+    border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text);
+  }
+  input:focus{outline:2px solid var(--primary-soft); border-color:var(--primary)}
+  .check{display:flex; align-items:flex-start; gap:10px; margin:16px 0; font-size:14px; font-weight:500}
+  .check input{width:20px; height:20px; margin:1px 0 0; flex:none}
+
+  button{font-family:inherit; font-size:16px; cursor:pointer}
+  .btn{
+    width:100%; padding:15px; border:0; border-radius:10px; font-weight:700;
+    background:var(--primary); color:#fff;
+  }
+  .btn:active{background:var(--primary-press)}
+  .btn[disabled]{opacity:.55}
+  .btn.ghost{background:var(--surface); color:var(--primary-on-soft); border:1px solid var(--border)}
+  .btn.done{background:var(--slate-bg); color:var(--slate-tx)}
+
+  .card{
+    background:var(--surface); border:1px solid var(--border); border-left-width:5px;
+    border-radius:12px; padding:14px; margin-bottom:12px;
+  }
+  .card .time{font-size:18px; font-weight:700}
+  .card .loc{font-size:15px; margin-top:2px}
+  .card .meta{color:var(--muted); font-size:13px; margin-top:6px; line-height:1.45}
+  .card .btn{margin-top:12px}
+  .tag{
+    display:inline-block; font-size:11px; font-weight:700; padding:3px 8px;
+    border-radius:999px; background:var(--primary-soft); color:var(--primary-on-soft);
+    vertical-align:2px; margin-left:8px;
+  }
+  .pill{display:inline-block; font-size:12px; font-weight:700; padding:3px 9px; border-radius:999px; border:1px solid}
+  /* Status colours follow §4 of the build spec. */
+  .s-scheduled{border-left-color:var(--slate-bd)}
+  .s-on_time  {border-left-color:var(--green-tx)}
+  .s-late,.s-early_leave{border-left-color:var(--red-tx)}
+  .s-incomplete{border-left-color:var(--amber-tx)}
+  .s-absent   {border-left-color:#334155}
+  .s-geofence_flag{border-left-color:var(--amber-tx)}
+  .p-on_time{background:var(--green-bg); color:var(--green-tx); border-color:var(--green-bd)}
+  .p-late,.p-early_leave{background:var(--red-bg); color:var(--red-tx); border-color:var(--red-bd)}
+  .p-incomplete,.p-geofence_flag{background:var(--amber-bg); color:var(--amber-tx); border-color:var(--amber-bd)}
+  .p-absent{background:var(--slate-bg); color:var(--slate-tx); border-color:var(--slate-bd)}
+  .p-scheduled{background:var(--slate-bg); color:var(--slate-tx); border-color:var(--slate-bd)}
+
+  .note{padding:12px 14px; border-radius:10px; font-size:14px; margin:12px 0; border:1px solid}
+  .note.err{background:var(--red-bg); color:var(--red-tx); border-color:var(--red-bd)}
+  .note.ok {background:var(--green-bg); color:var(--green-tx); border-color:var(--green-bd)}
+  .note.info{background:var(--primary-soft); color:var(--primary-on-soft); border-color:#BAE6FD}
+  .empty{text-align:center; color:var(--muted); padding:40px 16px; font-size:15px}
+
+  nav{
+    position:fixed; left:0; right:0; bottom:0; background:var(--surface);
+    border-top:1px solid var(--border); display:flex;
+    padding-bottom:env(safe-area-inset-bottom); z-index:10;
+  }
+  nav button{
+    flex:1; border:0; background:none; padding:10px 4px 12px; color:var(--muted);
+    font-size:11px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:3px;
+  }
+  nav button .ic{font-size:20px; line-height:1}
+  nav button.active{color:var(--primary-on-soft)}
+
+  table{width:100%; border-collapse:collapse; font-size:14px}
+  th,td{text-align:left; padding:9px 6px; border-bottom:1px solid var(--border)}
+  th{color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.03em}
+  td.num{text-align:right; font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<!-- ── Login ─────────────────────────────────────────────────────────── -->
+<section id="loginScreen">
+  <main>
+    <img src="./logo.png" alt="Star Swim" style="height:44px;margin-bottom:18px" />
+    <h1>Attendance</h1>
+    <p class="sub">Sign in with your staff ID.</p>
+    <form id="loginForm" autocomplete="on">
+      <label for="staffId">Staff ID</label>
+      <input id="staffId" type="text" inputmode="text" autocapitalize="characters"
+             autocomplete="username" placeholder="SS-012" required />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+      <div class="check">
+        <input id="keepMe" type="checkbox" checked />
+        <label for="keepMe" style="margin:0;font-weight:500">Keep me logged in for 90 days</label>
+      </div>
+      <div id="loginError" class="note err hidden"></div>
+      <button class="btn" id="loginBtn" type="submit">Sign in</button>
+    </form>
+  </main>
+</section>
+
+<!-- ── PDPA consent (first login only) ───────────────────────────────── -->
+<section id="consentScreen" class="hidden">
+  <main>
+    <h1>Before you start</h1>
+    <p class="sub">A one-time notice about your location.</p>
+    <div class="note info">
+      <p style="margin:0 0 10px"><b>We check your location only when you tap Check in or Check out.</b></p>
+      <p style="margin:0 0 10px">Star Swim records where you were at that moment to confirm you were at
+         the right pool. Your location is <b>not</b> tracked at any other time, and the app never
+         follows you in the background.</p>
+      <p style="margin:0">Each check is stored with your attendance record so your hours can be verified.</p>
+    </div>
+    <div id="consentError" class="note err hidden"></div>
+    <button class="btn" id="consentBtn" type="button">I understand — continue</button>
+    <button class="btn ghost" id="consentSignOut" type="button" style="margin-top:10px">Sign out</button>
+  </main>
+</section>
+
+<!-- ── App ───────────────────────────────────────────────────────────── -->
+<section id="appScreen" class="hidden">
+  <header>
+    <img src="./logo.png" alt="Star Swim" />
+    <div class="who"><b id="whoName">—</b><span id="whoId"></span></div>
+  </header>
+
+  <main>
+    <div id="viewToday">
+      <h1 id="todayTitle">Today</h1>
+      <p class="sub" id="todayDate"></p>
+      <div id="punchMsg"></div>
+      <div id="todayList"></div>
+    </div>
+
+    <div id="viewHistory" class="hidden">
+      <h1>History</h1>
+      <p class="sub">Your last 30 days.</p>
+      <div id="historyList"></div>
+    </div>
+
+    <div id="viewSummary" class="hidden">
+      <h1>My summary</h1>
+      <p class="sub">Hours by category.</p>
+      <div id="summaryBody"></div>
+      <button class="btn ghost" id="signOutBtn" style="margin-top:28px">Sign out</button>
+    </div>
+  </main>
+
+  <nav>
+    <button data-view="Today"   class="active"><span class="ic">📅</span>Today</button>
+    <button data-view="History"><span class="ic">🕘</span>History</button>
+    <button data-view="Summary"><span class="ic">📊</span>Summary</button>
+  </nav>
+</section>
+
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
