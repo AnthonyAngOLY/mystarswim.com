@@ -804,6 +804,10 @@ function App({
   const [attReportMode, setAttReportMode] = useState('month');
   const [attReportAnchor, setAttReportAnchor] = useState(todayStr());
   const [attReportShifts, setAttReportShifts] = useState([]);
+  const [attAlerts, setAttAlerts] = useState([]);
+  const [attAlertShifts, setAttAlertShifts] = useState([]);
+  const [attAlertFilter, setAttAlertFilter] = useState('open');
+  const [attOpenAlertCount, setAttOpenAlertCount] = useState(0);
   const [promos, setPromos] = useState([]);
   const [programmeModal, setProgrammeModal] = useState(null);
   const [programmeDate, setProgrammeDate] = useState(todayStr()); // own week cursor (independent of Schedule)
@@ -2048,6 +2052,77 @@ function App({
   useEffect(() => {
     if (view === 'attendance' && attendanceSection === 'report') loadAttendanceReport();
   }, [view, attendanceSection, attReportRange.from, attReportRange.to]);
+  async function loadAttendanceAlerts() {
+    try {
+      const rows = await selectAllRows('alerts', '*', `&status=eq.${attAlertFilter}&order=raised_at.desc`);
+      const ids = Array.from(new Set((rows || []).map(a => a.shift_id)));
+      let sh = [];
+      if (ids.length) sh = await selectAllRows('shifts', '*', `&id=in.(${ids.join(',')})`);
+      setAttAlerts(rows || []);
+      setAttAlertShifts(sh || []);
+      setAttBlocked(false);
+    } catch (_) {
+      setAttAlerts([]);
+      setAttAlertShifts([]);
+      setAttBlocked(true);
+    }
+  }
+  // Badge count, kept current whenever the module is open so the nav can show
+  // how much is waiting without the Alerts tab being the active one.
+  async function refreshOpenAlertCount() {
+    try {
+      const rows = await selectRows('alerts', 'id', '&status=eq.open');
+      setAttOpenAlertCount((rows || []).length);
+    } catch (_) {
+      setAttOpenAlertCount(0);
+    }
+  }
+  useEffect(() => {
+    if (view === 'attendance' && attendanceSection === 'alerts') loadAttendanceAlerts();
+  }, [view, attendanceSection, attAlertFilter]);
+  useEffect(() => {
+    if (view === 'attendance') refreshOpenAlertCount();
+  }, [view, attendanceSection]);
+
+  // An admin-entered punch. source='admin' makes it visually distinct from a
+  // real one, and the DB refuses it without a remark.
+  async function attEnterPunch(shift, type, hhmm, remark) {
+    const stamp = new Date(`${shift.shift_date}T${hhmm}:00+08:00`).toISOString();
+    await insertRows('punches', {
+      shift_id: shift.id,
+      crew_id: shift.crew_id,
+      type,
+      punched_at: stamp,
+      source: 'admin',
+      accepted: true,
+      remark
+    });
+  }
+  async function attResolveAlert(alertRow, out) {
+    // The alert carries the decision; the session keeps whatever happened.
+    await patchRows('alerts', {
+      id: alertRow.id
+    }, {
+      status: 'resolved',
+      resolution_action: out.resolution_action,
+      pay_treatment: out.pay_treatment || null,
+      remark: out.remark,
+      resolved_at: new Date().toISOString()
+    });
+    const patch = {};
+    if (out.markAbsent) patch.status = 'absent';
+    if (out.markUnpaidLeave) patch.is_unpaid_leave = true;
+    if (out.pay_treatment) patch.pay_treatment = out.pay_treatment;
+    if (out.remark) patch.remark = out.remark;
+    if (Object.keys(patch).length) {
+      patch.updated_at = new Date().toISOString();
+      await patchRows('shifts', {
+        id: alertRow.shift_id
+      }, patch);
+    }
+    await loadAttendanceAlerts();
+    await refreshOpenAlertCount();
+  }
   async function attSaveLocation(data, id) {
     try {
       if (id) await patchRows('locations', {
@@ -6421,6 +6496,19 @@ function App({
     className: `sub-tab ${attendanceSection === 'roster' ? 'active' : ''}`,
     onClick: () => setAttendanceSection('roster')
   }, "Roster"), /*#__PURE__*/React.createElement("button", {
+    className: `sub-tab ${attendanceSection === 'alerts' ? 'active' : ''}`,
+    onClick: () => setAttendanceSection('alerts')
+  }, "Alerts", attOpenAlertCount > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 6,
+      background: '#EF4444',
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: 800,
+      borderRadius: 999,
+      padding: '1px 6px'
+    }
+  }, attOpenAlertCount)), /*#__PURE__*/React.createElement("button", {
     className: `sub-tab ${attendanceSection === 'report' ? 'active' : ''}`,
     onClick: () => setAttendanceSection('report')
   }, "Report"), /*#__PURE__*/React.createElement("button", {
@@ -6447,6 +6535,16 @@ function App({
     employees: adminEmployees,
     lastLoaded: attLoadedAt,
     onRefresh: loadAttendanceLive
+  }), !attBlocked && attendanceSection === 'alerts' && /*#__PURE__*/React.createElement(AttendanceAlertsView, {
+    alerts: attAlerts,
+    shifts: attAlertShifts,
+    locations: attLocations,
+    employees: adminEmployees,
+    filter: attAlertFilter,
+    setFilter: setAttAlertFilter,
+    resolveAlert: attResolveAlert,
+    enterPunch: attEnterPunch,
+    onRefresh: loadAttendanceAlerts
   }), !attBlocked && attendanceSection === 'report' && /*#__PURE__*/React.createElement(AttendanceReportView, {
     shifts: attReportShifts,
     categories: attCategories,
@@ -24093,6 +24191,366 @@ function AttendanceReportView({
   }, /*#__PURE__*/React.createElement("b", null, "Reading this for payroll."), " Regular staff are on a fixed monthly salary — the column that matters is ", /*#__PURE__*/React.createElement("b", null, "Unpaid leave"), ", which is deducted outside this app. Part-time staff are paid per session, so theirs is ", /*#__PURE__*/React.createElement("b", null, "Attended"), ". Late and early-leave minutes are recorded for every session; whether any of them reduce pay is a decision you make per incident in the alerts, not something this report applies.")));
 }
 
+// ── Attendance: Alerts inbox ─────────────────────────────────────────────
+// Everything that needs a human decision. Late and early-leave are raised by
+// the punch function; absences and missed punches by the five-minute job.
+//
+// Resolving never erases what happened. The session keeps its status and its
+// recorded minutes; the alert gains a decision and a remark alongside them.
+// That is the §4 rule — "Late 12 min · No deduction · accident on Jalan Kuala
+// Kangsar" is the whole record, not a correction of it.
+function AttendanceAlertsView({
+  alerts,
+  shifts,
+  locations,
+  employees,
+  filter,
+  setFilter,
+  resolveAlert,
+  enterPunch,
+  onRefresh
+}) {
+  const [modal, setModal] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const empById = useMemo(() => {
+    const m = {};
+    (employees || []).forEach(e => {
+      m[e.id] = e;
+    });
+    return m;
+  }, [employees]);
+  const locById = useMemo(() => {
+    const m = {};
+    (locations || []).forEach(l => {
+      m[l.id] = l;
+    });
+    return m;
+  }, [locations]);
+  const shiftById = useMemo(() => {
+    const m = {};
+    (shifts || []).forEach(x => {
+      m[x.id] = x;
+    });
+    return m;
+  }, [shifts]);
+  const LABEL = {
+    late: 'Late check-in',
+    early_leave: 'Left early',
+    no_checkin: 'No check-in',
+    no_checkout: 'No check-out',
+    absent: 'Absent',
+    geofence: 'Wrong location'
+  };
+  // What resolving this alert actually involves. Missed punches need a time
+  // entered; the rest need a pay decision.
+  const NEEDS_TIME = {
+    no_checkin: 'in',
+    no_checkout: 'out'
+  };
+  const fmt = iso => new Date(iso).toLocaleString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+  const hhmm = t => String(t || '').slice(0, 5);
+  function open(a) {
+    const s = shiftById[a.shift_id] || {};
+    setModal({
+      a,
+      s,
+      pay_treatment: a.pay_treatment || 'none',
+      remark: a.remark || '',
+      time: NEEDS_TIME[a.type] === 'in' ? hhmm(s.start_time) : hhmm(s.end_time),
+      markAbsent: false,
+      markUnpaidLeave: false
+    });
+  }
+  async function submit() {
+    const {
+      a,
+      s
+    } = modal;
+    const remark = (modal.remark || '').trim();
+    const needsTime = NEEDS_TIME[a.type] && !modal.markAbsent;
+    // A manually entered punch is the one place an admin writes attendance
+    // history by hand, so the reason is not optional.
+    if (needsTime && !remark) {
+      alert('A remark is required when you enter a time by hand.');
+      return;
+    }
+    if (a.type === 'absent' && modal.markUnpaidLeave && !remark) {
+      alert('A remark is required for unpaid leave.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (needsTime) {
+        if (!modal.time) {
+          alert('Enter the time.');
+          setBusy(false);
+          return;
+        }
+        await enterPunch(s, NEEDS_TIME[a.type], modal.time, remark);
+      }
+      await resolveAlert(a, {
+        resolution_action: modal.markAbsent ? 'marked_absent' : needsTime ? 'time_entered' : 'reviewed',
+        pay_treatment: modal.pay_treatment,
+        remark: remark || null,
+        markAbsent: modal.markAbsent,
+        markUnpaidLeave: modal.markUnpaidLeave
+      });
+      setModal(null);
+    } catch (ex) {
+      alert(ex.message || 'Could not resolve that.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  const openCount = (alerts || []).filter(a => a.status === 'open').length;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 12,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "Alerts"), openCount > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "small",
+    style: {
+      background: '#FFF1F1',
+      color: '#DC2626',
+      border: '1px solid #FCA5A5',
+      borderRadius: 999,
+      padding: '1px 9px',
+      fontWeight: 800
+    }
+  }, openCount, " open"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 4
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `btn ${filter === 'open' ? 'btn-primary' : 'btn-ghost'} small`,
+    onClick: () => setFilter('open')
+  }, "Open"), /*#__PURE__*/React.createElement("button", {
+    className: `btn ${filter === 'resolved' ? 'btn-primary' : 'btn-ghost'} small`,
+    onClick: () => setFilter('resolved')
+  }, "Resolved")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: onRefresh
+  }, "↻ Refresh")), !(alerts || []).length && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      padding: '22px 0'
+    }
+  }, filter === 'open' ? 'Nothing needs attention. Alerts appear here when someone is late, leaves early, misses a punch or checks in from the wrong place.' : 'Nothing resolved yet.'), (alerts || []).map(a => {
+    const s = shiftById[a.shift_id] || {};
+    const emp = empById[a.crew_id] || {};
+    const loc = locById[s.location_id] || {};
+    const bad = a.type === 'absent' || a.type === 'no_checkin';
+    return /*#__PURE__*/React.createElement("div", {
+      key: a.id,
+      style: {
+        border: '1px solid var(--border)',
+        borderLeft: `5px solid ${bad ? '#DC2626' : '#B45309'}`,
+        borderRadius: 9,
+        padding: '10px 12px',
+        marginBottom: 8,
+        background: 'var(--surface)'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: 8,
+        flexWrap: 'wrap'
+      }
+    }, /*#__PURE__*/React.createElement("b", null, emp.full_name || 'Unknown worker'), /*#__PURE__*/React.createElement("span", {
+      className: "small",
+      style: {
+        fontWeight: 700,
+        color: bad ? '#DC2626' : '#B45309'
+      }
+    }, LABEL[a.type] || a.type), /*#__PURE__*/React.createElement("span", {
+      className: "small subtle"
+    }, s.shift_date || '', " · ", hhmm(s.start_time), "–", hhmm(s.end_time), " · ", loc.name || '—'), /*#__PURE__*/React.createElement("span", {
+      className: "small subtle",
+      style: {
+        marginLeft: 'auto'
+      }
+    }, "raised ", fmt(a.raised_at))), /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        marginTop: 4
+      }
+    }, s.late_min > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626',
+        fontWeight: 600
+      }
+    }, "Late ", s.late_min, " min"), s.late_min > 0 && s.early_min > 0 && /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, " · "), s.early_min > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626',
+        fontWeight: 600
+      }
+    }, "Left ", s.early_min, " min early")), a.status === 'open' ? /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-primary small",
+      style: {
+        marginTop: 8
+      },
+      onClick: () => open(a)
+    }, "Resolve…") : /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        marginTop: 6,
+        color: '#059669'
+      }
+    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered by admin' : a.resolution_action === 'marked_absent' ? 'Marked absent' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'), a.remark && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", /*#__PURE__*/React.createElement("i", null, a.remark))));
+  }), modal && (() => {
+    const t = modal.a.type,
+      needsTime = NEEDS_TIME[t] && !modal.markAbsent;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "modal-backdrop"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "modal-card"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "modal-head"
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        minWidth: 0,
+        flex: 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 13,
+        fontWeight: 800,
+        lineHeight: 1.1
+      }
+    }, "Resolve — ", LABEL[t] || t), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontSize: 10.5,
+        marginTop: 1
+      }
+    }, (empById[modal.a.crew_id] || {}).full_name, " · ", modal.s.shift_date, " ", hhmm(modal.s.start_time), "–", hhmm(modal.s.end_time))), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: () => setModal(null),
+      "aria-label": "Close"
+    }, "✕")), /*#__PURE__*/React.createElement("div", {
+      className: "modal-body"
+    }, t === 'absent' && /*#__PURE__*/React.createElement("label", {
+      className: "small",
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: modal.markUnpaidLeave,
+      onChange: e => setModal({
+        ...modal,
+        markUnpaidLeave: e.target.checked
+      })
+    }), "Mark as unpaid leave ", /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, "(counted in the report; deducted outside this app)")), NEEDS_TIME[t] && /*#__PURE__*/React.createElement("label", {
+      className: "small",
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: modal.markAbsent,
+      onChange: e => setModal({
+        ...modal,
+        markAbsent: e.target.checked
+      })
+    }), "They did not work this session — mark absent instead"), needsTime && /*#__PURE__*/React.createElement("div", {
+      className: "field"
+    }, /*#__PURE__*/React.createElement("label", null, NEEDS_TIME[t] === 'in' ? 'Check-in time' : 'Check-out time'), /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      type: "time",
+      value: modal.time,
+      onChange: e => setModal({
+        ...modal,
+        time: e.target.value
+      })
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        marginTop: 4
+      }
+    }, "Recorded as entered by you, with no location, and shown differently from a real punch.")), t !== 'absent' && /*#__PURE__*/React.createElement("div", {
+      className: "field"
+    }, /*#__PURE__*/React.createElement("label", null, "Pay treatment"), /*#__PURE__*/React.createElement("select", {
+      className: "input",
+      value: modal.pay_treatment,
+      onChange: e => setModal({
+        ...modal,
+        pay_treatment: e.target.value
+      })
+    }, /*#__PURE__*/React.createElement("option", {
+      value: "none"
+    }, "No deduction"), /*#__PURE__*/React.createElement("option", {
+      value: "half"
+    }, "Deduct half"), /*#__PURE__*/React.createElement("option", {
+      value: "full"
+    }, "Deduct full")), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        marginTop: 4
+      }
+    }, "Recorded now so the history is complete. Nothing is calculated from it until pay rates are set up.")), /*#__PURE__*/React.createElement("div", {
+      className: "field"
+    }, /*#__PURE__*/React.createElement("label", null, "Remark ", (needsTime || t === 'absent' && modal.markUnpaidLeave) && /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: '#DC2626'
+      }
+    }, "*")), /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      value: modal.remark,
+      autoFocus: true,
+      placeholder: "What happened, in your words",
+      onChange: e => setModal({
+        ...modal,
+        remark: e.target.value
+      })
+    })), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 8,
+        marginTop: 16
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-primary",
+      disabled: busy,
+      onClick: submit
+    }, busy ? 'Saving…' : 'Resolve'), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost",
+      onClick: () => setModal(null)
+    }, "Cancel")))));
+  })());
+}
+
 // ── Attendance: Locations ────────────────────────────────────────────────
 // Geofence centres for the punch Edge Function. Radius is deliberately tight:
 // a circle wide enough to cover a worker's home defeats the whole point, and
@@ -24544,12 +25002,14 @@ function AttendanceRosterView({
     className: "table"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
     style: {
-      minWidth: 140
+      minWidth: 130,
+      padding: '4px 6px'
     }
   }, "Worker"), days.map((d, i) => /*#__PURE__*/React.createElement("th", {
     key: d,
     style: {
-      minWidth: 138
+      minWidth: 138,
+      padding: '4px 6px'
     }
   }, DAY_NAMES[i], /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
@@ -24560,14 +25020,25 @@ function AttendanceRosterView({
     key: cid
   }, /*#__PURE__*/React.createElement("td", {
     style: {
-      fontWeight: 600
+      fontWeight: 600,
+      padding: '3px 6px'
     }
   }, (empById[cid] || {}).full_name || 'Unknown worker'), days.map(d => {
     const cell = (byCrew[cid] || []).filter(s => s.shift_date === d).sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
+    // The cell itself is the add target, with a faint + pinned in the
+    // corner so it costs no layout height. The old button sat on its own
+    // line under the cards and added a row to every single cell.
     return /*#__PURE__*/React.createElement("td", {
       key: d,
       style: {
-        verticalAlign: 'top'
+        verticalAlign: 'top',
+        position: 'relative',
+        padding: '3px 4px',
+        cursor: activeLocations.length ? 'pointer' : 'default'
+      },
+      title: activeLocations.length ? 'Add a session' : '',
+      onClick: () => {
+        if (activeLocations.length) openNew(cid, d);
       }
     }, cell.map(s => {
       // Two lines, never three: time and place up top, then category
@@ -24583,13 +25054,17 @@ function AttendanceRosterView({
       };
       return /*#__PURE__*/React.createElement("div", {
         key: s.id,
+        onClick: ev => {
+          ev.stopPropagation();
+          openEdit(s);
+        },
         style: {
           border: '1px solid var(--border)',
-          borderRadius: 7,
-          padding: '4px 7px',
-          marginBottom: 4,
+          borderRadius: 6,
+          padding: '2px 6px',
+          marginBottom: 3,
           background: 'var(--surface)',
-          lineHeight: 1.4
+          lineHeight: 1.35
         }
       }, /*#__PURE__*/React.createElement("div", {
         className: "small",
@@ -24612,24 +25087,32 @@ function AttendanceRosterView({
           ...lk,
           color: 'var(--primary-on-soft,#0369A1)'
         },
-        onClick: () => openEdit(s)
+        onClick: ev => {
+          ev.stopPropagation();
+          openEdit(s);
+        }
       }, "Edit"), /*#__PURE__*/React.createElement("span", null, " · "), /*#__PURE__*/React.createElement("button", {
         style: {
           ...lk,
           color: '#DC2626'
         },
-        onClick: () => {
+        onClick: ev => {
+          ev.stopPropagation();
           if (confirm('Void this session? It stays in the record.')) voidShift(s.id);
         }
       }, "Void")));
-    }), /*#__PURE__*/React.createElement("button", {
-      className: "btn btn-ghost small",
+    }), activeLocations.length > 0 && /*#__PURE__*/React.createElement("span", {
+      "aria-hidden": "true",
       style: {
-        padding: '1px 6px',
-        fontSize: 10
-      },
-      disabled: !activeLocations.length,
-      onClick: () => openNew(cid, d)
+        position: 'absolute',
+        top: 1,
+        right: 4,
+        fontSize: 12,
+        lineHeight: 1,
+        color: '#CBD5E1',
+        fontWeight: 800,
+        pointerEvents: 'none'
+      }
     }, "+"));
   })))))), modal && /*#__PURE__*/React.createElement("div", {
     className: "modal-backdrop"
