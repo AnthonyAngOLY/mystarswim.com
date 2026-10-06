@@ -183,6 +183,16 @@ Deno.serve(async (req) => {
     } else {
       if (!hasIn)  return json({ error: "Check in before you check out." }, 409);
       if (hasOut)  return json({ error: "You have already checked out for this session." }, 409);
+      // A check-out records when the tap happened, not when they left. Someone
+      // who finishes at 11:00 and remembers at 14:00 would bank three hours
+      // they did not work — and the geofence waves it through, because they
+      // may well still be at the pool for a later session. Past the grace
+      // window it goes to the admin, same as a missed check-in.
+      if (now > new Date(endsAt.getTime() + settings.no_checkout_alert_min * 60000)) {
+        return json({
+          error: "Too long after the session ended. Ask your admin to record your check-out time.",
+        }, 409);
+      }
     }
 
     // ── 6. Geofence ─────────────────────────────────────────────────────

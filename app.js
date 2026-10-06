@@ -12320,6 +12320,8 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
   // One line per session that went wrong, with whatever the worker said and
   // whatever was decided. This is the part a payroll argument actually turns
   // on, so it belongs in the same export-ready view as the totals.
+  const RLABEL = { sick:'Unwell', family:'Family emergency', transport:'Transport or traffic',
+                   venue:'Pool or venue problem', forgot:'Forgot to tap', other:'Something else' };
   const exceptions = useMemo(()=>{
     const byShift = {};
     (alerts||[]).forEach(a=>{
@@ -12333,7 +12335,7 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
         x.status==='incomplete' || x.is_unpaid_leave)
       .map(x=>{
         const as = byShift[x.id] || [];
-        const withReason = as.find(a=>a.worker_reason) || {};
+        const withReason = as.find(a=>a.worker_reason || a.worker_reason_code) || {};
         const resolved   = as.find(a=>a.status==='resolved') || {};
         let what='', tone='red';
         if(x.status==='absent')            what = x.is_unpaid_leave ? 'Absent · unpaid leave' : 'Absent';
@@ -12345,7 +12347,8 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
         return {
           id:x.id, date:x.shift_date, worker:(empById[x.crew_id]||{}).full_name || 'Unknown worker',
           what, tone, location:locName(x.location_id),
-          workerReason: withReason.worker_reason || null,
+          workerReason: [RLABEL[withReason.worker_reason_code], withReason.worker_reason]
+                          .filter(Boolean).join(' — ') || null,
           adminNote: resolved.remark || null,
           decision: DEC[x.pay_treatment || resolved.pay_treatment] || null
         };
@@ -12532,6 +12535,11 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
     late:'Late check-in', early_leave:'Left early', no_checkin:'No check-in',
     no_checkout:'No check-out', absent:'Absent', geofence:'Wrong location'
   };
+  // Mirrors the categories offered in the worker app.
+  const REASON_LABEL = {
+    sick:'Unwell', family:'Family emergency', transport:'Transport or traffic',
+    venue:'Pool or venue problem', forgot:'Forgot to tap', other:'Something else'
+  };
   // What resolving this alert actually involves. Missed punches need a time
   // entered; the rest need a pay decision.
   const NEEDS_TIME = { no_checkin:'in', no_checkout:'out' };
@@ -12616,7 +12624,8 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
         const mins = sh.late_min>0 && sh.early_min>0 ? ` ${sh.late_min}m/${sh.early_min}m`
                    : sh.late_min>0  ? ` ${sh.late_min}m`
                    : sh.early_min>0 ? ` ${sh.early_min}m` : '';
-        const reason = a.worker_reason || '';
+        const reason = [REASON_LABEL[a.worker_reason_code], a.worker_reason]
+                         .filter(Boolean).join(' — ');
         const note   = a.remark || '';
         return <tr key={a.id} style={a.status==='open'&&bad?{background:'#FFF7F7'}:undefined}>
           <td style={{fontWeight:600,borderLeft:`3px solid ${bad?'#DC2626':'#B45309'}`}}>
@@ -12706,9 +12715,15 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
               from it until pay rates are set up.
             </div></div>}
 
-          {modal.a.worker_reason && <div className="field"><label>Their reason</label>
-            <div className="small" style={{padding:'7px 10px',background:'#F8FAFC',
-                 border:'1px solid var(--border)',borderRadius:8}}><i>{modal.a.worker_reason}</i></div>
+          {(modal.a.worker_reason || modal.a.worker_reason_code) &&
+            <div className="field"><label>Their reason</label>
+              <div className="small" style={{padding:'7px 10px',background:'#F8FAFC',
+                   border:'1px solid var(--border)',borderRadius:8}}>
+                {REASON_LABEL[modal.a.worker_reason_code] &&
+                  <b>{REASON_LABEL[modal.a.worker_reason_code]}</b>}
+                {modal.a.worker_reason && <> {modal.a.worker_reason_code ? '— ' : ''}
+                  <i>{modal.a.worker_reason}</i></>}
+              </div>
             </div>}
 
           <div className="field"><label>

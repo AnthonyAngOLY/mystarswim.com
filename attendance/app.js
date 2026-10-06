@@ -178,12 +178,14 @@
 
   // How long a worker has to correct a reason, set by the admin.
   var reasonWindowMin = 2;
+  var checkoutGraceMin = 30;
   function loadSettings() {
-    return api('/rest/v1/attendance_settings?select=reason_edit_window_min')
+    return api('/rest/v1/attendance_settings?select=reason_edit_window_min,no_checkout_alert_min,timezone')
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (rows) {
-        if (rows && rows[0] && rows[0].reason_edit_window_min != null) {
-          reasonWindowMin = rows[0].reason_edit_window_min;
+        if (rows && rows[0]) {
+          if (rows[0].reason_edit_window_min != null) reasonWindowMin = rows[0].reason_edit_window_min;
+          if (rows[0].no_checkout_alert_min != null) checkoutGraceMin = rows[0].no_checkout_alert_min;
         }
       }).catch(function () {});
   }
@@ -281,7 +283,7 @@
 
     $('todayList').innerHTML = shifts.map(function (s) {
       var p = byShift[s.id] || {};
-      var stage = !p['in'] ? 'in' : !p['out'] ? 'out' : 'done';
+      var stage = buttonStage(s, p);
       var loc = (s.locations && s.locations.name) || 'Location';
       var cat = (s.shift_categories && s.shift_categories.name) || '';
       var mates = buddyBy[s.id] || [];
@@ -296,11 +298,11 @@
       // Blue to start, green once they are in and the only thing left is to
       // check out, grey when the session is done. The colour alone tells a
       // worker where they are in the session from across the pool deck.
-      var btn = stage === 'done'
-        ? '<button class="btn done" disabled>Done</button>'
-        : '<button class="btn' + (stage === 'out' ? ' go' : '') + '"'
-          + ' data-punch="' + s.id + '" data-type="' + stage + '">'
-          + (stage === 'in' ? 'Check in' : 'Check out') + '</button>';
+      var btn = stage === 'done'      ? '<button class="btn done" disabled>Done</button>'
+              : CLOSED_NOTE[stage]  ? '<div class="closed-note">' + esc(CLOSED_NOTE[stage]) + '</div>'
+              : '<button class="btn' + (stage === 'out' ? ' go' : '') + '"'
+                + ' data-punch="' + s.id + '" data-type="' + stage + '">'
+                + (stage === 'in' ? 'Check in' : 'Check out') + '</button>';
 
       return ''
         + '<div class="card s-' + esc(s.status) + '" id="card-' + esc(s.id) + '">'
@@ -344,6 +346,26 @@
   // Being late is something only the person who was late can explain. Rather
   // than an admin chasing them for it, they write it here and the admin only
   // decides whether it stands.
+  // A short, neutral list. A long menu of excuses invites picking the softest
+  // one; the pay decision stays with the admin either way. "Forgot to tap" is
+  // offered only where a punch was genuinely missed, never for an absence.
+  var REASONS = {
+    sick:      'Unwell',
+    family:    'Family emergency',
+    transport: 'Transport or traffic',
+    venue:     'Pool or venue problem',
+    forgot:    'Forgot to tap',
+    other:     'Something else'
+  };
+  var REASON_SETS = {
+    late:        ['transport','family','sick','venue','other'],
+    early_leave: ['sick','family','venue','other'],
+    absent:      ['sick','family','transport','other'],
+    no_checkin:  ['forgot','transport','sick','family','other'],
+    no_checkout: ['forgot','venue','other'],
+    geofence:    ['venue','other']
+  };
+
   var ALERT_ASK = {
     late:        'You were marked late.',
     early_leave: 'You left before the session ended.',
@@ -372,10 +394,11 @@
     return list.map(function (a) {
       var ask = esc(ALERT_ASK[a.type] || 'Needs an explanation.');
 
-      if (!a.worker_reason) {
+      if (!a.worker_reason && !a.worker_reason_code) {
         return '<div class="explain" data-alert="' + esc(a.id) + '">'
           + '<div class="ask">' + ask + '</div>'
-          + '<textarea class="reason" rows="2" placeholder="What happened?"></textarea>'
+          + reasonChips(a)
+          + '<textarea class="reason" rows="2" placeholder="Anything to add? (optional)"></textarea>'
           + '<button class="btn small-btn" data-send="' + esc(a.id) + '">Send reason</button>'
           + '<div class="hint">You can change this for ' + reasonWindowMin
           + ' minutes after sending.</div>'
@@ -383,9 +406,10 @@
       }
 
       var left = secondsLeft(a);
+      var said = [REASONS[a.worker_reason_code], a.worker_reason].filter(Boolean).join(' — ');
       return '<div class="explain done" data-alert="' + esc(a.id) + '">'
         + '<div class="ask">' + ask + '</div>'
-        + '<div class="said">You said: <i>' + esc(a.worker_reason) + '</i></div>'
+        + '<div class="said">You said: <i>' + esc(said) + '</i></div>'
         + (left > 0
             ? '<button class="btn small-btn edit" data-edit="' + esc(a.id) + '">Change</button>'
               + '<div class="hint">Locked in <b data-countdown="' + esc(a.id) + '">'
@@ -393,6 +417,16 @@
             : '<div class="hint">Sent to your admin.</div>')
         + '</div>';
     }).join('');
+  }
+
+  // One tap is the whole interaction for most people; the text box is there
+  // for when it is not.
+  function reasonChips(a, selected) {
+    var codes = REASON_SETS[a.type] || ['other'];
+    return '<div class="chips">' + codes.map(function (c) {
+      return '<button type="button" class="chip' + (c === selected ? ' on' : '') + '"'
+        + ' data-code="' + c + '">' + esc(REASONS[c]) + '</button>';
+    }).join('') + '</div>';
   }
 
   // Swap the box back to an editable field, keeping what they wrote.
@@ -403,6 +437,7 @@
     if (!box) return;
     box.classList.remove('done');
     box.innerHTML = '<div class="ask">' + esc(ALERT_ASK[a.type] || 'Needs an explanation.') + '</div>'
+      + reasonChips(a, a.worker_reason_code)
       + '<textarea class="reason" rows="2"></textarea>'
       + '<button class="btn small-btn" data-send="' + esc(id) + '">Save change</button>'
       + '<div class="hint">Locked in <b data-countdown="' + esc(id) + '">'
@@ -434,14 +469,44 @@
 
   // Used by Today, History, and a box re-opened for editing.
   function wireExplain(root) {
+    Array.prototype.forEach.call(root.querySelectorAll('.chip'), function (c) {
+      c.addEventListener('click', function () {
+        var box = c.closest('.explain');
+        var was = c.classList.contains('on');
+        Array.prototype.forEach.call(box.querySelectorAll('.chip'), function (x) {
+          x.classList.remove('on');
+        });
+        if (!was) c.classList.add('on');
+        // "Something else" says nothing on its own, so ask for words.
+        var ta = box.querySelector('textarea');
+        var needsWords = !was && c.getAttribute('data-code') === 'other';
+        ta.placeholder = needsWords ? 'What happened?' : 'Anything to add? (optional)';
+        if (needsWords) ta.focus();
+      });
+    });
+
     Array.prototype.forEach.call(root.querySelectorAll('[data-send]'), function (b) {
       b.addEventListener('click', function () {
         var box = b.closest('.explain'), ta = box.querySelector('textarea');
         var text = (ta.value || '').trim();
-        if (!text) { ta.focus(); return; }
+        var chip = box.querySelector('.chip.on');
+        var code = chip ? chip.getAttribute('data-code') : null;
+        var err  = box.querySelector('.hint.err');
+        if (err) err.remove();
+        if (!code && !text) {
+          box.insertAdjacentHTML('beforeend',
+            '<div class="hint err">Pick a reason, or type what happened.</div>');
+          return;
+        }
+        if (code === 'other' && !text) { ta.focus(); 
+          box.insertAdjacentHTML('beforeend',
+            '<div class="hint err">Tell us what happened.</div>');
+          return;
+        }
         var label = b.textContent;
         b.disabled = true; b.textContent = 'Sending…';
-        rpc('set_my_alert_reason', { p_alert_id: b.getAttribute('data-send'), p_reason: text })
+        rpc('set_my_alert_reason', { p_alert_id: b.getAttribute('data-send'),
+                                     p_reason: text || null, p_code: code })
           .then(function () { refreshViews(); })
           .catch(function (e) {
             b.disabled = false; b.textContent = label;
@@ -460,6 +525,32 @@
   function refreshViews() {
     if (!$('viewHistory').classList.contains('hidden')) loadHistory();
     else loadToday();
+  }
+
+  // What the card should offer. Previously this read the punches alone, so a
+  // session already marked absent still showed a live Check in — the worker
+  // tapped it and the server refused. A button that cannot work should not be
+  // there at all.
+  function buttonStage(s, p) {
+    var ended = minutesPastEnd(s);
+    if (s.status === 'absent') return 'absent';
+    if (!p['in'])  return ended > 0 ? 'missed_in' : 'in';
+    if (!p['out']) return ended > checkoutGraceMin ? 'missed_out' : 'out';
+    return 'done';
+  }
+  // Say what specifically is closed. "Nothing more to do" reads as a
+  // contradiction next to a box still asking for a reason.
+  var CLOSED_NOTE = {
+    absent:     'Marked absent. Your admin will close this.',
+    missed_in:  'Too late to check in. Your admin will record this.',
+    missed_out: 'Too late to check out. Your admin will record your time.'
+  };
+  // Minutes since the session's end, in the pool's timezone.
+  function minutesPastEnd(s) {
+    var t = String(s.end_time).split(':');
+    var end = new Date(s.shift_date + 'T'
+      + String(t[0]).padStart(2, '0') + ':' + String(t[1]).padStart(2, '0') + ':00+08:00');
+    return (Date.now() - end.getTime()) / 60000;
   }
 
   function fmtClock(iso) {

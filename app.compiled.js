@@ -24009,6 +24009,14 @@ function AttendanceReportView({
   // One line per session that went wrong, with whatever the worker said and
   // whatever was decided. This is the part a payroll argument actually turns
   // on, so it belongs in the same export-ready view as the totals.
+  const RLABEL = {
+    sick: 'Unwell',
+    family: 'Family emergency',
+    transport: 'Transport or traffic',
+    venue: 'Pool or venue problem',
+    forgot: 'Forgot to tap',
+    other: 'Something else'
+  };
   const exceptions = useMemo(() => {
     const byShift = {};
     (alerts || []).forEach(a => {
@@ -24023,7 +24031,7 @@ function AttendanceReportView({
     };
     return (shifts || []).filter(x => x.status === 'absent' || x.late_min > 0 || x.early_min > 0 || x.status === 'incomplete' || x.is_unpaid_leave).map(x => {
       const as = byShift[x.id] || [];
-      const withReason = as.find(a => a.worker_reason) || {};
+      const withReason = as.find(a => a.worker_reason || a.worker_reason_code) || {};
       const resolved = as.find(a => a.status === 'resolved') || {};
       let what = '',
         tone = 'red';
@@ -24041,7 +24049,7 @@ function AttendanceReportView({
         what,
         tone,
         location: locName(x.location_id),
-        workerReason: withReason.worker_reason || null,
+        workerReason: [RLABEL[withReason.worker_reason_code], withReason.worker_reason].filter(Boolean).join(' — ') || null,
         adminNote: resolved.remark || null,
         decision: DEC[x.pay_treatment || resolved.pay_treatment] || null
       };
@@ -24430,6 +24438,15 @@ function AttendanceAlertsView({
     absent: 'Absent',
     geofence: 'Wrong location'
   };
+  // Mirrors the categories offered in the worker app.
+  const REASON_LABEL = {
+    sick: 'Unwell',
+    family: 'Family emergency',
+    transport: 'Transport or traffic',
+    venue: 'Pool or venue problem',
+    forgot: 'Forgot to tap',
+    other: 'Something else'
+  };
   // What resolving this alert actually involves. Missed punches need a time
   // entered; the rest need a pay decision.
   const NEEDS_TIME = {
@@ -24576,7 +24593,7 @@ function AttendanceAlertsView({
     const bad = a.type === 'absent' || a.type === 'no_checkin';
     // The minutes belong next to the label, not on their own line.
     const mins = sh.late_min > 0 && sh.early_min > 0 ? ` ${sh.late_min}m/${sh.early_min}m` : sh.late_min > 0 ? ` ${sh.late_min}m` : sh.early_min > 0 ? ` ${sh.early_min}m` : '';
-    const reason = a.worker_reason || '';
+    const reason = [REASON_LABEL[a.worker_reason_code], a.worker_reason].filter(Boolean).join(' — ');
     const note = a.remark || '';
     return /*#__PURE__*/React.createElement("tr", {
       key: a.id,
@@ -24750,7 +24767,7 @@ function AttendanceAlertsView({
       style: {
         marginTop: 4
       }
-    }, "Recorded now so the history is complete. Nothing is calculated from it until pay rates are set up.")), modal.a.worker_reason && /*#__PURE__*/React.createElement("div", {
+    }, "Recorded now so the history is complete. Nothing is calculated from it until pay rates are set up.")), (modal.a.worker_reason || modal.a.worker_reason_code) && /*#__PURE__*/React.createElement("div", {
       className: "field"
     }, /*#__PURE__*/React.createElement("label", null, "Their reason"), /*#__PURE__*/React.createElement("div", {
       className: "small",
@@ -24760,7 +24777,7 @@ function AttendanceAlertsView({
         border: '1px solid var(--border)',
         borderRadius: 8
       }
-    }, /*#__PURE__*/React.createElement("i", null, modal.a.worker_reason))), /*#__PURE__*/React.createElement("div", {
+    }, REASON_LABEL[modal.a.worker_reason_code] && /*#__PURE__*/React.createElement("b", null, REASON_LABEL[modal.a.worker_reason_code]), modal.a.worker_reason && /*#__PURE__*/React.createElement(React.Fragment, null, " ", modal.a.worker_reason_code ? '— ' : '', /*#__PURE__*/React.createElement("i", null, modal.a.worker_reason)))), /*#__PURE__*/React.createElement("div", {
       className: "field"
     }, /*#__PURE__*/React.createElement("label", null, "Your note ", (needsTime || t === 'absent' && modal.markUnpaidLeave) && /*#__PURE__*/React.createElement("span", {
       style: {
