@@ -292,11 +292,17 @@
       var elsewhere = myAlerts.filter(function (a) {
         return !a.worker_reason && todayIds.indexOf(a.shift_id) === -1;
       }).length;
+      // punch() writes its green confirmation here and then calls this, so
+      // rebuilding the box blindly wiped it within the second: the worker
+      // taps, sees the line flash, and taps again to be sure it took. Carry
+      // it over, above whatever else needs saying.
+      var confirmed = $('punchMsg').querySelector('.note.ok');
       $('punchMsg').innerHTML = elsewhere
         ? '<div class="note info">' + elsewhere + ' earlier session'
           + (elsewhere === 1 ? '' : 's') + ' still need'
           + (elsewhere === 1 ? 's' : '') + ' a reason — see <b>History</b>.</div>'
         : '';
+      if (confirmed) $('punchMsg').insertBefore(confirmed, $('punchMsg').firstChild);
 
       if (!todayShifts.length) {
         $('todayList').innerHTML = '<p class="empty">No sessions scheduled today.</p>';
