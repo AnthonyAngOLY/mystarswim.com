@@ -12,8 +12,9 @@
 --     it into payroll would be worse than losing it. Do not reuse this script
 --     as a way to tidy up live data later: void the rows instead.
 --
--- Nothing here touches the schema, your locations, your staff logins or the
--- Crew records. Those are set up once and kept.
+-- Nothing here touches the schema, your locations, your staff logins, the
+-- passwords workers have set, or the Crew records. Those are set up once and
+-- kept. STEP 1 counts them so you can see them survive.
 --
 -- HOW TO USE
 --   1. Run STEP 1 on its own and read the counts.
@@ -26,8 +27,16 @@
 select 'punches'      as table_name, count(*) as rows_to_delete from punches
 union all select 'alerts',   count(*) from alerts
 union all select 'shifts',   count(*) from shifts
+union all select 'shift_patterns', count(*) from shift_patterns
 union all select 'audit_log (attendance rows only)', count(*)
   from audit_log where table_name in ('shifts','punches','alerts')
+order by 1;
+
+-- And what is deliberately being KEPT, so there are no surprises on Monday:
+select 'locations (kept)' as table_name, count(*) as rows_kept from locations
+union all select 'staff logins (kept)', count(*) from admin_employees where auth_user_id is not null
+union all select 'password state (kept)', count(*) from attendance_password_state
+union all select 'PDPA consents (kept)', count(*) from attendance_consents
 order by 1;
 
 -- Also worth a look before you wipe: what the trial actually recorded.
@@ -54,6 +63,10 @@ delete from punches;
 delete from alerts;
 delete from shifts;
 
+-- Empty in practice — the repeating roster writes real sessions rather than
+-- patterns — but cleared too, so nothing from the trial can seed live weeks.
+delete from shift_patterns;
+
 -- Drop the history the trial generated, but leave any other table's audit
 -- rows alone — this log is shared.
 delete from audit_log where table_name in ('shifts','punches','alerts');
@@ -69,6 +82,7 @@ commit;
 select 'punches' as table_name, count(*) as remaining from punches
 union all select 'alerts',   count(*) from alerts
 union all select 'shifts',   count(*) from shifts
+union all select 'shift_patterns', count(*) from shift_patterns
 union all select 'audit_log (attendance rows only)', count(*)
   from audit_log where table_name in ('shifts','punches','alerts')
 order by 1;
