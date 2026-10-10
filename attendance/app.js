@@ -17,6 +17,11 @@
   var TZ = 'Asia/Kuala_Lumpur';
   var EMAIL_DOMAIN = 'staff.mystarswim.internal';
   var STORE_KEY = 'ssb.attendance.session';
+  // Kept apart from the session: the staff ID outlives a sign-out, the
+  // tokens must not.
+  var ID_KEY    = 'ssb.attendance.staff_id';
+  var KEEP_KEY  = 'ssb.attendance.keep';
+  var KEEP_DAYS = 90;
 
   // ── Session storage ────────────────────────────────────────────────────
   // "Keep me logged in" decides persistent vs session storage. Both are read
@@ -36,7 +41,16 @@
       if (raw) { store = window.sessionStorage; }
     }
     if (!raw) return null;
-    try { return JSON.parse(raw); } catch (e) { return null; }
+    var s;
+    try { s = JSON.parse(raw); } catch (e) { return null; }
+    // The checkbox promises 90 days. localStorage would otherwise keep it for
+    // ever, so the promise is kept here rather than left to the browser.
+    if (s && s.persistent && s.saved_at &&
+        Date.now() - s.saved_at > KEEP_DAYS * 86400000) {
+      clearSession();
+      return null;
+    }
+    return s;
   }
   function clearSession() {
     try { window.localStorage.removeItem(STORE_KEY); } catch (e) {}
@@ -44,7 +58,43 @@
     store = null;
   }
 
-  var session = null;   // { access_token, refresh_token, persistent }
+  // The staff ID is not a secret, and typing it on a wet poolside phone is the
+  // slowest part of signing in. It survives sign-out; the password never
+  // touches our storage and is left to the browser's own manager.
+  function rememberStaffId(id, keep) {
+    try {
+      window.localStorage.setItem(ID_KEY, id);
+      window.localStorage.setItem(KEEP_KEY, keep ? '1' : '0');
+    } catch (e) { /* private mode */ }
+  }
+
+  function prefillLogin() {
+    var id = null, keep = null;
+    try {
+      id = window.localStorage.getItem(ID_KEY);
+      keep = window.localStorage.getItem(KEEP_KEY);
+    } catch (e) {}
+    if (keep !== null) $('keepMe').checked = keep === '1';
+    // Only into an empty field. The browser may have autofilled an ID and a
+    // password as a matched pair, and replacing half of it breaks the other.
+    if (id && !$('staffId').value) {
+      $('staffId').value = id;
+      try { $('password').focus(); } catch (e) {}
+    }
+  }
+
+  // Chrome and Safari will usually notice a submitted login form on their own.
+  // This says it outright where the API exists, so the offer to save does not
+  // rest on a heuristic. Everywhere else it is a no-op.
+  function offerCredentialSave(id, password) {
+    try {
+      if (!navigator.credentials || !window.PasswordCredential) return;
+      var c = new window.PasswordCredential({ id: id, password: password, name: id });
+      navigator.credentials.store(c).catch(function () {});
+    } catch (e) { /* unsupported, or blocked by policy */ }
+  }
+
+  var session = null;   // { access_token, refresh_token, persistent, saved_at }
   var profile = null;   // { crew_id, full_name, staff_id, consented_at }
 
   // ── Helpers ────────────────────────────────────────────────────────────
@@ -142,7 +192,10 @@
       session = {
         access_token: d.access_token,
         refresh_token: d.refresh_token,
-        persistent: !!persistent
+        persistent: !!persistent,
+        // Set once, at sign-in. Refreshing the token does not restart the 90
+        // days, or a worker who opens the app daily would never sign in again.
+        saved_at: Date.now()
       };
       saveSession(session, persistent);
     });
@@ -155,12 +208,13 @@
     hide($('appScreen')); hide($('consentScreen')); hide($('passwordScreen'));
     show($('loginScreen'));
     $('password').value = '';
+    prefillLogin();
   }
 
   // ── Boot ───────────────────────────────────────────────────────────────
   function boot() {
     session = loadSession();
-    if (!session || !session.access_token) { show($('loginScreen')); return; }
+    if (!session || !session.access_token) { show($('loginScreen')); prefillLogin(); return; }
     loadProfile().catch(function () { signOut(); });
   }
 
@@ -197,6 +251,7 @@
     if (!profile || !profile.must_change_password || pwOffered) return false;
     pwOffered = true;
     hide($('loginScreen')); hide($('consentScreen')); hide($('appScreen'));
+    $('pwUser').value = profile.staff_id || '';
     show($('passwordScreen'));
     return true;
   }
@@ -695,7 +750,14 @@
     e.preventDefault();
     var btn = $('loginBtn'), err = $('loginError');
     hide(err); btn.disabled = true; btn.textContent = 'Signing in…';
-    doLogin($('staffId').value, $('password').value, $('keepMe').checked)
+    var id = $('staffId').value.trim(), pw = $('password').value, keep = $('keepMe').checked;
+    doLogin(id, pw, keep)
+      .then(function () {
+        // Only once the credentials are known good — no point remembering a
+        // staff ID that was mistyped, or offering to save a wrong password.
+        rememberStaffId(id, keep);
+        offerCredentialSave(id, pw);
+      })
       .then(loadProfile)
       .catch(function (ex) {
         err.textContent = ex.message; show(err);
@@ -735,6 +797,7 @@
         .then(function (d) { if (!r.ok) throw new Error(d.error || 'Could not save that.'); });
     }).then(function () {
       profile.must_change_password = false;
+      offerCredentialSave(profile.staff_id || $('pwUser').value, a);
       $('curPw').value = $('newPw').value = $('newPw2').value = '';
       enterApp();
     }).catch(function (ex) {

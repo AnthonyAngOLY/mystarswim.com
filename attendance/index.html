@@ -184,12 +184,16 @@
     <img src="./logo.png" alt="Star Swim" style="height:44px;margin-bottom:18px" />
     <h1>Attendance</h1>
     <p class="sub">Sign in with your staff ID.</p>
-    <form id="loginForm" autocomplete="on">
+    <!-- method="post" so that, in the event the script fails to load and the
+         browser submits the form itself, the password is not put in the URL.
+         The name attributes are what password managers key on; without them
+         the save prompt is hit and miss. -->
+    <form id="loginForm" method="post" autocomplete="on">
       <label for="staffId">Staff ID</label>
-      <input id="staffId" type="text" inputmode="text" autocapitalize="characters"
+      <input id="staffId" name="username" type="text" inputmode="text" autocapitalize="characters"
              autocomplete="username" placeholder="SS-012" required />
       <label for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password" required />
+      <input id="password" name="password" type="password" autocomplete="current-password" required />
       <div class="check">
         <input id="keepMe" type="checkbox" checked />
         <label for="keepMe" style="margin:0;font-weight:500">Keep me logged in for 90 days</label>
@@ -223,13 +227,18 @@
   <main>
     <h1>Set your own password</h1>
     <p class="sub">You can do this once. After that, ask your admin for a new one.</p>
-    <form id="passwordForm" autocomplete="off">
+    <!-- Left open to the password manager on purpose: a worker who lets the
+         browser save the password their admin issued must have it updated
+         here, or autofill keeps handing back the one that no longer works.
+         The hidden staff ID tells the manager which account is changing. -->
+    <form id="passwordForm" method="post" autocomplete="on">
+      <input id="pwUser" name="username" type="text" autocomplete="username" hidden />
       <label for="curPw">Password your admin gave you</label>
-      <input id="curPw" type="password" autocomplete="current-password" required />
+      <input id="curPw" name="current-password" type="password" autocomplete="current-password" required />
       <label for="newPw">New password</label>
-      <input id="newPw" type="password" autocomplete="new-password" required />
+      <input id="newPw" name="new-password" type="password" autocomplete="new-password" required />
       <label for="newPw2">New password again</label>
-      <input id="newPw2" type="password" autocomplete="new-password" required />
+      <input id="newPw2" name="new-password-confirm" type="password" autocomplete="new-password" required />
       <div id="pwHint" class="note info" style="font-size:13px">
         At least 8 characters. Write it down somewhere safe — nobody can look
         it up for you.
