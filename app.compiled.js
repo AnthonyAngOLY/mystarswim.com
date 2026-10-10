@@ -25518,7 +25518,7 @@ function AttendanceRosterView({
     })
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "Choose…"), (employees || []).map(e => /*#__PURE__*/React.createElement("option", {
+  }, "Choose…"), (employees || []).filter(e => !e.archived_at || e.id === modal.crew_id).map(e => /*#__PURE__*/React.createElement("option", {
     key: e.id,
     value: e.id
   }, e.full_name)))), /*#__PURE__*/React.createElement("div", {
@@ -25771,6 +25771,78 @@ function CrewLoginModal({
 }
 
 // ── Crew (Employees) ─────────────────────────────────────────────────────
+// Archiving is the gentle end of a crew record: the person goes off the
+// roster, everything recorded against them stays. The one thing it must not
+// do quietly is leave a leaver able to sign in and punch, so that choice is
+// put in front of whoever is archiving rather than assumed either way.
+function ArchiveCrewModal({
+  employee,
+  busy,
+  onArchive,
+  onClose
+}) {
+  const hasLogin = !!employee.auth_user_id;
+  const [removeLogin, setRemoveLogin] = useState(hasLogin);
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card",
+    onClick: e => e.stopPropagation(),
+    style: {
+      maxWidth: 460
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 17,
+      marginBottom: 4
+    }
+  }, "🗄 Archive ", employee.full_name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12
+    }
+  }, "Their record stays exactly as it is — attendance history, dates worked, position and banking details are all kept, and their name still shows on every past session and report. They simply leave the crew roster and can no longer be picked for a session. You can restore them at any time."), hasLogin && /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'flex-start',
+      background: '#FEF3C7',
+      border: '1px solid #FDE68A',
+      borderRadius: 8,
+      padding: '9px 11px',
+      marginBottom: 12,
+      cursor: 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: removeLogin,
+    onChange: e => setRemoveLogin(e.target.checked),
+    style: {
+      marginTop: 2
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "small",
+    style: {
+      color: '#92400E'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Also remove their attendance login (", employee.staff_id || '—', ")."), " They can sign in and check themselves into sessions until this is done. Their punches and alerts are not touched.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      justifyContent: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    disabled: busy,
+    onClick: onClose
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy,
+    onClick: () => onArchive(employee, removeLogin)
+  }, busy ? 'Archiving…' : 'Archive'))));
+}
 function AdminCrewView({
   employees,
   saveEmployee,
@@ -25792,10 +25864,15 @@ function AdminCrewView({
   // Canonical column set — export headers, template headers and import
   // parsing all share this list so export → edit → import round-trips.
   const CREW_FIELDS = ['full_name', 'emp_no', 'ic_no', 'position', 'department', 'employment_type', 'start_date', 'status', 'phone', 'email', 'emergency_name', 'emergency_phone', 'bank_name', 'bank_account', 'notes'];
+
+  // Export only — import maps CREW_FIELDS, so this column rides out and is
+  // ignored on the way back in, which is what we want: archiving is done in
+  // the app, not by editing a spreadsheet.
+  const EXPORT_FIELDS = CREW_FIELDS.concat(['archived_at']);
   function exportRows() {
     return (employees || []).map(e => {
       const r = {};
-      CREW_FIELDS.forEach(f => {
+      EXPORT_FIELDS.forEach(f => {
         r[f] = e[f] ?? '';
       });
       return r;
@@ -25810,7 +25887,7 @@ function AdminCrewView({
       const s = String(v ?? '');
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
-    const csv = [CREW_FIELDS.join(',')].concat(rows.map(r => CREW_FIELDS.map(f => esc(r[f])).join(','))).join('\n');
+    const csv = [EXPORT_FIELDS.join(',')].concat(rows.map(r => EXPORT_FIELDS.map(f => esc(r[f])).join(','))).join('\n');
     const blob = new Blob(['\ufeff' + csv], {
       type: 'text/csv;charset=utf-8'
     });
@@ -25826,9 +25903,9 @@ function AdminCrewView({
       return;
     }
     const ws = XLSX.utils.json_to_sheet(exportRows(), {
-      header: CREW_FIELDS
+      header: EXPORT_FIELDS
     });
-    ws['!cols'] = CREW_FIELDS.map(f => ({
+    ws['!cols'] = EXPORT_FIELDS.map(f => ({
       wch: Math.max(12, f.length + 2)
     }));
     const wb = XLSX.utils.book_new();
@@ -25964,17 +26041,71 @@ function AdminCrewView({
       setImportBusy(false);
     }
   }
+
+  // Archived crew are still records — history, banking, dates worked — they
+  // are just not part of the working roster any more.
+  //
+  // PostgREST returns every column, so the key is present (as null) the moment
+  // the migration has run and absent until then. Without that check the first
+  // archive would remove a login and then fail to write the date, leaving a
+  // worker locked out and still on the roster — worse than not offering it.
+  const archiveReady = (employees || []).some(e => Object.prototype.hasOwnProperty.call(e, 'archived_at'));
+  const live = useMemo(() => (employees || []).filter(e => !e.archived_at), [employees]);
+  const archived = useMemo(() => (employees || []).filter(e => !!e.archived_at), [employees]);
+  const showingArchive = statusFilter === 'archived';
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    let rows = (employees || []).slice();
-    if (statusFilter !== 'all') rows = rows.filter(e => e.status === statusFilter);
+    let rows = showingArchive ? archived.slice() : live.slice();
+    if (statusFilter !== 'all' && !showingArchive) rows = rows.filter(e => e.status === statusFilter);
     if (term) rows = rows.filter(e => (e.full_name || '').toLowerCase().includes(term) || (e.emp_no || '').toLowerCase().includes(term) || (e.position || '').toLowerCase().includes(term) || (e.department || '').toLowerCase().includes(term) || (e.phone || '').toLowerCase().includes(term) || (e.email || '').toLowerCase().includes(term));
     return rows;
-  }, [employees, q, statusFilter]);
+  }, [live, archived, q, statusFilter, showingArchive]);
   const counts = {
-    active: (employees || []).filter(e => e.status === 'Active').length,
-    inactive: (employees || []).filter(e => e.status === 'Inactive').length
+    active: live.filter(e => e.status === 'Active').length,
+    inactive: live.filter(e => e.status === 'Inactive').length,
+    archived: archived.length
   };
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  // Archiving a leaver who can still sign in would leave a door open, so the
+  // login is dealt with in the same breath rather than left for later.
+  async function doArchive(emp, alsoRemoveLogin) {
+    setArchiveBusy(true);
+    try {
+      if (alsoRemoveLogin && emp.auth_user_id) await unlinkLogin(emp.id);
+      await saveEmployee({
+        archived_at: new Date().toISOString()
+      }, emp.id);
+      setModal(null);
+    } catch (err) {
+      alert(err.message || 'Could not archive this record.');
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+  // Back to Inactive, never straight to Active: returning someone to the
+  // roster should be a decision somebody makes on purpose.
+  async function doRestore(emp) {
+    try {
+      await saveEmployee({
+        archived_at: null,
+        status: 'Inactive'
+      }, emp.id);
+    } catch (err) {
+      alert(err.message || 'Could not restore this record.');
+    }
+  }
+  function archivedOn(e) {
+    if (!e.archived_at) return '';
+    try {
+      return new Date(e.archived_at).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+      });
+    } catch (_) {
+      return String(e.archived_at).slice(0, 10);
+    }
+  }
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 1120,
@@ -26009,7 +26140,7 @@ function AdminCrewView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "small subtle"
-  }, /*#__PURE__*/React.createElement("strong", null, counts.active), " active · ", /*#__PURE__*/React.createElement("strong", null, counts.inactive), " inactive"), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("strong", null, counts.active), " active · ", /*#__PURE__*/React.createElement("strong", null, counts.inactive), " inactive", counts.archived > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", /*#__PURE__*/React.createElement("strong", null, counts.archived), " archived")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     title: "Download all crew records as CSV",
     onClick: exportCSV
@@ -26078,18 +26209,36 @@ function AdminCrewView({
   }), /*#__PURE__*/React.createElement("button", {
     className: `btn small ${statusFilter === 'all' ? 'btn-primary' : 'btn-ghost'}`,
     onClick: () => setStatusFilter('all')
-  }, "All (", (employees || []).length, ")"), /*#__PURE__*/React.createElement("button", {
+  }, "All (", live.length, ")"), /*#__PURE__*/React.createElement("button", {
     className: `btn small ${statusFilter === 'Active' ? 'btn-primary' : 'btn-ghost'}`,
     onClick: () => setStatusFilter('Active')
   }, "Active (", counts.active, ")"), /*#__PURE__*/React.createElement("button", {
     className: `btn small ${statusFilter === 'Inactive' ? 'btn-primary' : 'btn-ghost'}`,
     onClick: () => setStatusFilter('Inactive')
-  }, "Inactive (", counts.inactive, ")"))), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "Inactive (", counts.inactive, ")"), archiveReady && /*#__PURE__*/React.createElement("button", {
+    className: `btn small ${showingArchive ? 'btn-primary' : 'btn-ghost'}`,
+    title: "People who have left — kept for their records, out of the roster",
+    onClick: () => setStatusFilter(showingArchive ? 'all' : 'archived')
+  }, "🗄 Archived (", counts.archived, ")")), !archiveReady && (employees || []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 8
+    }
+  }, "Archiving leavers needs one database migration — run ", /*#__PURE__*/React.createElement("code", null, "supabase_crew_archive_migration.sql"), " and reload."), showingArchive && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 8,
+      background: '#F8FAFC',
+      border: '1px solid #E2E8F0',
+      borderRadius: 8,
+      padding: '7px 10px'
+    }
+  }, "Archived crew keep every record — attendance history, dates worked, banking details — but are out of the crew roster and cannot be picked for a session. Restore puts them back as ", /*#__PURE__*/React.createElement("b", null, "Inactive"), ".")), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "empty",
     style: {
       padding: 30
     }
-  }, (employees || []).length === 0 ? 'No employees yet. Click "+ Add employee" to add your first record.' : 'No employees match. Try a different search.') : /*#__PURE__*/React.createElement("div", {
+  }, showingArchive ? 'Nobody is archived. Mark a leaver Inactive, then archive them from their row.' : (employees || []).length === 0 ? 'No employees yet. Click "+ Add employee" to add your first record.' : 'No employees match. Try a different search.') : /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       padding: 0,
@@ -26150,7 +26299,12 @@ function AdminCrewView({
     className: "small"
   }, e.emp_no || '—'), /*#__PURE__*/React.createElement("td", null, e.position || '—', /*#__PURE__*/React.createElement("div", {
     className: "small subtle"
-  }, e.employment_type || '')), /*#__PURE__*/React.createElement("td", null, e.department || '—'), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("select", {
+  }, e.employment_type || '')), /*#__PURE__*/React.createElement("td", null, e.department || '—'), /*#__PURE__*/React.createElement("td", null, e.archived_at ? /*#__PURE__*/React.createElement("span", {
+    className: "small subtle",
+    title: e.archived_at
+  }, "🗄 Archived", /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, archivedOn(e))) : /*#__PURE__*/React.createElement("select", {
     className: "select",
     style: {
       padding: '3px 6px',
@@ -26160,7 +26314,27 @@ function AdminCrewView({
     onChange: ev => saveEmployee({
       status: ev.target.value
     }, e.id)
-  }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive"))), canManageLogins && /*#__PURE__*/React.createElement("td", null, e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive"))), canManageLogins && /*#__PURE__*/React.createElement("td", null, e.archived_at ? e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 700
+    }
+  }, "⚠ login still active"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '1px 6px',
+      fontSize: 10,
+      color: '#DC2626'
+    },
+    onClick: () => setModal({
+      kind: 'login',
+      data: e,
+      mode: 'unlink'
+    })
+  }, "Remove")) : /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, "—") : e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "small",
     style: {
       fontWeight: 700
@@ -26202,27 +26376,51 @@ function AdminCrewView({
     })
   }, "+ Create login")), /*#__PURE__*/React.createElement("td", {
     style: {
-      textAlign: 'right'
+      textAlign: 'right',
+      whiteSpace: 'nowrap'
     }
-  }, /*#__PURE__*/React.createElement("button", {
+  }, e.archived_at ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    title: "Put this person back in the crew list as Inactive",
+    onClick: () => doRestore(e)
+  }, "↩ Restore"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      color: '#DC2626'
+    },
+    title: "Delete the record outright",
+    onClick: () => deleteEmployee(e.id)
+  }, "×")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: () => setModal({
       kind: 'edit',
       data: e
     })
-  }, "✎"), /*#__PURE__*/React.createElement("button", {
+  }, "✎"), archiveReady && e.status === 'Inactive' && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    title: "They have left — keep the record, clear them off the roster",
+    onClick: () => setModal({
+      kind: 'archive',
+      data: e
+    })
+  }, "🗄"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     style: {
       color: '#DC2626'
     },
     onClick: () => deleteEmployee(e.id)
-  }, "×")))))))), modal?.kind === 'edit' && /*#__PURE__*/React.createElement(AdminEmployeeModal, {
+  }, "×"))))))))), modal?.kind === 'edit' && /*#__PURE__*/React.createElement(AdminEmployeeModal, {
     existing: modal.data,
     onSave: async d => {
       await saveEmployee(d, modal.data?.id);
       setModal(null);
     },
     onClose: () => setModal(null)
+  }), modal?.kind === 'archive' && /*#__PURE__*/React.createElement(ArchiveCrewModal, {
+    employee: modal.data,
+    busy: archiveBusy,
+    onArchive: doArchive,
+    onClose: () => !archiveBusy && setModal(null)
   }), modal?.kind === 'login' && /*#__PURE__*/React.createElement(CrewLoginModal, {
     employee: modal.data,
     mode: modal.mode,
