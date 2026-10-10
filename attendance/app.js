@@ -128,6 +128,25 @@
   }
 
   // ── API ────────────────────────────────────────────────────────────────
+  // What the server sends back is not written for a worker. PostgREST wraps a
+  // raise from a function as {code, details, hint, message}, and printing the
+  // lot put a line of JSON on a poolside phone. Only the message is meant for
+  // a person; anything else gets a sentence instead.
+  function readableError(text, fallback) {
+    var d = null;
+    try { d = JSON.parse(text); } catch (e) {}
+    var m = d && (d.message || d.error_description || d.error || d.msg || d.detail);
+    if (typeof m === 'string' && m.trim()) return m.trim();
+    if (typeof text === 'string' && text.trim() && text.indexOf('{') !== 0) return text.trim();
+    return fallback || 'Something went wrong. Please try again.';
+  }
+
+  // fetch only rejects when the request never got a reply at all: no signal in
+  // a pool car park, flight mode, a Wi-Fi that has quietly dropped. That is
+  // not the worker's fault and must not read like a wrong password.
+  var OFFLINE = 'Cannot reach Star Swim. Check your connection and try again.';
+  function asOffline() { throw new Error(OFFLINE); }
+
   function authHeaders() {
     return {
       'apikey': cfg.supabaseAnonKey,
@@ -159,7 +178,7 @@
   function api(path, opts, isRetry) {
     opts = opts || {};
     opts.headers = authHeaders();
-    return fetch(cfg.supabaseUrl + path, opts).then(function (r) {
+    return fetch(cfg.supabaseUrl + path, opts).catch(asOffline).then(function (r) {
       if (r.status === 401 && !isRetry) {
         return refreshSession().then(function (ok) {
           if (!ok) { signOut(); throw new Error('Your session expired. Please sign in again.'); }
@@ -174,7 +193,7 @@
     return api('/rest/v1/rpc/' + name, {
       method: 'POST', body: JSON.stringify(args || {})
     }).then(function (r) {
-      if (!r.ok) return r.text().then(function (t) { throw new Error(t || 'Request failed'); });
+      if (!r.ok) return r.text().then(function (t) { throw new Error(readableError(t)); });
       return r.json();
     });
   }
@@ -185,7 +204,7 @@
       method: 'POST',
       headers: { 'apikey': cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: staffIdToEmail(staffId), password: password })
-    }).then(function (r) {
+    }).catch(asOffline).then(function (r) {
       if (!r.ok) throw new Error('Incorrect staff ID or password.');
       return r.json();
     }).then(function (d) {
@@ -798,7 +817,7 @@
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ action: 'change_own_password', current_password: cur, new_password: a })
-    }).then(function (r) {
+    }).catch(asOffline).then(function (r) {
       return r.json().catch(function () { return {}; })
         .then(function (d) { if (!r.ok) throw new Error(d.error || 'Could not save that.'); });
     }).then(function () {
