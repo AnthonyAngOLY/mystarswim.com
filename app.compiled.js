@@ -25162,11 +25162,22 @@ function AttendanceRosterView({
     });
     return m;
   }, [employees]);
+
+  // The toolbar's + lands on today, not on the Monday the view happens to
+  // start at. Scheduling starts from "now" far more often than from the start
+  // of a week, and a date quietly set to Monday is the kind of thing that is
+  // noticed after the session is saved. Clicking a specific day still uses
+  // that day. A week already in the past has no valid day to offer, so it
+  // falls back to the week's start and the form's own min blocks the save.
+  function defaultNewDate() {
+    const t = todayStr();
+    return t >= weekStart && t <= addDays(weekStart, 6) ? t : weekStart;
+  }
   function openNew(crewId, date) {
     setRepeatWeeks(1);
     setModal({
       crew_id: crewId || '',
-      shift_date: date || weekStart,
+      shift_date: date || defaultNewDate(),
       start_time: '09:00',
       end_time: '11:00',
       location_id: activeLocations[0]?.id || '',
@@ -25356,7 +25367,7 @@ function AttendanceRosterView({
     },
     disabled: !activeLocations.length,
     title: activeLocations.length ? '' : 'Add a location first',
-    onClick: () => openNew('', weekStart)
+    onClick: () => openNew('', defaultNewDate())
   }, "+ Add session")), !activeLocations.length && /*#__PURE__*/React.createElement("div", {
     className: "small",
     style: {

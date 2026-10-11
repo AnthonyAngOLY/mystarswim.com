@@ -12888,9 +12888,19 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
     const m={}; (employees||[]).forEach(e=>{ m[e.id]=e; }); return m;
   }, [employees]);
 
+  // The toolbar's + lands on today, not on the Monday the view happens to
+  // start at. Scheduling starts from "now" far more often than from the start
+  // of a week, and a date quietly set to Monday is the kind of thing that is
+  // noticed after the session is saved. Clicking a specific day still uses
+  // that day. A week already in the past has no valid day to offer, so it
+  // falls back to the week's start and the form's own min blocks the save.
+  function defaultNewDate(){
+    const t = todayStr();
+    return (t >= weekStart && t <= addDays(weekStart, 6)) ? t : weekStart;
+  }
   function openNew(crewId, date){
     setRepeatWeeks(1);
-    setModal({ crew_id:crewId||'', shift_date:date||weekStart, start_time:'09:00', end_time:'11:00',
+    setModal({ crew_id:crewId||'', shift_date:date||defaultNewDate(), start_time:'09:00', end_time:'11:00',
                location_id:activeLocations[0]?.id||'', category_id:(categories[0]||{}).id||'' });
   }
   function openEdit(s){
@@ -12979,7 +12989,7 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
       <button className="btn btn-primary small" style={{marginLeft:'auto'}}
         disabled={!activeLocations.length}
         title={activeLocations.length?'':'Add a location first'}
-        onClick={()=>openNew('', weekStart)}>+ Add session</button>
+        onClick={()=>openNew('', defaultNewDate())}>+ Add session</button>
     </div>
 
     {!activeLocations.length && <div className="small" style={{color:'#B45309',fontWeight:600,marginBottom:10}}>
