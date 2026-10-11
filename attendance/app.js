@@ -263,11 +263,15 @@
   // How long a worker has to correct a reason, set by the admin.
   var reasonWindowMin = 2;
   var checkoutGraceMin = 30;
+  // What the server counts as finishing early. Taken from the same setting it
+  // uses, so the warning and the record can never disagree.
+  var graceMin = 5;
   function loadSettings() {
-    return api('/rest/v1/attendance_settings?select=reason_edit_window_min,no_checkout_alert_min,timezone')
+    return api('/rest/v1/attendance_settings?select=grace_min,reason_edit_window_min,no_checkout_alert_min,timezone')
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (rows) {
         if (rows && rows[0]) {
+          if (rows[0].grace_min != null) graceMin = rows[0].grace_min;
           if (rows[0].reason_edit_window_min != null) reasonWindowMin = rows[0].reason_edit_window_min;
           if (rows[0].no_checkout_alert_min != null) checkoutGraceMin = rows[0].no_checkout_alert_min;
         }
@@ -411,7 +415,14 @@
 
     Array.prototype.forEach.call($('todayList').querySelectorAll('[data-punch]'), function (b) {
       b.addEventListener('click', function () {
-        punch(b.getAttribute('data-punch'), b.getAttribute('data-type'), b);
+        var id = b.getAttribute('data-punch'), type = b.getAttribute('data-type');
+        var sh = shiftById(id);
+        var left = sh ? Math.round(-minutesPastEnd(sh)) : 0;
+        // A session that is still running should not end on one tap. Checking
+        // out on time goes straight through — the friction belongs only where
+        // the mistake costs something.
+        if (type === 'out' && left > graceMin) { confirmEarlyOut(b, id, left); return; }
+        punch(id, type, b);
       });
     });
 
@@ -616,6 +627,40 @@
   function refreshViews() {
     if (!$('viewHistory').classList.contains('hidden')) loadHistory();
     else loadToday();
+  }
+
+  function shiftById(id) {
+    for (var i = 0; i < todayShifts.length; i++) {
+      if (todayShifts[i].id === id) return todayShifts[i];
+    }
+    return null;
+  }
+
+  // Replaces the button in place rather than opening a dialog: a dialog on a
+  // phone appears under the thumb that just tapped, which is the one place it
+  // must not be.
+  function confirmEarlyOut(btn, id, left) {
+    var box = document.createElement('div');
+    box.className = 'confirm-out';
+    box.innerHTML =
+        '<div class="confirm-head">' + left + ' minute' + (left === 1 ? '' : 's')
+      +   ' still to go</div>'
+      + '<div class="confirm-body">Checking out now ends the session early and'
+      +   ' tells your admin. Tapped by mistake? Stay checked in.</div>'
+      + '<div class="confirm-acts">'
+      +   '<button class="btn ghost" data-stay>Stay checked in</button>'
+      +   '<button class="btn warn" data-go>Check out anyway</button>'
+      + '</div>';
+    btn.parentNode.replaceChild(box, btn);
+
+    function restore() {
+      if (box.parentNode) box.parentNode.replaceChild(btn, box);
+    }
+    box.querySelector('[data-stay]').addEventListener('click', restore);
+    box.querySelector('[data-go]').addEventListener('click', function () {
+      restore();
+      punch(id, 'out', btn);
+    });
   }
 
   // What the card should offer. Previously this read the punches alone, so a

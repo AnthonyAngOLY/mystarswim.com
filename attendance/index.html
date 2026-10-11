@@ -147,6 +147,20 @@
   .btn.small-btn{width:auto; margin-top:8px; padding:9px 16px; font-size:14px;
     background:var(--amber-tx)}
   .btn.small-btn:active{background:#92400E}
+  /* Standing between a thumb and an early finish. The safe button comes
+     first, where the Check out button was, so a second accidental tap lands
+     on "stay" rather than confirming what the first tap started. */
+  .confirm-out{
+    margin-top:12px; padding:12px 13px; border-radius:10px;
+    background:var(--amber-bg); border:1px solid var(--amber-bd);
+  }
+  .confirm-out .confirm-head{font-weight:700; font-size:14.5px; color:var(--amber-tx)}
+  .confirm-out .confirm-body{font-size:13.5px; color:var(--amber-tx); margin-top:4px; line-height:1.45}
+  .confirm-out .confirm-acts{display:flex; gap:8px; margin-top:11px}
+  .confirm-out .btn{margin-top:0; padding:13px 10px; font-size:14.5px; flex:1}
+  .confirm-out .btn.warn{background:var(--red-tx)}
+  .confirm-out .btn.warn:active{background:#B91C1C}
+
   /* Shown where a button would be when there is nothing left to press. */
   .closed-note{
     margin-top:12px; padding:11px 13px; border-radius:10px; font-size:13.5px;
