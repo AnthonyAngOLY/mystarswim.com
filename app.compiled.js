@@ -244,6 +244,16 @@ async function rest(path, opts = {}) {
 async function selectRows(table, select = '*', extra = '') {
   return rest(`${table}?select=${select}${extra}`);
 }
+// PostgREST wraps a raise from a function as {code, details, hint, message}.
+// Only the message was written for a person to read.
+function leaveErrText(err) {
+  const raw = err && err.message || '';
+  try {
+    const d = JSON.parse(raw);
+    if (d && d.message) return String(d.message);
+  } catch (_) {}
+  return raw || 'Something went wrong.';
+}
 // True when a PostgREST error means a column doesn't exist yet (a migration
 // hasn't been run on this deployment). Lets write paths retry with a legacy
 // row shape instead of crashing. Covers PostgREST's schema-cache miss
@@ -780,13 +790,13 @@ function App({
   }
   // Robust: header rendering follows the CURRENT VIEW, not a separate `side`
   // state, so the header can never drift out of sync with the content area.
-  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance'].includes(view);
+  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance', 'leave'].includes(view);
   // Defensive: if view and side ever get out of sync (e.g. after login flow
   // or a stale route), snap view back to the side's home. Prevents the
   // "half-breed" state where system nav is shown but schedule content mounts.
   useEffect(() => {
     const scheduleViews = new Set(['schedule', 'programme', 'accounts', 'shop', 'messages', 'enroll', 'settings', 'students']);
-    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance']);
+    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance', 'leave']);
     if (side === 'schedule' && systemViews.has(view)) setView('schedule');
     if (side === 'system' && scheduleViews.has(view)) setView('adminDirectory');
   }, [side, view]);
@@ -801,6 +811,14 @@ function App({
   const [adminVouchers, setAdminVouchers] = useState([]);
   const [adminEmployees, setAdminEmployees] = useState([]);
   const [adminCrewLoadFailed, setAdminCrewLoadFailed] = useState(false);
+  // ── Leave ──
+  const [leaveTypes, setLeaveTypes] = useState([]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [leaveYear, setLeaveYear] = useState(() => new Date().getFullYear());
+  const [leaveFilter, setLeaveFilter] = useState('pending');
+  // How much is waiting, without the Leave tab having to be the open one.
+  const pendingLeaveCount = useMemo(() => (leaveRequests || []).filter(r => r.status === 'pending').length, [leaveRequests]);
   // ── Attendance module (geofenced punch clock) ──
   // Reads RLS-protected tables, so these calls only succeed once the signed-in
   // user carries a Supabase JWT (Phase 2). Before that they fail closed and
@@ -951,7 +969,7 @@ function App({
       setLoading(false);
       setStatus('Connected');
       // Phase 2 — background: load everything else after first paint.
-      Promise.all([loadStudents(), loadGroups(), loadGroupMemberships(), loadCreditBalances(), loadCreditPurchases(), loadSubscriptions(), loadCodes(), loadReplacementPending(), loadTcAcceptances(), loadRemarks(monthCursor), loadInvoiceData(), loadProgrammeSessions(), loadProgrammeCategories(), loadBillingTerms(), loadProducts(), loadContactMessages(), loadAppUsers(), loadAdminAll()]).catch(e => console.warn('Background load warning:', e));
+      Promise.all([loadStudents(), loadGroups(), loadGroupMemberships(), loadCreditBalances(), loadCreditPurchases(), loadSubscriptions(), loadCodes(), loadReplacementPending(), loadTcAcceptances(), loadRemarks(monthCursor), loadInvoiceData(), loadProgrammeSessions(), loadProgrammeCategories(), loadBillingTerms(), loadProducts(), loadContactMessages(), loadAppUsers(), loadAdminAll(), loadLeave()]).catch(e => console.warn('Background load warning:', e));
     } catch (err) {
       handleErr(err);
       setLoading(false);
@@ -1982,6 +2000,75 @@ function App({
       setAdminCrewLoadFailed(true);
     }
   }
+
+  // ── Leave ───────────────────────────────────────────────────────────────
+  async function loadLeave() {
+    try {
+      const [types, reqs, bals] = await Promise.all([selectRows('leave_types', '*', '&order=sort_order.asc').catch(() => []), selectAllRows('leave_requests', '*', '&order=applied_at.desc').catch(() => []), selectRows('v_leave_balances', '*', `&year=eq.${leaveYear}`).catch(() => [])]);
+      setLeaveTypes(types || []);
+      setLeaveRequests(reqs || []);
+      setLeaveBalances(bals || []);
+    } catch (_) {/* the screens show their own empty state */}
+  }
+  // Entered per person, per type, per year. Upsert on that triple so editing
+  // a figure twice does not leave two of them.
+  async function saveEntitlement(crewId, leaveTypeId, days) {
+    const body = {
+      crew_id: crewId,
+      leave_type_id: leaveTypeId,
+      year: leaveYear,
+      days_given: Number(days) || 0,
+      updated_at: new Date().toISOString()
+    };
+    try {
+      await rest('leave_entitlements?on_conflict=crew_id,leave_type_id,year', {
+        method: 'POST',
+        headers: {
+          Prefer: 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify(body)
+      });
+      await loadLeave();
+    } catch (err) {
+      handleErr(err);
+      alert(err.message || 'Could not save that allowance.');
+    }
+  }
+  async function decideLeave(id, status, note) {
+    try {
+      await rest('rpc/decide_leave', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_request_id: id,
+          p_status: status,
+          p_note: note || null
+        })
+      });
+      await loadLeave();
+      // An approval marks the roster, so what is on screen is now stale.
+      if (view === 'attendance') await loadAttendance();
+    } catch (err) {
+      handleErr(err);
+      throw new Error(leaveErrText(err));
+    }
+  }
+  // A signed link, not a public URL: the bucket is private and these are
+  // medical certificates.
+  async function leaveDocUrl(path) {
+    const res = await fetch(`${cfg.supabaseUrl}/storage/v1/object/sign/leave-docs/${path}`, {
+      method: 'POST',
+      headers: authHeadersFor(),
+      body: JSON.stringify({
+        expiresIn: 300
+      })
+    });
+    if (!res.ok) throw new Error('Could not open that document.');
+    const d = await res.json();
+    return `${cfg.supabaseUrl}/storage/v1${d.signedURL || d.signedUrl}`;
+  }
+  useEffect(() => {
+    if (!loading) loadLeave(); /* eslint-disable-next-line */
+  }, [leaveYear]);
   async function loadAttendance() {
     try {
       const from = attWeekStart,
@@ -6092,6 +6179,22 @@ function App({
   }, "👥 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
   }, "Crew")), /*#__PURE__*/React.createElement("button", {
+    className: `nav-btn ${view === 'leave' ? 'active' : ''}`,
+    onClick: () => setView('leave'),
+    title: "Leave"
+  }, "🏖 ", /*#__PURE__*/React.createElement("span", {
+    className: "nav-label"
+  }, "Leave"), pendingLeaveCount > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 5,
+      background: '#EF4444',
+      color: '#fff',
+      borderRadius: 999,
+      fontSize: 10,
+      fontWeight: 800,
+      padding: '1px 6px'
+    }
+  }, pendingLeaveCount)), /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'adminPromos' ? 'active' : ''}`,
     onClick: () => setView('adminPromos'),
     title: "Website Promotions"
@@ -6158,6 +6261,21 @@ function App({
   }, /*#__PURE__*/React.createElement("span", {
     className: "mtab-ic"
   }, "👥"), "Crew"), /*#__PURE__*/React.createElement("button", {
+    className: `mtab ${view === 'leave' ? 'active' : ''}`,
+    onClick: () => setView('leave')
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mtab-ic"
+  }, "🏖"), "Leave", pendingLeaveCount > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 4,
+      background: '#EF4444',
+      color: '#fff',
+      borderRadius: 999,
+      fontSize: 9,
+      fontWeight: 800,
+      padding: '0 5px'
+    }
+  }, pendingLeaveCount)), /*#__PURE__*/React.createElement("button", {
     className: `mtab ${view === 'adminPromos' ? 'active' : ''}`,
     onClick: () => setView('adminPromos')
   }, /*#__PURE__*/React.createElement("span", {
@@ -6516,7 +6634,22 @@ function App({
     unlinkLogin: crewUnlinkLogin,
     saveEmployee: adminSaveEmployee,
     deleteEmployee: adminDeleteEmployee,
-    onRefresh: loadAdminAll
+    onRefresh: loadAdminAll,
+    leaveTypes: leaveTypes,
+    leaveBalances: leaveBalances,
+    leaveYear: leaveYear,
+    setLeaveYear: setLeaveYear,
+    saveEntitlement: saveEntitlement
+  }), !loading && side === 'system' && view === 'leave' && canSystem && /*#__PURE__*/React.createElement(AdminLeaveView, {
+    requests: leaveRequests,
+    types: leaveTypes,
+    employees: adminEmployees,
+    filter: leaveFilter,
+    setFilter: setLeaveFilter,
+    decideLeave: decideLeave,
+    docUrl: leaveDocUrl,
+    onRefresh: loadLeave,
+    canDecide: canApproveLeave(currentUser?.role)
   }), !loading && side === 'system' && view === 'attendance' && canSystem && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "sub-bar"
   }, /*#__PURE__*/React.createElement("div", {
@@ -25797,6 +25930,515 @@ function CrewLoginModal({
   }, "Cancel"))))));
 }
 
+// ── Leave ─────────────────────────────────────────────────────────────────
+const LEAVE_STATUS = {
+  pending: {
+    label: 'Pending',
+    bg: '#FFFBEB',
+    tx: '#B45309',
+    bd: '#FCD34D'
+  },
+  approved: {
+    label: 'Approved',
+    bg: '#ECFDF5',
+    tx: '#047857',
+    bd: '#A7F3D0'
+  },
+  rejected: {
+    label: 'Rejected',
+    bg: '#FFF1F1',
+    tx: '#DC2626',
+    bd: '#FCA5A5'
+  },
+  cancelled: {
+    label: 'Withdrawn',
+    bg: '#F1F5F9',
+    tx: '#475569',
+    bd: '#CBD5E1'
+  }
+};
+function LeavePill({
+  status
+}) {
+  const s = LEAVE_STATUS[status] || LEAVE_STATUS.pending;
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      display: 'inline-block',
+      fontSize: 11,
+      fontWeight: 800,
+      padding: '2px 8px',
+      borderRadius: 999,
+      background: s.bg,
+      color: s.tx,
+      border: `1px solid ${s.bd}`
+    }
+  }, s.label);
+}
+function fmtLeaveDate(d) {
+  if (!d) return '—';
+  try {
+    return new Date(d + 'T00:00:00+08:00').toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  } catch (_) {
+    return d;
+  }
+}
+function leaveRange(r) {
+  return r.start_date === r.end_date ? fmtLeaveDate(r.start_date) : `${fmtLeaveDate(r.start_date)} – ${fmtLeaveDate(r.end_date)}`;
+}
+
+// What each person is given this year, and what is left. Given is the only
+// editable figure: used is summed from approved applications and available
+// follows from the two, so there is nothing here that can disagree with the
+// list of applications underneath it.
+function CrewLeaveModal({
+  employee,
+  year,
+  setYear,
+  types,
+  balances,
+  saveEntitlement,
+  onClose
+}) {
+  const mine = useMemo(() => {
+    const m = {};
+    (balances || []).filter(b => b.crew_id === employee.id).forEach(b => {
+      m[b.code] = b;
+    });
+    return m;
+  }, [balances, employee.id]);
+  const [draft, setDraft] = useState({});
+  const [busy, setBusy] = useState(null);
+  const thisYear = new Date().getFullYear();
+  async function commit(t) {
+    const v = draft[t.code];
+    if (v == null || v === '') return;
+    setBusy(t.code);
+    try {
+      await saveEntitlement(employee.id, t.id, v);
+      setDraft(d => ({
+        ...d,
+        [t.code]: undefined
+      }));
+    } finally {
+      setBusy(null);
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card",
+    onClick: e => e.stopPropagation(),
+    style: {
+      maxWidth: 620
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 12,
+      marginBottom: 4
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 17
+    }
+  }, "🏖 Leave — ", employee.full_name), /*#__PURE__*/React.createElement("select", {
+    className: "select",
+    style: {
+      width: 110
+    },
+    value: year,
+    onChange: e => setYear(Number(e.target.value))
+  }, [thisYear + 1, thisYear, thisYear - 1, thisYear - 2].map(y => /*#__PURE__*/React.createElement("option", {
+    key: y,
+    value: y
+  }, y)))), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12
+    }
+  }, "Enter what they are given for ", year, ". Used is counted from approved applications, so it cannot drift from the list it came from. Allowances are per year — editing", ' ', year, " leaves every other year as it was."), /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Leave"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 120,
+      textAlign: 'right'
+    }
+  }, "Given"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 70,
+      textAlign: 'right'
+    }
+  }, "Used"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 90,
+      textAlign: 'right'
+    }
+  }, "Left"))), /*#__PURE__*/React.createElement("tbody", null, (types || []).filter(t => t.is_active !== false).map(t => {
+    const b = mine[t.code];
+    const given = draft[t.code] !== undefined ? draft[t.code] : b ? b.days_given : '';
+    const used = b ? Number(b.days_used) : 0;
+    const left = b ? Number(b.days_available) : null;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: t.id
+    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 700
+      }
+    }, t.label), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, t.default_cap_days == null ? 'No cap' : `Cap ${Number(t.default_cap_days)} days`, t.requires_document ? ' · document required' : '', t.is_paid === false ? ' · unpaid' : '')), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      type: "number",
+      min: "0",
+      step: "0.5",
+      style: {
+        width: 92,
+        textAlign: 'right',
+        padding: '4px 6px',
+        fontSize: 13
+      },
+      value: given,
+      disabled: busy === t.code,
+      onChange: e => setDraft(d => ({
+        ...d,
+        [t.code]: e.target.value
+      })),
+      onBlur: () => commit(t),
+      onKeyDown: e => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }
+    })), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      },
+      className: "small"
+    }, used.toFixed(1)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right',
+        fontWeight: 700,
+        color: left == null ? 'var(--text-3)' : left < 0 ? '#DC2626' : left === 0 ? '#B45309' : '#047857'
+      }
+    }, left == null ? '—' : left.toFixed(1)));
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 10
+    }
+  }, "A figure saves when you leave the box. A negative balance is not an error — it means more was approved than allowed for, which is sometimes the right call."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Close"))));
+}
+
+// The approval queue. Pending first, because that is the only state anybody
+// has to do something about.
+function AdminLeaveView({
+  requests,
+  types,
+  employees,
+  filter,
+  setFilter,
+  decideLeave,
+  docUrl,
+  onRefresh,
+  canDecide
+}) {
+  const [modal, setModal] = useState(null);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const empById = useMemo(() => {
+    const m = {};
+    (employees || []).forEach(e => {
+      m[e.id] = e;
+    });
+    return m;
+  }, [employees]);
+  const typeById = useMemo(() => {
+    const m = {};
+    (types || []).forEach(t => {
+      m[t.id] = t;
+    });
+    return m;
+  }, [types]);
+  const counts = useMemo(() => {
+    const c = {
+      pending: 0,
+      approved: 0,
+      rejected: 0,
+      cancelled: 0
+    };
+    (requests || []).forEach(r => {
+      if (c[r.status] != null) c[r.status]++;
+    });
+    return c;
+  }, [requests]);
+  const rows = useMemo(() => (requests || []).filter(r => filter === 'all' || r.status === filter), [requests, filter]);
+  async function decide(status) {
+    setBusy(true);
+    setErr('');
+    try {
+      await decideLeave(modal.id, status, note);
+      setModal(null);
+      setNote('');
+    } catch (e) {
+      setErr(e.message || 'Could not record that.');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function openDoc(path) {
+    try {
+      window.open(await docUrl(path), '_blank', 'noopener');
+    } catch (e) {
+      alert(e.message || 'Could not open that document.');
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 1120,
+      margin: '18px auto 0'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 20,
+      fontWeight: 800
+    }
+  }, "🏖 Leave"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Applications from the crew. Approving marks their rostered sessions as leave and keeps them on the roster, so the cover gap stays visible.")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onRefresh,
+    title: "Reload"
+  }, "↻ Refresh")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10,
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap'
+    }
+  }, [['pending', 'Pending'], ['approved', 'Approved'], ['rejected', 'Rejected'], ['cancelled', 'Withdrawn'], ['all', 'All']].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: `btn small ${filter === k ? 'btn-primary' : 'btn-ghost'}`,
+    onClick: () => setFilter(k)
+  }, l, k !== 'all' ? ` (${counts[k] || 0})` : ` (${(requests || []).length})`))), !canDecide && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 8,
+      color: '#B45309',
+      fontWeight: 600
+    }
+  }, "You can see these but not decide them — that needs the HR Admin or Sysadmin role.")), rows.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty",
+    style: {
+      padding: 30
+    }
+  }, filter === 'pending' ? 'Nothing waiting on a decision.' : 'Nothing here.') : /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 0,
+      overflow: 'hidden'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap",
+    style: {
+      border: 'none',
+      borderRadius: 0
+    }
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Worker"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 160
+    }
+  }, "Leave"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 210
+    }
+  }, "Dates"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 60,
+      textAlign: 'right'
+    }
+  }, "Days"), /*#__PURE__*/React.createElement("th", null, "Reason"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 110
+    }
+  }, "Status"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 110,
+      textAlign: 'right'
+    }
+  }, "Action"))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => {
+    const t = typeById[r.leave_type_id] || {};
+    const e = empById[r.crew_id] || {};
+    return /*#__PURE__*/React.createElement("tr", {
+      key: r.id
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 700
+      }
+    }, e.full_name || '—', /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontWeight: 400
+      }
+    }, e.staff_id || e.emp_no || '')), /*#__PURE__*/React.createElement("td", null, t.label || '—', t.is_paid === false && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, "unpaid")), /*#__PURE__*/React.createElement("td", {
+      className: "small"
+    }, leaveRange(r)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right',
+        fontWeight: 700
+      }
+    }, Number(r.days).toFixed(1)), /*#__PURE__*/React.createElement("td", {
+      className: "small subtle",
+      style: {
+        maxWidth: 260
+      }
+    }, r.reason || '—', r.document_path && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10,
+        marginLeft: 6
+      },
+      onClick: () => openDoc(r.document_path)
+    }, "📎 Document"), r.decision_note && /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        color: '#475569',
+        marginTop: 2
+      }
+    }, "Note: ", r.decision_note)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement(LeavePill, {
+      status: r.status
+    })), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
+      }
+    }, r.status === 'pending' && canDecide ? /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: () => {
+        setErr('');
+        setNote('');
+        setModal(r);
+      }
+    }, "Review…") : /*#__PURE__*/React.createElement("span", {
+      className: "small subtle"
+    }, "—")));
+  }))))), modal && (() => {
+    const t = typeById[modal.leave_type_id] || {};
+    const e = empById[modal.crew_id] || {};
+    return /*#__PURE__*/React.createElement("div", {
+      className: "modal-backdrop",
+      onClick: () => !busy && setModal(null)
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "modal-card",
+      onClick: ev => ev.stopPropagation(),
+      style: {
+        maxWidth: 520
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 800,
+        fontSize: 17,
+        marginBottom: 2
+      }
+    }, t.label, " — ", e.full_name), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        marginBottom: 10
+      }
+    }, leaveRange(modal), " · ", Number(modal.days).toFixed(1), " day", Number(modal.days) === 1 ? '' : 's'), modal.reason && /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        background: '#F8FAFC',
+        border: '1px solid #E2E8F0',
+        borderRadius: 8,
+        padding: '8px 10px',
+        marginBottom: 10
+      }
+    }, modal.reason), modal.document_path && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        marginBottom: 10
+      },
+      onClick: () => openDoc(modal.document_path)
+    }, "📎 Open the document"), /*#__PURE__*/React.createElement("div", {
+      className: "field"
+    }, /*#__PURE__*/React.createElement("label", null, "Note (optional)"), /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      value: note,
+      onChange: ev => setNote(ev.target.value),
+      placeholder: "Anything the worker should know"
+    })), err && /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        color: '#DC2626',
+        fontWeight: 600,
+        marginTop: 6
+      }
+    }, err), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        marginTop: 10
+      }
+    }, "Approving marks any session they are rostered for over those days as leave, and closes the alerts an absence already raised. Sessions they have already punched for are left alone."), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 8,
+        justifyContent: 'flex-end',
+        marginTop: 14
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost",
+      disabled: busy,
+      onClick: () => setModal(null)
+    }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost",
+      disabled: busy,
+      style: {
+        color: '#DC2626'
+      },
+      onClick: () => decide('rejected')
+    }, busy ? '…' : 'Reject'), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-primary",
+      disabled: busy,
+      onClick: () => decide('approved')
+    }, busy ? 'Saving…' : 'Approve'))));
+  })());
+}
+
 // ── Crew (Employees) ─────────────────────────────────────────────────────
 // Archiving is the gentle end of a crew record: the person goes off the
 // roster, everything recorded against them stays. The one thing it must not
@@ -25880,7 +26522,12 @@ function AdminCrewView({
   canManageLogins,
   provisionLogin,
   resetLogin,
-  unlinkLogin
+  unlinkLogin,
+  leaveTypes,
+  leaveBalances,
+  leaveYear,
+  setLeaveYear,
+  saveEntitlement
 }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -26423,7 +27070,14 @@ function AdminCrewView({
       kind: 'edit',
       data: e
     })
-  }, "✎"), archiveReady && e.status === 'Inactive' && /*#__PURE__*/React.createElement("button", {
+  }, "✎"), leaveTypes && leaveTypes.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    title: "Leave allowance and what is left of it",
+    onClick: () => setModal({
+      kind: 'leave',
+      data: e
+    })
+  }, "🏖"), archiveReady && e.status === 'Inactive' && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     title: "They have left — keep the record, clear them off the roster",
     onClick: () => setModal({
@@ -26442,6 +27096,14 @@ function AdminCrewView({
       await saveEmployee(d, modal.data?.id);
       setModal(null);
     },
+    onClose: () => setModal(null)
+  }), modal?.kind === 'leave' && /*#__PURE__*/React.createElement(CrewLeaveModal, {
+    employee: modal.data,
+    year: leaveYear,
+    setYear: setLeaveYear,
+    types: leaveTypes,
+    balances: leaveBalances,
+    saveEntitlement: saveEntitlement,
     onClose: () => setModal(null)
   }), modal?.kind === 'archive' && /*#__PURE__*/React.createElement(ArchiveCrewModal, {
     employee: modal.data,
@@ -27798,7 +28460,7 @@ function UsersAdminView({
     style: {
       marginBottom: 14
     }
-  }, "Create logins and manage passwords. ", /*#__PURE__*/React.createElement("strong", null, "Sysadmin"), " — full access to both the scheduler and the Admin & Procurement system. ", /*#__PURE__*/React.createElement("strong", null, "Schedule Admin"), " — this scheduler only (no Settings or Reports). ", /*#__PURE__*/React.createElement("strong", null, "Admin (Procurement)"), " — signs in here but is redirected to the Admin & Procurement system."), /*#__PURE__*/React.createElement("div", {
+  }, "Create logins and manage passwords. ", /*#__PURE__*/React.createElement("strong", null, "Sysadmin"), " — full access to both the scheduler and the Admin & Procurement system. ", /*#__PURE__*/React.createElement("strong", null, "Schedule Admin"), " — this scheduler only (no Settings or Reports). ", /*#__PURE__*/React.createElement("strong", null, "Admin (Procurement)"), " — signs in here but is redirected to the Admin & Procurement system. ", /*#__PURE__*/React.createElement("strong", null, "HR Admin"), " — crew records and leave approvals, including the medical certificates attached to them. A role change reaches them at their next sign-in, not immediately."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: '1fr 1fr 1fr 130px auto',
@@ -27851,6 +28513,8 @@ function UsersAdminView({
   }, "Schedule Admin"), /*#__PURE__*/React.createElement("option", {
     value: "admin"
   }, "Admin (Procurement)"), /*#__PURE__*/React.createElement("option", {
+    value: "hr_admin"
+  }, "HR Admin"), /*#__PURE__*/React.createElement("option", {
     value: "sysadmin"
   }, "Sysadmin"))), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
@@ -27936,6 +28600,8 @@ function UsersAdminView({
     }, "Schedule Admin"), /*#__PURE__*/React.createElement("option", {
       value: "admin"
     }, "Admin (Procurement)"), /*#__PURE__*/React.createElement("option", {
+      value: "hr_admin"
+    }, "HR Admin"), /*#__PURE__*/React.createElement("option", {
       value: "sysadmin"
     }, "Sysadmin"))), /*#__PURE__*/React.createElement("td", null, u.is_active !== false ? /*#__PURE__*/React.createElement("span", {
       style: {
@@ -30152,7 +30818,12 @@ function canUseScheduler(role) {
   return role === 'sysadmin' || role === 'schedule_admin';
 }
 function canUseAdminSystem(role) {
-  return role === 'sysadmin' || role === 'admin';
+  return role === 'sysadmin' || role === 'admin' || role === 'hr_admin';
+}
+// Approving leave. Deliberately narrower than canUseAdminSystem: procurement
+// reaches the System side without reaching anybody's medical certificate.
+function canApproveLeave(role) {
+  return role === 'sysadmin' || role === 'hr_admin';
 }
 // Legacy client-side hash — used ONLY by the login fallback below, for the
 // window between shipping the edge-function wiring and deploying the `login`
