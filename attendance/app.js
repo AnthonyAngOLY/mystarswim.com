@@ -297,8 +297,12 @@
     $('whoName').textContent = profile.full_name || '';
     $('whoId').textContent = profile.staff_id || '';
     $('menuPassword').classList.toggle('hidden', !profile.must_change_password);
-    $('hrToggle').classList.toggle('hidden', !profile.is_hr);
-    if (profile.is_hr) refreshBadges();
+    $('hrToggle').classList.toggle('hidden', !canRoster());
+    $('hrToggle').textContent = canApprove() ? 'HR' : 'Roster';
+    // The tab goes, not just its contents: a button that refuses to open is
+    // worse than one that was never there.
+    $('apprTab').classList.toggle('hidden', !canApprove());
+    if (canRoster()) refreshBadges();
     loadSettings().then(loadToday);
   }
 
@@ -880,12 +884,18 @@
   }
   function dayNum(iso) { return String(Number(iso.slice(8, 10))); }
 
+  // Two separate authorities, deliberately not bundled. A coordinator covering
+  // a sick instructor needs the roster and the alerts; they have no business
+  // in anybody's medical certificate. is_admin gets the first, is_hr the lot.
+  function canRoster() { return !!(profile && (profile.is_hr || profile.is_admin)); }
+  function canApprove() { return !!(profile && profile.is_hr); }
+
   function setMode(on) {
     hrMode = !!on;
     $('mainNav').classList.toggle('hidden', hrMode);
     $('hrNav').classList.toggle('hidden', !hrMode);
     $('hrToggle').classList.toggle('on', hrMode);
-    $('hrToggle').textContent = hrMode ? 'Me' : 'HR';
+    $('hrToggle').textContent = hrMode ? 'Me' : (canApprove() ? 'HR' : 'Roster');
     showView(hrMode ? 'Roster' : 'Today');
   }
 
@@ -904,7 +914,7 @@
     if (v === 'Summary')   loadSummary();
     if (v === 'Roster')    loadRoster();
     if (v === 'Alerts')    loadHrAlerts();
-    if (v === 'Approvals') loadApprovals();
+    if (v === 'Approvals') { if (!canApprove()) { showView('Roster'); return; } loadApprovals(); }
   }
 
   // Loaded once when HR mode is first opened: the pickers barely change.
@@ -1343,13 +1353,16 @@
   function refreshBadges() {
     Promise.all([
       api('/rest/v1/alerts?select=id&status=eq.open').then(function (r) { return r.ok ? r.json() : []; }),
-      api('/rest/v1/leave_requests?select=id&status=eq.pending').then(function (r) { return r.ok ? r.json() : []; })
+      canApprove()
+        ? api('/rest/v1/leave_requests?select=id&status=eq.pending')
+            .then(function (r) { return r.ok ? r.json() : []; })
+        : Promise.resolve([])
     ]).then(function (res) {
       var a = (res[0] || []).length, l = (res[1] || []).length;
       $('alertBadge').textContent = a;
       $('alertBadge').classList.toggle('hidden', !a);
       $('apprBadge').textContent = l;
-      $('apprBadge').classList.toggle('hidden', !l);
+      $('apprBadge').classList.toggle('hidden', !l || !canApprove());
     }).catch(function () {});
   }
 
