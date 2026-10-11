@@ -6939,7 +6939,9 @@ function App({
     deleteCode: deleteCode,
     pools: activePools(),
     onUpdatePool: updatePool
-  })))), modal ? /*#__PURE__*/React.createElement(SessionModal, {
+  }))), !loading && /*#__PURE__*/React.createElement("footer", {
+    className: "app-footer"
+  }, /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", null, "Star Swim Sdn Bhd"), " · Ipoh, Perak"), /*#__PURE__*/React.createElement("span", null, "SSB System · ", new Date().getFullYear()))), modal ? /*#__PURE__*/React.createElement(SessionModal, {
     modal: modal,
     setModal: setModal,
     saveBusy: saveBusy,

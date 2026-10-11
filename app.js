@@ -4582,6 +4582,10 @@ function App({ currentUser, onLogout }){
         </div>
       </div>}
 
+      {!loading && <footer className="app-footer">
+        <span><b>Star Swim Sdn Bhd</b> · Ipoh, Perak</span>
+        <span>SSB System · {new Date().getFullYear()}</span>
+      </footer>}
     </div>{/* end .wrap */}
 
     {modal ? <SessionModal
