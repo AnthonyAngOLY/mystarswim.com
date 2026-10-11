@@ -353,7 +353,7 @@
   // the signed-in worker's own rows.
   var myAlerts = [];
   function loadMyAlerts() {
-    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason,worker_reason_at&status=eq.open')
+    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason,worker_reason_code,worker_reason_at&status=eq.open')
       .then(function (r) { return r.ok ? r.json() : []; })
       .catch(function () { return []; });
   }
@@ -459,13 +459,17 @@
     forgot:    'Forgot to tap',
     other:     'Something else'
   };
+  // No geofence entry: a check-in from the wrong place is refused outright,
+  // and the worker is told so at the moment they tap. Asking them afterwards
+  // to explain a thing that never happened invites an excuse for an event
+  // with no record — the refusal itself is the record, and it is the admin's
+  // to look at.
   var REASON_SETS = {
     late:        ['transport','family','sick','venue','other'],
     early_leave: ['sick','family','venue','other'],
     absent:      ['sick','family','transport','other'],
     no_checkin:  ['forgot','transport','sick','family','other'],
-    no_checkout: ['forgot','venue','other'],
-    geofence:    ['venue','other']
+    no_checkout: ['forgot','venue','other']
   };
 
   var ALERT_ASK = {
@@ -473,11 +477,12 @@
     early_leave: 'You left before the session ended.',
     absent:      'You were marked absent.',
     no_checkin:  'No check-in was recorded.',
-    no_checkout: 'No check-out was recorded.',
-    geofence:    'A check-in was refused for being too far away.'
+    no_checkout: 'No check-out was recorded.'
   };
   function alertsFor(shiftId) {
-    return myAlerts.filter(function (a) { return a.shift_id === shiftId; });
+    return myAlerts.filter(function (a) {
+      return a.shift_id === shiftId && ALERT_ASK[a.type];
+    });
   }
   // Seconds left to correct a reason, from the moment it was first saved.
   function secondsLeft(a) {
@@ -509,14 +514,17 @@
 
       var left = secondsLeft(a);
       var said = [REASONS[a.worker_reason_code], a.worker_reason].filter(Boolean).join(' — ');
-      return '<div class="explain done" data-alert="' + esc(a.id) + '">'
+      // Green while it can still be changed, grey once it cannot. An expired
+      // box used to keep the colour of something still in play, which read as
+      // "we are waiting on you" when nothing more was possible.
+      return '<div class="explain ' + (left > 0 ? 'done' : 'locked') + '" data-alert="' + esc(a.id) + '">'
         + '<div class="ask">' + ask + '</div>'
         + '<div class="said">You said: <i>' + esc(said) + '</i></div>'
         + (left > 0
             ? '<button class="btn small-btn edit" data-edit="' + esc(a.id) + '">Change</button>'
               + '<div class="hint">Locked in <b data-countdown="' + esc(a.id) + '">'
               + mmss(left) + '</b></div>'
-            : '<div class="hint">Sent to your admin.</div>')
+            : '<div class="hint">🔒 Locked in. With your admin now.</div>')
         + '</div>';
     }).join('');
   }
@@ -548,6 +556,10 @@
     ta.value = a.worker_reason || '';
     ta.focus();
     wireExplain(box);
+    // Without this the countdown in a reopened box stood still and the Save
+    // button stayed live past the window — the server refused it, which is
+    // the right answer given far too late.
+    startCountdowns();
   }
 
   // One ticker for the whole screen: updates every countdown and, at zero,

@@ -128,6 +128,10 @@
   .explain{margin-top:10px; padding:10px 11px; border-radius:9px;
            background:var(--amber-bg); border:1px solid var(--amber-bd)}
   .explain.done{background:var(--green-bg); border-color:var(--green-bd)}
+  /* Nothing left to do here, and it should not look like there is. */
+  .explain.locked{background:var(--slate-bg); border-color:var(--slate-bd); opacity:.8}
+  .explain.locked .ask{color:var(--slate-tx)}
+  .explain.locked .said{color:var(--slate-tx)}
   .explain .ask{font-size:13px; font-weight:700; color:var(--amber-tx)}
   .explain.done .ask{color:var(--green-tx)}
   .explain .said{font-size:13.5px; margin-top:4px; color:var(--text)}
