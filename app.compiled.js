@@ -26964,7 +26964,31 @@ function AdminCrewView({
     style: {
       fontWeight: 700
     }
-  }, e.full_name, /*#__PURE__*/React.createElement("div", {
+  }, e.full_name, e.is_hr && /*#__PURE__*/React.createElement("span", {
+    title: "Can approve leave and open medical certificates",
+    style: {
+      marginLeft: 6,
+      fontSize: 9.5,
+      fontWeight: 800,
+      padding: '1px 5px',
+      borderRadius: 999,
+      background: '#FFF1F1',
+      color: '#DC2626',
+      border: '1px solid #FCA5A5'
+    }
+  }, "HR"), !e.is_hr && e.is_admin && /*#__PURE__*/React.createElement("span", {
+    title: "Can roster and see alerts from the phone",
+    style: {
+      marginLeft: 6,
+      fontSize: 9.5,
+      fontWeight: 800,
+      padding: '1px 5px',
+      borderRadius: 999,
+      background: '#EFF6FF',
+      color: '#1D4ED8',
+      border: '1px solid #BFDBFE'
+    }
+  }, "ROSTER"), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       fontWeight: 400
@@ -27092,6 +27116,7 @@ function AdminCrewView({
     onClick: () => deleteEmployee(e.id)
   }, "×"))))))))), modal?.kind === 'edit' && /*#__PURE__*/React.createElement(AdminEmployeeModal, {
     existing: modal.data,
+    canGrantAccess: canManageLogins,
     onSave: async d => {
       await saveEmployee(d, modal.data?.id);
       setModal(null);
@@ -27995,9 +28020,12 @@ function AdminPromoPreviewModal({
 function AdminEmployeeModal({
   existing,
   onSave,
-  onClose
+  onClose,
+  canGrantAccess
 }) {
   const [d, setD] = useState({
+    is_admin: existing?.is_admin === true,
+    is_hr: existing?.is_hr === true,
     full_name: existing?.full_name || '',
     emp_no: existing?.emp_no || '',
     ic_no: existing?.ic_no || '',
@@ -28027,6 +28055,12 @@ function AdminEmployeeModal({
       payload[k] = v === '' ? null : v;
     });
     payload.full_name = d.full_name.trim();
+    // Only a sysadmin's edit may carry these. Anyone else's save leaves
+    // whatever is on the record alone rather than writing false over it.
+    if (!canGrantAccess) {
+      delete payload.is_admin;
+      delete payload.is_hr;
+    }
     await onSave(payload);
     setBusy(false);
   }
@@ -28213,7 +28247,65 @@ function AdminEmployeeModal({
     className: "textarea",
     value: d.notes,
     onChange: e => up('notes', e.target.value)
-  })), /*#__PURE__*/React.createElement("div", {
+  })), canGrantAccess && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: '#F8FAFC',
+      border: '1px solid #E2E8F0',
+      borderRadius: 10,
+      padding: '11px 13px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 13,
+      marginBottom: 2
+    }
+  }, "Access from the attendance app"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 9
+    }
+  }, "What this person can do on their phone, beyond their own sessions. Neither is granted by creating a login — both start off. A change reaches them at their next sign-in."), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      gap: 9,
+      alignItems: 'flex-start',
+      cursor: 'pointer',
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!d.is_admin,
+    onChange: e => up('is_admin', e.target.checked),
+    style: {
+      marginTop: 3
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "small"
+  }, /*#__PURE__*/React.createElement("b", null, "Can roster from the phone."), " Sees the whole roster and every worker's alerts, and can add, change or remove sessions. No leave, no documents.")), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      gap: 9,
+      alignItems: 'flex-start',
+      cursor: 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!d.is_hr,
+    onChange: e => up('is_hr', e.target.checked),
+    style: {
+      marginTop: 3
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "small"
+  }, /*#__PURE__*/React.createElement("b", null, "Can approve leave."), " Everything above, plus approving and rejecting leave and opening the medical certificates attached to it.")), d.is_hr && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 9,
+      color: '#B45309',
+      fontWeight: 600
+    }
+  }, "⚠ This lets them open anybody's MC from a phone. Grant it to people, not to roles.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'flex-end',

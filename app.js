@@ -13723,7 +13723,14 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
               <tbody>
                 {filtered.map(e=><tr key={e.id}>
                   <td><div style={{width:30,height:30,borderRadius:'50%',background:'#0EA5E9',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:11}}>{adminIni(e.full_name)}</div></td>
-                  <td style={{fontWeight:700}}>{e.full_name}<div className="small subtle" style={{fontWeight:400}}>{[e.phone,e.email].filter(Boolean).join(' · ')||'—'}</div></td>
+                  <td style={{fontWeight:700}}>{e.full_name}
+                    {e.is_hr && <span title="Can approve leave and open medical certificates"
+                      style={{marginLeft:6,fontSize:9.5,fontWeight:800,padding:'1px 5px',borderRadius:999,
+                      background:'#FFF1F1',color:'#DC2626',border:'1px solid #FCA5A5'}}>HR</span>}
+                    {!e.is_hr && e.is_admin && <span title="Can roster and see alerts from the phone"
+                      style={{marginLeft:6,fontSize:9.5,fontWeight:800,padding:'1px 5px',borderRadius:999,
+                      background:'#EFF6FF',color:'#1D4ED8',border:'1px solid #BFDBFE'}}>ROSTER</span>}
+                    <div className="small subtle" style={{fontWeight:400}}>{[e.phone,e.email].filter(Boolean).join(' · ')||'—'}</div></td>
                   <td className="small">{e.emp_no||'—'}</td>
                   <td>{e.position||'—'}<div className="small subtle">{e.employment_type||''}</div></td>
                   <td>{e.department||'—'}</td>
@@ -13771,7 +13778,8 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
           </div>
         </div>}
 
-    {modal?.kind==='edit' && <AdminEmployeeModal existing={modal.data} onSave={async d=>{ await saveEmployee(d, modal.data?.id); setModal(null); }} onClose={()=>setModal(null)} />}
+    {modal?.kind==='edit' && <AdminEmployeeModal existing={modal.data} canGrantAccess={canManageLogins}
+      onSave={async d=>{ await saveEmployee(d, modal.data?.id); setModal(null); }} onClose={()=>setModal(null)} />}
     {modal?.kind==='leave' && <CrewLeaveModal employee={modal.data}
       year={leaveYear} setYear={setLeaveYear} types={leaveTypes} balances={leaveBalances}
       saveEntitlement={saveEntitlement} onClose={()=>setModal(null)} />}
@@ -14111,8 +14119,10 @@ function AdminPromoPreviewModal({ promo, onClose }){
     </div>
   </div></div>;
 }
-function AdminEmployeeModal({ existing, onSave, onClose }){
+function AdminEmployeeModal({ existing, onSave, onClose, canGrantAccess }){
   const [d,setD]=useState({
+    is_admin: existing?.is_admin===true,
+    is_hr: existing?.is_hr===true,
     full_name: existing?.full_name||'',
     emp_no: existing?.emp_no||'',
     ic_no: existing?.ic_no||'',
@@ -14139,6 +14149,9 @@ function AdminEmployeeModal({ existing, onSave, onClose }){
       payload[k] = (v===''?null:v);
     });
     payload.full_name = d.full_name.trim();
+    // Only a sysadmin's edit may carry these. Anyone else's save leaves
+    // whatever is on the record alone rather than writing false over it.
+    if(!canGrantAccess){ delete payload.is_admin; delete payload.is_hr; }
     await onSave(payload);
     setBusy(false);
   }
@@ -14165,6 +14178,26 @@ function AdminEmployeeModal({ existing, onSave, onClose }){
         <div className="field" style={{margin:0}}><label>Bank account</label><input className="input" value={d.bank_account} onChange={e=>up('bank_account',e.target.value)} /></div>
       </div>
       <div className="field" style={{margin:0}}><label>Notes</label><textarea className="textarea" value={d.notes} onChange={e=>up('notes',e.target.value)} /></div>
+      {canGrantAccess && <div style={{background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:10,padding:'11px 13px'}}>
+        <div style={{fontWeight:800,fontSize:13,marginBottom:2}}>Access from the attendance app</div>
+        <div className="small subtle" style={{marginBottom:9}}>
+          What this person can do on their phone, beyond their own sessions. Neither is granted by
+          creating a login — both start off. A change reaches them at their next sign-in.
+        </div>
+        <label style={{display:'flex',gap:9,alignItems:'flex-start',cursor:'pointer',marginBottom:8}}>
+          <input type="checkbox" checked={!!d.is_admin} onChange={e=>up('is_admin',e.target.checked)} style={{marginTop:3}} />
+          <span className="small"><b>Can roster from the phone.</b> Sees the whole roster and every
+            worker's alerts, and can add, change or remove sessions. No leave, no documents.</span>
+        </label>
+        <label style={{display:'flex',gap:9,alignItems:'flex-start',cursor:'pointer'}}>
+          <input type="checkbox" checked={!!d.is_hr} onChange={e=>up('is_hr',e.target.checked)} style={{marginTop:3}} />
+          <span className="small"><b>Can approve leave.</b> Everything above, plus approving and
+            rejecting leave and opening the medical certificates attached to it.</span>
+        </label>
+        {d.is_hr && <div className="small" style={{marginTop:9,color:'#B45309',fontWeight:600}}>
+          ⚠ This lets them open anybody's MC from a phone. Grant it to people, not to roles.
+        </div>}
+      </div>}
       <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         <button className="btn btn-primary" disabled={busy||!d.full_name.trim()} onClick={save}>{busy?'Saving…':'Save'}</button>
