@@ -255,7 +255,10 @@
       }
       profile = rows[0];
       hide($('loginScreen'));
-      if (!profile.consented_at) { show($('consentScreen')); return; }
+      // The location notice is about being geolocated at a session. Someone
+      // with no sessions is never asked for their location, so putting it to
+      // them would be theatre.
+      if (!isOffice() && !profile.consented_at) { show($('consentScreen')); return; }
       enterApp();
     });
   }
@@ -295,13 +298,25 @@
     hide($('loginScreen')); hide($('consentScreen')); hide($('passwordScreen'));
     show($('appScreen'));
     $('whoName').textContent = profile.full_name || '';
-    $('whoId').textContent = profile.staff_id || '';
+    $('whoId').textContent = profile.staff_id || (isOffice() ? 'Office' : '');
     $('menuPassword').classList.toggle('hidden', !profile.must_change_password);
-    $('hrToggle').classList.toggle('hidden', !canRoster());
-    $('hrToggle').textContent = canApprove() ? 'HR' : 'Roster';
     // The tab goes, not just its contents: a button that refuses to open is
     // worse than one that was never there.
     $('apprTab').classList.toggle('hidden', !canApprove());
+
+    if (isOffice()) {
+      // One side only, so a switch between sides would switch to nothing.
+      // Both it and the way back are taken away rather than left to confuse.
+      $('hrToggle').classList.add('hidden');
+      $('meTab').classList.add('hidden');
+      refreshBadges();
+      setMode(true);
+      return;
+    }
+
+    $('hrToggle').classList.toggle('hidden', !canRoster());
+    $('hrToggle').textContent = canApprove() ? 'HR' : 'Roster';
+    $('meTab').classList.remove('hidden');
     if (canRoster()) refreshBadges();
     loadSettings().then(loadToday);
   }
@@ -889,6 +904,11 @@
   // in anybody's medical certificate. is_admin gets the first, is_hr the lot.
   function canRoster() { return !!(profile && (profile.is_hr || profile.is_admin)); }
   function canApprove() { return !!(profile && profile.is_hr); }
+  // Somebody from the office: a scheduler account signing in here with the
+  // same password they use on the desktop. No crew row, so no sessions of
+  // their own — nothing to consent to, nothing to punch, and no "Me" side to
+  // switch back to.
+  function isOffice() { return !!profile && !profile.crew_id; }
 
   function setMode(on) {
     hrMode = !!on;
@@ -1755,7 +1775,7 @@
     b.addEventListener('click', function () {
       var v = b.getAttribute('data-view');
       // The Me button on the HR bar is a way back, not a seventh view.
-      if (hrMode && v === 'Today') { setMode(false); return; }
+      if (hrMode && v === 'Today') { if (isOffice()) return; setMode(false); return; }
       showView(v);
       if (v === 'Today') loadToday();
     });
@@ -1764,7 +1784,8 @@
   // Refresh Today when the app comes back to the foreground — a worker
   // typically reopens it at the pool, minutes after last looking at it.
   document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && profile && !$('viewToday').classList.contains('hidden')) loadToday();
+    if (!document.hidden && profile && !isOffice()
+        && !$('viewToday').classList.contains('hidden')) loadToday();
   });
 
   if ('serviceWorker' in navigator) {

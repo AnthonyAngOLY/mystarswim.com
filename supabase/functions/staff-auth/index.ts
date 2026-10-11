@@ -172,6 +172,27 @@ Deno.serve(async (req) => {
         return json({ error: "This worker already has a login. Use reset instead." }, 409);
       }
 
+      // Scheduler logins and staff logins share one Auth namespace: both are
+      // minted as <name>@staff.mystarswim.internal. A staff ID equal to a
+      // scheduler username is therefore the SAME account, and provisioning it
+      // would quietly hand two people one identity and one password. Caught
+      // here, by name, rather than surfacing later as a login that behaves
+      // like somebody else's.
+      {
+        const { data: clash } = await db
+          .from("app_users")
+          .select("username")
+          .ilike("username", sid)
+          .maybeSingle();
+        if (clash) {
+          return json({
+            error: `"${sid}" is already a scheduler username. A staff ID and a ` +
+                   `scheduler username share one account, so this one needs to be ` +
+                   `different — try adding their employee number.`,
+          }, 409);
+        }
+      }
+
       const { data: created, error: createErr } = await db.auth.admin.createUser({
         email: emailFor(sid),
         password,
