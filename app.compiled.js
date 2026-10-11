@@ -163,39 +163,53 @@ function authHeadersFor() {
   };
 }
 // Swap an expired access token for a fresh one. Returns true on success.
+//
+// Shared between callers. loadAdminAll fires a dozen selects at once, so they
+// all meet an expired token together — and Supabase spends a refresh token
+// when it is used, so every caller after the first would present one that has
+// just been rotated away. Here that cost the JWT and dropped the screens back
+// to the anon key; in the worker app the same race signed people out.
+let sbRefreshInFlight = null;
 async function refreshSbSession() {
   if (!sbSession || !sbSession.refresh_token) return false;
-  try {
-    const res = await fetch(`${cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: {
-        apikey: cfg.supabaseAnonKey,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        refresh_token: sbSession.refresh_token
-      })
-    });
-    if (!res.ok) return false;
-    const d = await res.json();
-    if (!d.access_token) return false;
-    sbSession = {
-      access_token: d.access_token,
-      refresh_token: d.refresh_token || sbSession.refresh_token
-    };
-    // Keep the stored session in step so a reload does not start out stale.
+  if (sbRefreshInFlight) return sbRefreshInFlight;
+  sbRefreshInFlight = (async () => {
     try {
-      const raw = localStorage.getItem('ssb.auth');
-      if (raw) {
-        const a = JSON.parse(raw);
-        a.supabase = sbSession;
-        localStorage.setItem('ssb.auth', JSON.stringify(a));
-      }
-    } catch (_) {}
-    return true;
-  } catch (_) {
-    return false;
-  }
+      const res = await fetch(`${cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: {
+          apikey: cfg.supabaseAnonKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          refresh_token: sbSession.refresh_token
+        })
+      });
+      if (!res.ok) return false;
+      const d = await res.json();
+      if (!d.access_token) return false;
+      sbSession = {
+        access_token: d.access_token,
+        refresh_token: d.refresh_token || sbSession.refresh_token
+      };
+      // Keep the stored session in step so a reload does not start out stale.
+      try {
+        const raw = localStorage.getItem('ssb.auth');
+        if (raw) {
+          const a = JSON.parse(raw);
+          a.supabase = sbSession;
+          localStorage.setItem('ssb.auth', JSON.stringify(a));
+        }
+      } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
+  })().then(ok => {
+    sbRefreshInFlight = null;
+    return ok;
+  });
+  return sbRefreshInFlight;
 }
 function apiUrl(path) {
   return `${cfg.supabaseUrl}/rest/v1/${path}`;

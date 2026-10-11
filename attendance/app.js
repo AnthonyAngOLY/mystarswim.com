@@ -156,9 +156,18 @@
   }
 
   // Exchange the refresh token for a new access token. Returns true on success.
+  //
+  // Shared, because several requests discover an aged-out token at the same
+  // moment: opening the app fires the roster, the buddies and the alerts
+  // together. Supabase SPENDS a refresh token when it is used, so a second
+  // caller presenting the same one is refused — and the app read that refusal
+  // as "signed out" and sent the worker back to the password screen, in the
+  // middle of checking in. One refresh, everyone waits on it.
+  var refreshInFlight = null;
   function refreshSession() {
     if (!session || !session.refresh_token) return Promise.resolve(false);
-    return fetch(cfg.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = fetch(cfg.supabaseUrl + '/auth/v1/token?grant_type=refresh_token', {
       method: 'POST',
       headers: { 'apikey': cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: session.refresh_token })
@@ -170,7 +179,9 @@
         saveSession(session, session.persistent);
         return true;
       });
-    }).catch(function () { return false; });
+    }).catch(function () { return false; })
+      .then(function (ok) { refreshInFlight = null; return ok; });
+    return refreshInFlight;
   }
 
   // fetch + one transparent retry after a token refresh. An expired token is

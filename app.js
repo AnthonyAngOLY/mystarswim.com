@@ -95,8 +95,17 @@ function authHeadersFor(){
   return { ...BASE_HEADERS, Authorization: `Bearer ${sbSession.access_token}` };
 }
 // Swap an expired access token for a fresh one. Returns true on success.
+//
+// Shared between callers. loadAdminAll fires a dozen selects at once, so they
+// all meet an expired token together — and Supabase spends a refresh token
+// when it is used, so every caller after the first would present one that has
+// just been rotated away. Here that cost the JWT and dropped the screens back
+// to the anon key; in the worker app the same race signed people out.
+let sbRefreshInFlight = null;
 async function refreshSbSession(){
   if(!sbSession || !sbSession.refresh_token) return false;
+  if(sbRefreshInFlight) return sbRefreshInFlight;
+  sbRefreshInFlight = (async () => {
   try{
     const res = await fetch(`${cfg.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
       method:'POST',
@@ -114,6 +123,8 @@ async function refreshSbSession(){
     }catch(_){}
     return true;
   }catch(_){ return false; }
+  })().then(ok => { sbRefreshInFlight = null; return ok; });
+  return sbRefreshInFlight;
 }
 function apiUrl(path){ return `${cfg.supabaseUrl}/rest/v1/${path}`; }
 async function rest(path, opts={}){
