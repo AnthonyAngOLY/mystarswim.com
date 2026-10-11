@@ -581,6 +581,275 @@
     }, 1000);
   }
 
+  // ── Leave ──────────────────────────────────────────────────────────────
+  var leaveBalances = [], leaveRequests = [], leaveFormOpen = false;
+
+  var LV_STATUS = { pending:'Pending', approved:'Approved',
+                    rejected:'Not approved', cancelled:'Withdrawn' };
+
+  function fmtLeaveDate(d) {
+    if (!d) return '';
+    try {
+      return new Intl.DateTimeFormat('en-GB',
+        { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' })
+        .format(new Date(d + 'T00:00:00+08:00'));
+    } catch (e) { return d; }
+  }
+  function leaveRange(r) {
+    return r.start_date === r.end_date
+      ? fmtLeaveDate(r.start_date)
+      : fmtLeaveDate(r.start_date) + ' – ' + fmtLeaveDate(r.end_date);
+  }
+  function daysBetween(a, b) {
+    if (!a || !b) return 0;
+    var d1 = new Date(a + 'T00:00:00+08:00'), d2 = new Date(b + 'T00:00:00+08:00');
+    return Math.round((d2 - d1) / 86400000) + 1;
+  }
+  function todayISO() { return todayKL(); }
+
+  function loadLeave() {
+    $('leaveBalances').innerHTML = '<p class="empty">Loading…</p>';
+    return Promise.all([
+      rpc('get_my_leave_balances').catch(function () { return []; }),
+      api('/rest/v1/leave_requests?select=id,leave_type_id,start_date,end_date,days,reason,'
+        + 'status,document_path,applied_at,decision_note&order=applied_at.desc')
+        .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
+    ]).then(function (res) {
+      leaveBalances = res[0] || [];
+      leaveRequests = res[1] || [];
+      renderLeave();
+    });
+  }
+
+  function renderLeave() {
+    var box = $('leaveBalances');
+    if (!leaveBalances.length) {
+      box.innerHTML = '<div class="note info">Your leave allowance has not been set up yet. '
+        + 'Your admin enters it, and it will appear here.</div>';
+    } else {
+      box.innerHTML = leaveBalances.map(function (b) {
+        var left = Number(b.days_available);
+        // Unpaid leave has no ceiling, so "0 left" would read as "you may not
+        // apply" — the opposite of the truth.
+        var uncapped = b.cap_days == null && Number(b.days_given) === 0;
+        var cls = uncapped ? ' free' : left < 0 ? ' over' : left === 0 ? ' none' : '';
+        var bits = uncapped
+          ? [Number(b.days_used).toFixed(0) + ' taken', 'no limit']
+          : [Number(b.days_given).toFixed(0) + ' given',
+             Number(b.days_used).toFixed(0) + ' taken'];
+        if (b.is_paid === false && !uncapped) bits.push('unpaid');
+        return '<div class="lv-bal">'
+          + '<div class="name">' + esc(b.label) + '</div>'
+          + '<div class="left' + cls + '">'
+          +   (uncapped ? 'No limit' : left.toFixed(left % 1 ? 1 : 0) + '<small>left</small>')
+          + '</div>'
+          + '<p class="sub">' + esc(bits.join(' · ')) + '</p>'
+          + '</div>';
+      }).join('');
+    }
+
+    var list = $('leaveList');
+    if (!leaveRequests.length) {
+      list.innerHTML = '<p class="empty">You have not applied for any leave.</p>';
+      return;
+    }
+    var typeLabel = {};
+    leaveBalances.forEach(function (b) { typeLabel[b.leave_type_id] = b.label; });
+    list.innerHTML = leaveRequests.map(function (r) {
+      // Theirs to withdraw while it is still ahead of them.
+      var canCancel = (r.status === 'pending')
+        || (r.status === 'approved' && r.start_date > todayISO());
+      return '<div class="lv-req st-' + esc(r.status) + '">'
+        + '<div class="top"><div class="kind">' + esc(typeLabel[r.leave_type_id] || 'Leave') + '</div>'
+        +   '<span class="lv-pill">' + esc(LV_STATUS[r.status] || r.status) + '</span></div>'
+        + '<div class="when">' + esc(leaveRange(r)) + ' · '
+        +   esc(Number(r.days).toFixed(Number(r.days) % 1 ? 1 : 0))
+        +   ' day' + (Number(r.days) === 1 ? '' : 's') + '</div>'
+        + (r.reason ? '<div class="why">' + esc(r.reason) + '</div>' : '')
+        + (r.document_path ? '<div class="why">📎 Document attached</div>' : '')
+        + (r.decision_note ? '<div class="note info">Your admin said: ' + esc(r.decision_note) + '</div>' : '')
+        + (canCancel
+            ? '<button class="btn small-btn" data-cancel="' + esc(r.id) + '"'
+              + ' style="background:var(--slate-tx)">Withdraw</button>'
+            : '')
+        + '</div>';
+    }).join('');
+
+    Array.prototype.forEach.call(list.querySelectorAll('[data-cancel]'), function (b) {
+      b.addEventListener('click', function () {
+        b.disabled = true; b.textContent = 'Withdrawing…';
+        rpc('cancel_my_leave', { p_request_id: b.getAttribute('data-cancel') })
+          .then(loadLeave)
+          .catch(function (e) {
+            b.disabled = false; b.textContent = 'Withdraw';
+            leaveNote(e.message, true);
+          });
+      });
+    });
+  }
+
+  function leaveNote(msg, bad) {
+    $('leaveMsg').innerHTML = msg
+      ? '<div class="note ' + (bad ? 'err' : 'ok') + '">' + esc(msg) + '</div>' : '';
+  }
+
+  // A photo of an MC off a phone is several megabytes of detail nobody needs.
+  // Long edge 1600px and JPEG quality 0.82 keeps a certificate readable at a
+  // fraction of the size — which matters on a pool deck with one bar of signal.
+  function shrinkImage(file) {
+    return new Promise(function (resolve, reject) {
+      if (!/^image\//.test(file.type)) return resolve(file);   // a PDF goes as-is
+      var img = new Image(), url = URL.createObjectURL(file);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var max = 1600, w = img.width, h = img.height;
+        if (w > max || h > max) {
+          if (w >= h) { h = Math.round(h * max / w); w = max; }
+          else        { w = Math.round(w * max / h); h = max; }
+        }
+        var c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        c.toBlob(function (blob) {
+          resolve(blob ? new File([blob], 'doc.jpg', { type: 'image/jpeg' }) : file);
+        }, 'image/jpeg', 0.82);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('That image could not be read.')); };
+      img.src = url;
+    });
+  }
+
+  // Into the worker's own folder. The bucket is private and the policy keys on
+  // the folder name, so a path outside their own crew id is refused server-side.
+  function uploadLeaveDoc(file) {
+    return shrinkImage(file).then(function (small) {
+      var ext = small.type === 'application/pdf' ? 'pdf' : 'jpg';
+      var path = profile.crew_id + '/' + Date.now() + '.' + ext;
+      return fetch(cfg.supabaseUrl + '/storage/v1/object/leave-docs/' + path, {
+        method: 'POST',
+        headers: {
+          'apikey': cfg.supabaseAnonKey,
+          'Authorization': 'Bearer ' + (session && session.access_token),
+          'Content-Type': small.type || 'image/jpeg'
+        },
+        body: small
+      }).catch(asOffline).then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(readableError(t, 'Could not upload that.')); });
+        return path;
+      });
+    });
+  }
+
+  function openLeaveForm() {
+    if (leaveFormOpen) return;
+    leaveFormOpen = true;
+    leaveNote('');
+    $('leaveApplyBtn').classList.add('hidden');
+
+    var opts = leaveBalances.map(function (b) {
+      var free = b.cap_days == null && Number(b.days_given) === 0;
+      return '<option value="' + esc(b.code) + '" data-doc="' + (b.requires_document ? '1' : '')
+        + '" data-free="' + (free ? '1' : '')
+        + '" data-left="' + esc(b.days_available) + '">' + esc(b.label) + '</option>';
+    }).join('');
+
+    var form = document.createElement('div');
+    form.className = 'lv-form';
+    form.id = 'leaveForm';
+    form.innerHTML =
+        '<label for="lvType">Kind of leave</label>'
+      + '<select id="lvType">' + opts + '</select>'
+      + '<div class="row"><div><label for="lvFrom">First day</label>'
+      +   '<input type="date" id="lvFrom" value="' + todayISO() + '" /></div>'
+      +   '<div><label for="lvTo">Last day</label>'
+      +   '<input type="date" id="lvTo" value="' + todayISO() + '" /></div></div>'
+      + '<label for="lvWhy">Reason (optional)</label>'
+      + '<textarea id="lvWhy" rows="2" placeholder="Anything your admin should know"></textarea>'
+      + '<div id="lvDoc"></div>'
+      + '<div id="lvWarn"></div>'
+      + '<button class="btn" id="lvSend" style="margin-top:12px">Send application</button>'
+      + '<button class="btn ghost" id="lvClose" style="margin-top:8px">Cancel</button>';
+    $('leaveApplyBtn').parentNode.insertBefore(form, $('leaveMsg'));
+
+    var docFile = null;
+    function refresh() {
+      var sel = $('lvType'), opt = sel.options[sel.selectedIndex];
+      var needsDoc = opt && opt.getAttribute('data-doc') === '1';
+      var left = opt ? Number(opt.getAttribute('data-left')) : 0;
+      var days = daysBetween($('lvFrom').value, $('lvTo').value);
+
+      $('lvDoc').innerHTML = needsDoc
+        ? '<div class="lv-doc"><b>A photo is required for this.</b> '
+          + 'Your MC or the certificate — a clear photo is enough.'
+          + '<input type="file" id="lvFile" accept="image/*,application/pdf" capture="environment" />'
+          + '<div id="lvThumb"></div></div>'
+        : '';
+      if (needsDoc) {
+        $('lvFile').addEventListener('change', function (e) {
+          docFile = e.target.files[0] || null;
+          $('lvThumb').innerHTML = docFile && /^image\//.test(docFile.type)
+            ? '<img class="thumb" src="' + URL.createObjectURL(docFile) + '" alt="" />' : '';
+        });
+      } else { docFile = null; }
+
+      // Over the allowance is allowed through — a hospital stay does not stop
+      // because the allowance did. It says so rather than refusing.
+      var noCeiling = opt && opt.getAttribute('data-free') === '1';
+      $('lvWarn').innerHTML = (days > 0 && !noCeiling && left != null && days > left)
+        ? '<div class="lv-warn">That is ' + days + ' day' + (days === 1 ? '' : 's')
+          + ', and you have ' + left.toFixed(left % 1 ? 1 : 0)
+          + ' left. You can still apply — your admin decides.</div>'
+        : (days > 0
+            ? '<div class="note info" style="margin:10px 0 0">' + days + ' day'
+              + (days === 1 ? '' : 's') + '.</div>'
+            : '<div class="note err" style="margin:10px 0 0">The last day is before the first.</div>');
+    }
+    $('lvType').addEventListener('change', refresh);
+    $('lvFrom').addEventListener('change', function () {
+      if ($('lvTo').value < $('lvFrom').value) $('lvTo').value = $('lvFrom').value;
+      refresh();
+    });
+    $('lvTo').addEventListener('change', refresh);
+    refresh();
+
+    $('lvClose').addEventListener('click', closeLeaveForm);
+    $('lvSend').addEventListener('click', function () {
+      var btn = $('lvSend');
+      var sel = $('lvType'), opt = sel.options[sel.selectedIndex];
+      var needsDoc = opt && opt.getAttribute('data-doc') === '1';
+      var from = $('lvFrom').value, to = $('lvTo').value;
+      if (!from || !to || daysBetween(from, to) < 1) { leaveNote('Check the dates.', true); return; }
+      if (needsDoc && !docFile) { leaveNote('A photo of your document is needed for this.', true); return; }
+
+      btn.disabled = true; btn.textContent = 'Sending…';
+      leaveNote('');
+      (needsDoc ? uploadLeaveDoc(docFile) : Promise.resolve(null))
+        .then(function (path) {
+          return rpc('apply_for_leave', {
+            p_type_code: sel.value, p_start: from, p_end: to,
+            p_reason: ($('lvWhy').value || '').trim() || null,
+            p_document_path: path
+          });
+        })
+        .then(function () {
+          closeLeaveForm();
+          leaveNote('Sent. Your admin will decide and you will see it here.');
+          return loadLeave();
+        })
+        .catch(function (e) {
+          btn.disabled = false; btn.textContent = 'Send application';
+          leaveNote(e.message, true);
+        });
+    });
+  }
+
+  function closeLeaveForm() {
+    var f = $('leaveForm');
+    if (f) f.remove();
+    leaveFormOpen = false;
+    $('leaveApplyBtn').classList.remove('hidden');
+  }
+
   // Used by Today, History, and a box re-opened for editing.
   function wireExplain(root) {
     Array.prototype.forEach.call(root.querySelectorAll('.chip'), function (c) {
@@ -930,6 +1199,8 @@
     maybeOfferPasswordChange();
   });
 
+  $('leaveApplyBtn').addEventListener('click', openLeaveForm);
+
   $('consentSignOut').addEventListener('click', signOut);
   $('signOutBtn').addEventListener('click', signOut);
 
@@ -939,10 +1210,11 @@
       Array.prototype.forEach.call(document.querySelectorAll('nav button'), function (x) {
         x.classList.toggle('active', x === b);
       });
-      ['Today', 'History', 'Summary'].forEach(function (name) {
+      ['Today', 'History', 'Leave', 'Summary'].forEach(function (name) {
         $('view' + name).classList.toggle('hidden', name !== v);
       });
       if (v === 'History') loadHistory();
+      if (v === 'Leave')   { closeLeaveForm(); loadLeave(); }
       if (v === 'Summary') loadSummary();
       if (v === 'Today') loadToday();
     });

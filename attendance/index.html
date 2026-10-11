@@ -128,6 +128,53 @@
   .explain{margin-top:10px; padding:10px 11px; border-radius:9px;
            background:var(--amber-bg); border:1px solid var(--amber-bd)}
   .explain.done{background:var(--green-bg); border-color:var(--green-bd)}
+  /* Leave: what you have, and what you have asked for. */
+  .lv-h2{font-size:15px; font-weight:700; margin:22px 0 8px}
+  .lv-bal{display:grid; grid-template-columns:1fr auto; gap:2px 10px; align-items:baseline;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:11px 13px; margin-bottom:8px}
+  .lv-bal .name{font-size:14.5px; font-weight:700}
+  .lv-bal .sub{font-size:11.5px; color:var(--muted); margin:0; grid-column:1}
+  .lv-bal .left{font-size:19px; font-weight:800; grid-column:2; grid-row:1 / span 2;
+    align-self:center; text-align:right; color:var(--green-tx)}
+  .lv-bal .left.free{font-size:13px; color:var(--muted); font-weight:700}
+  .lv-bal .left.none{color:var(--amber-tx)}
+  .lv-bal .left.over{color:var(--red-tx)}
+  .lv-bal .left small{display:block; font-size:10.5px; font-weight:600; color:var(--muted)}
+  .lv-req{background:var(--surface); border:1px solid var(--border); border-left-width:5px;
+    border-radius:10px; padding:11px 13px; margin-bottom:8px}
+  .lv-req.st-pending{border-left-color:var(--amber-tx)}
+  .lv-req.st-approved{border-left-color:var(--green-tx)}
+  .lv-req.st-rejected{border-left-color:var(--red-tx)}
+  .lv-req.st-cancelled{border-left-color:var(--slate-bd)}
+  .lv-req .top{display:flex; justify-content:space-between; align-items:baseline; gap:10px}
+  .lv-req .kind{font-size:14.5px; font-weight:700}
+  .lv-req .when{font-size:13px; color:var(--muted); margin-top:2px}
+  .lv-req .why{font-size:13px; margin-top:5px}
+  .lv-req .note{font-size:12.5px; margin:6px 0 0; padding:7px 9px}
+  .lv-pill{font-size:11px; font-weight:800; padding:2px 8px; border-radius:999px;
+    border:1px solid; white-space:nowrap}
+  .st-pending   .lv-pill{background:var(--amber-bg); color:var(--amber-tx); border-color:var(--amber-bd)}
+  .st-approved  .lv-pill{background:var(--green-bg); color:var(--green-tx); border-color:var(--green-bd)}
+  .st-rejected  .lv-pill{background:var(--red-bg);   color:var(--red-tx);   border-color:var(--red-bd)}
+  .st-cancelled .lv-pill{background:var(--slate-bg); color:var(--slate-tx); border-color:var(--slate-bd)}
+  .lv-form{background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:14px; margin-top:12px}
+  .lv-form label{display:block; font-size:12px; font-weight:700; margin:10px 0 4px}
+  .lv-form label:first-of-type{margin-top:0}
+  .lv-form select, .lv-form input[type=date], .lv-form textarea{
+    width:100%; padding:11px 12px; font:inherit; font-size:15px;
+    border:1px solid var(--border); border-radius:9px; background:var(--surface); color:var(--text)}
+  .lv-form .row{display:flex; gap:9px}
+  .lv-form .row > div{flex:1; min-width:0}
+  .lv-warn{margin-top:10px; padding:10px 12px; border-radius:9px; font-size:13px;
+    background:var(--amber-bg); color:var(--amber-tx); border:1px solid var(--amber-bd)}
+  .lv-doc{margin-top:10px; padding:11px 12px; border-radius:9px; font-size:13px;
+    background:var(--primary-soft); color:var(--primary-on-soft); border:1px solid #BAE6FD}
+  .lv-doc input[type=file]{display:block; margin-top:7px; font-size:13px; max-width:100%}
+  .lv-doc .thumb{margin-top:8px; max-width:100%; max-height:170px; border-radius:8px;
+    border:1px solid var(--border); display:block}
+
   /* Nothing left to do here, and it should not look like there is. */
   .explain.locked{background:var(--slate-bg); border-color:var(--slate-bd); opacity:.8}
   .explain.locked .ask{color:var(--slate-tx)}
@@ -299,6 +346,16 @@
       <div id="historyList"></div>
     </div>
 
+    <div id="viewLeave" class="hidden">
+      <h1>Leave</h1>
+      <p class="sub" id="leaveSub">What you have, and what you have asked for.</p>
+      <div id="leaveBalances"></div>
+      <button class="btn" id="leaveApplyBtn" type="button" style="margin-top:14px">Apply for leave</button>
+      <div id="leaveMsg"></div>
+      <h2 class="lv-h2">Your applications</h2>
+      <div id="leaveList"></div>
+    </div>
+
     <div id="viewSummary" class="hidden">
       <h1>My summary</h1>
       <p class="sub">Hours by category.</p>
@@ -310,6 +367,7 @@
   <nav>
     <button data-view="Today"   class="active"><span class="ic">📅</span>Today</button>
     <button data-view="History"><span class="ic">🕘</span>History</button>
+    <button data-view="Leave"><span class="ic">🏖</span>Leave</button>
     <button data-view="Summary"><span class="ic">📊</span>Summary</button>
   </nav>
 </section>

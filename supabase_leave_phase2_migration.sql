@@ -42,18 +42,46 @@ as $$
 $$;
 
 -- ── What the worker's app asks for ──────────────────────────────────────────
+-- Every active kind, whether or not an allowance has been entered. Driving
+-- this off the entitlements table alone meant a worker could not even apply
+-- for unpaid leave until somebody had typed a zero against it, which is a
+-- setup step nobody would remember and an error nobody could diagnose.
+-- The return type gains a column, which CREATE OR REPLACE cannot do, so this
+-- file stays re-runnable only with the drop.
+drop function if exists get_my_leave_balances(integer);
 create or replace function get_my_leave_balances(p_year integer default null)
 returns table (code text, label text, requires_document boolean, is_paid boolean,
-               days_given numeric, days_used numeric, days_available numeric,
-               sort_order integer)
+               cap_days numeric, days_given numeric, days_used numeric,
+               days_available numeric, sort_order integer)
 language sql stable security definer set search_path = public
 as $$
-  select b.code, b.label, b.requires_document, b.is_paid,
-         b.days_given, b.days_used, b.days_available, b.sort_order
-    from v_leave_balances b
-   where b.crew_id = attendance_my_crew_id()
-     and b.year = coalesce(p_year, extract(year from current_date)::integer)
-   order by b.sort_order;
+  with yr as (select coalesce(p_year, extract(year from current_date)::integer) as y),
+       me as (select attendance_my_crew_id() as crew)
+  select t.code, t.label, t.requires_document, t.is_paid,
+         t.default_cap_days,
+         coalesce(e.days_given, 0)::numeric as days_given,
+         coalesce((
+           select sum(r.days) from leave_requests r
+            where r.crew_id = (select crew from me)
+              and r.leave_type_id = t.id
+              and r.status = 'approved'
+              and extract(year from r.start_date) = (select y from yr)
+         ), 0)::numeric as days_used,
+         (coalesce(e.days_given, 0) - coalesce((
+           select sum(r.days) from leave_requests r
+            where r.crew_id = (select crew from me)
+              and r.leave_type_id = t.id
+              and r.status = 'approved'
+              and extract(year from r.start_date) = (select y from yr)
+         ), 0))::numeric as days_available,
+         t.sort_order
+    from leave_types t
+    left join leave_entitlements e
+      on e.leave_type_id = t.id
+     and e.crew_id = (select crew from me)
+     and e.year = (select y from yr)
+   where t.is_active
+   order by t.sort_order;
 $$;
 
 -- ── Applying ────────────────────────────────────────────────────────────────
