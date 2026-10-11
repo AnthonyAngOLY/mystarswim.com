@@ -297,6 +297,8 @@
     $('whoName').textContent = profile.full_name || '';
     $('whoId').textContent = profile.staff_id || '';
     $('menuPassword').classList.toggle('hidden', !profile.must_change_password);
+    $('hrToggle').classList.toggle('hidden', !profile.is_hr);
+    if (profile.is_hr) refreshBadges();
     loadSettings().then(loadToday);
   }
 
@@ -850,6 +852,507 @@
     $('leaveApplyBtn').classList.remove('hidden');
   }
 
+  // ── HR on the phone ────────────────────────────────────────────────────
+  // A switch rather than a seventh tab: four things fit a phone's bottom bar
+  // legibly, and this app needs four on each side.
+  var hrMode = false, hrCrew = [], hrLocations = [], hrCats = [];
+  var rsWeekStart = null, rsDay = null, rsShifts = [], rsPunches = [];
+  var hrAlerts = [], hrAlertSeg = 'open', apprSeg = 'pending', apprList = [];
+
+  // Calendar arithmetic, not instant arithmetic. The rest of the app is careful
+  // to work in the pool's timezone, and getDay()/setDate() quietly use the
+  // device's — so a phone set to anything but Malaysia would draw the week
+  // from the wrong Monday. Anchoring at noon UTC puts the date far enough from
+  // either midnight that no offset can tip it into the day before.
+  function mondayOf(iso) {
+    var d = new Date(iso + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  }
+  function addDaysISO(iso, n) {
+    var d = new Date(iso + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+  function dowShort(iso) {
+    return new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short' })
+      .format(new Date(iso + 'T00:00:00+08:00'));
+  }
+  function dayNum(iso) { return String(Number(iso.slice(8, 10))); }
+
+  function setMode(on) {
+    hrMode = !!on;
+    $('mainNav').classList.toggle('hidden', hrMode);
+    $('hrNav').classList.toggle('hidden', !hrMode);
+    $('hrToggle').classList.toggle('on', hrMode);
+    $('hrToggle').textContent = hrMode ? 'Me' : 'HR';
+    showView(hrMode ? 'Roster' : 'Today');
+  }
+
+  var ALL_VIEWS = ['Today','History','Leave','Summary','Roster','Alerts','Approvals'];
+  function showView(v) {
+    ALL_VIEWS.forEach(function (name) {
+      var el = $('view' + name);
+      if (el) el.classList.toggle('hidden', name !== v);
+    });
+    var nav = hrMode ? $('hrNav') : $('mainNav');
+    Array.prototype.forEach.call(nav.querySelectorAll('button'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-view') === v);
+    });
+    if (v === 'History')   loadHistory();
+    if (v === 'Leave')     { closeLeaveForm(); loadLeave(); }
+    if (v === 'Summary')   loadSummary();
+    if (v === 'Roster')    loadRoster();
+    if (v === 'Alerts')    loadHrAlerts();
+    if (v === 'Approvals') loadApprovals();
+  }
+
+  // Loaded once when HR mode is first opened: the pickers barely change.
+  function loadHrRefs() {
+    if (hrCrew.length) return Promise.resolve();
+    return Promise.all([
+      rpc('get_rosterable_crew').catch(function () { return []; }),
+      api('/rest/v1/locations?select=id,name,is_active&order=name.asc')
+        .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
+      api('/rest/v1/shift_categories?select=id,name,sort_order&order=sort_order.asc')
+        .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
+    ]).then(function (res) {
+      hrCrew = res[0] || [];
+      hrLocations = (res[1] || []).filter(function (l) { return l.is_active !== false; });
+      hrCats = res[2] || [];
+    });
+  }
+
+  // ── Roster ─────────────────────────────────────────────────────────────
+  function loadRoster() {
+    if (!rsWeekStart) { rsWeekStart = mondayOf(todayKL()); rsDay = todayKL(); }
+    if (rsDay < rsWeekStart || rsDay > addDaysISO(rsWeekStart, 6)) rsDay = rsWeekStart;
+    $('rosterList').innerHTML = '<p class="empty">Loading…</p>';
+    return loadHrRefs().then(function () {
+      var from = rsWeekStart, to = addDaysISO(rsWeekStart, 6);
+      return api('/rest/v1/shifts?select=id,crew_id,shift_date,start_time,end_time,'
+        + 'location_id,category_id,status,is_void'
+        + '&is_void=eq.false&shift_date=gte.' + from + '&shift_date=lte.' + to
+        + '&order=shift_date.asc,start_time.asc')
+        .then(function (r) { return r.ok ? r.json() : []; });
+    }).then(function (rows) {
+      rsShifts = rows || [];
+      renderRoster();
+    }).catch(function (e) {
+      $('rosterList').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function renderRoster() {
+    var end = addDaysISO(rsWeekStart, 6);
+    $('wkLabel').textContent =
+      new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short' })
+        .format(new Date(rsWeekStart + 'T00:00:00+08:00'))
+      + ' – ' +
+      new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short', year: 'numeric' })
+        .format(new Date(end + 'T00:00:00+08:00'));
+
+    var today = todayKL();
+    var byDay = {};
+    rsShifts.forEach(function (s) { (byDay[s.shift_date] = byDay[s.shift_date] || []).push(s); });
+
+    var strip = '';
+    for (var i = 0; i < 7; i++) {
+      var d = addDaysISO(rsWeekStart, i);
+      var n = (byDay[d] || []).length;
+      strip += '<button class="day-chip' + (d === rsDay ? ' on' : '')
+        + (d === today ? ' today' : '') + (d < today ? ' past' : '') + '" data-day="' + d + '">'
+        + '<span class="dow">' + esc(dowShort(d)) + '</span>'
+        + '<span class="dnum">' + esc(dayNum(d)) + '</span>'
+        + '<span class="cnt' + (n ? '' : ' none') + '"></span></button>';
+    }
+    $('dayStrip').innerHTML = strip;
+    Array.prototype.forEach.call($('dayStrip').querySelectorAll('[data-day]'), function (b) {
+      b.addEventListener('click', function () { rsDay = b.getAttribute('data-day'); renderRoster(); });
+    });
+    // Seven chips do not fit a phone's width, so the day being looked at has
+    // to be brought to where it can be seen — otherwise today sits half off
+    // the right edge, which is exactly where it must not be.
+    var sel = $('dayStrip').querySelector('.day-chip.on');
+    if (sel && sel.scrollIntoView) {
+      try { sel.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {}
+    }
+
+    $('rsDayLabel').textContent = prettyDate(rsDay);
+
+    var crewName = {}; hrCrew.forEach(function (c) { crewName[c.id] = c.full_name; });
+    var locName  = {}; hrLocations.forEach(function (l) { locName[l.id] = l.name; });
+    var catName  = {}; hrCats.forEach(function (c) { catName[c.id] = c.name; });
+
+    // Sorted here rather than trusted from the query: the order a day reads in
+    // is the whole point of the screen.
+    var list = (byDay[rsDay] || []).slice().sort(function (a, b) {
+      return String(a.start_time).localeCompare(String(b.start_time));
+    });
+    $('rosterList').innerHTML = list.length
+      ? list.map(function (s) {
+          return '<div class="rs-card s-' + esc(s.status) + '" data-shift="' + esc(s.id) + '">'
+            + '<div class="t1"><span class="time">' + esc(prettyTime(s.start_time))
+            +   ' – ' + esc(prettyTime(s.end_time)) + '</span>'
+            +   '<span class="pill p-' + esc(s.status) + '">' + esc(statusLabel(s.status)) + '</span></div>'
+            + '<div class="who">' + esc(crewName[s.crew_id] || 'Unassigned') + '</div>'
+            + '<div class="meta">' + esc(locName[s.location_id] || '—')
+            +   (catName[s.category_id] ? ' · ' + esc(catName[s.category_id]) : '') + '</div>'
+            + '</div>';
+        }).join('')
+      : '<p class="empty">Nothing rostered.</p>';
+
+    Array.prototype.forEach.call($('rosterList').querySelectorAll('[data-shift]'), function (c) {
+      c.addEventListener('click', function () {
+        var sh = rsShifts.filter(function (x) { return x.id === c.getAttribute('data-shift'); })[0];
+        if (sh) openShiftSheet(sh);
+      });
+    });
+
+    // A day already gone takes no new sessions, the same rule the desktop
+    // roster follows.
+    $('rsAdd').disabled = rsDay < today;
+    $('rsAdd').textContent = rsDay < today ? 'That day has passed' : '+ Add session';
+    $('rsCopy').disabled = addDaysISO(rsWeekStart, 6) < today;
+  }
+
+  function rosterNote(msg, bad) {
+    $('rosterMsg').innerHTML = msg
+      ? '<div class="note ' + (bad ? 'err' : 'ok') + '">' + esc(msg) + '</div>' : '';
+  }
+
+  // ── The sheet ──────────────────────────────────────────────────────────
+  function closeSheet() {
+    var b = document.querySelector('.sheet-back'), s = document.querySelector('.sheet');
+    if (b) b.remove();
+    if (s) s.remove();
+  }
+
+  function openShiftSheet(shift) {
+    closeSheet();
+    var isNew = !shift;
+    var back = document.createElement('div');
+    back.className = 'sheet-back';
+    back.addEventListener('click', closeSheet);
+
+    var opt = function (rows, sel, labelKey) {
+      return rows.map(function (r) {
+        return '<option value="' + esc(r.id) + '"' + (r.id === sel ? ' selected' : '') + '>'
+          + esc(r[labelKey]) + '</option>';
+      }).join('');
+    };
+
+    var sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.innerHTML =
+        '<div class="grab"></div>'
+      + '<h3>' + (isNew ? 'New session' : 'Edit session') + '</h3>'
+      + '<p class="sub" style="margin:0">' + esc(prettyDate(isNew ? rsDay : shift.shift_date)) + '</p>'
+      + '<label for="shWho">Worker</label>'
+      + '<select id="shWho"><option value="">Choose…</option>'
+      +   opt(hrCrew, isNew ? '' : shift.crew_id, 'full_name') + '</select>'
+      + '<label for="shLoc">Pool</label>'
+      + '<select id="shLoc">' + opt(hrLocations, isNew ? (hrLocations[0] || {}).id : shift.location_id, 'name') + '</select>'
+      + '<label for="shCat">Category</label>'
+      + '<select id="shCat">' + opt(hrCats, isNew ? (hrCats[0] || {}).id : shift.category_id, 'name') + '</select>'
+      + '<div class="row"><div><label for="shFrom">Start</label>'
+      +   '<input type="time" id="shFrom" value="' + (isNew ? '09:00' : String(shift.start_time).slice(0, 5)) + '" /></div>'
+      +   '<div><label for="shTo">End</label>'
+      +   '<input type="time" id="shTo" value="' + (isNew ? '11:00' : String(shift.end_time).slice(0, 5)) + '" /></div></div>'
+      + (isNew
+          ? '<label for="shRepeat">Repeat weekly</label>'
+            + '<select id="shRepeat"><option value="1">Just this once</option>'
+            + '<option value="2">2 weeks</option><option value="4">4 weeks</option>'
+            + '<option value="8">8 weeks</option><option value="12">12 weeks</option></select>'
+          : '')
+      + '<div id="shErr"></div>'
+      + '<button class="btn" id="shSave" style="margin-top:14px">'
+      +   (isNew ? 'Add session' : 'Save changes') + '</button>'
+      + (isNew ? '' : '<button class="btn ghost" id="shVoid" style="margin-top:8px;color:var(--red-tx)">Remove this session</button>')
+      + '<button class="btn ghost" id="shCancel" style="margin-top:8px">Cancel</button>';
+
+    document.body.appendChild(back);
+    document.body.appendChild(sheet);
+
+    function err(m) {
+      $('shErr').innerHTML = m ? '<div class="note err" style="margin:12px 0 0">' + esc(m) + '</div>' : '';
+    }
+
+    $('shCancel').addEventListener('click', closeSheet);
+    $('shSave').addEventListener('click', function () {
+      var who = $('shWho').value, from = $('shFrom').value, to = $('shTo').value;
+      if (!who) { err('Choose who is working.'); return; }
+      if (!from || !to || to <= from) { err('The end time must be after the start.'); return; }
+
+      var btn = $('shSave');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      err('');
+
+      var base = {
+        crew_id: who, location_id: $('shLoc').value, category_id: $('shCat').value,
+        start_time: from + ':00', end_time: to + ':00'
+      };
+      var work;
+      if (isNew) {
+        var weeks = Number(($('shRepeat') || {}).value || 1);
+        var rows = [];
+        for (var i = 0; i < weeks; i++) {
+          rows.push(Object.keys(base).reduce(function (o, k) { o[k] = base[k]; return o; },
+            { shift_date: addDaysISO(rsDay, i * 7) }));
+        }
+        work = api('/rest/v1/shifts', {
+          method: 'POST',
+          body: JSON.stringify(rows)
+        }).then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(readableError(t)); });
+          return rows.length;
+        });
+      } else {
+        work = api('/rest/v1/shifts?id=eq.' + encodeURIComponent(shift.id), {
+          method: 'PATCH',
+          body: JSON.stringify(base)
+        }).then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(readableError(t)); });
+          return 0;
+        });
+      }
+
+      work.then(function (n) {
+        closeSheet();
+        rosterNote(isNew
+          ? (n > 1 ? n + ' sessions added.' : 'Session added.')
+          : 'Session updated.');
+        return loadRoster();
+      }).catch(function (e) {
+        btn.disabled = false; btn.textContent = isNew ? 'Add session' : 'Save changes';
+        err(e.message);
+      });
+    });
+
+    if (!isNew) {
+      $('shVoid').addEventListener('click', function () {
+        var b = $('shVoid');
+        if (b.getAttribute('data-sure') !== '1') {
+          b.setAttribute('data-sure', '1');
+          b.textContent = 'Tap again to remove';
+          return;
+        }
+        b.disabled = true; b.textContent = 'Removing…';
+        // Voided, never deleted: the session is evidence of what was planned.
+        api('/rest/v1/shifts?id=eq.' + encodeURIComponent(shift.id), {
+          method: 'PATCH', body: JSON.stringify({ is_void: true })
+        }).then(function (r) {
+          if (!r.ok) return r.text().then(function (t) { throw new Error(readableError(t)); });
+          closeSheet();
+          rosterNote('Session removed.');
+          return loadRoster();
+        }).catch(function (e) {
+          b.disabled = false; b.textContent = 'Remove this session';
+          err(e.message);
+        });
+      });
+    }
+  }
+
+  function copyLastWeek() {
+    var btn = $('rsCopy');
+    if (btn.getAttribute('data-sure') !== '1') {
+      btn.setAttribute('data-sure', '1');
+      btn.textContent = 'Tap again to copy last week';
+      return;
+    }
+    btn.disabled = true; btn.textContent = 'Copying…';
+    var prev = addDaysISO(rsWeekStart, -7);
+    api('/rest/v1/shifts?select=crew_id,shift_date,start_time,end_time,location_id,category_id'
+      + '&is_void=eq.false&shift_date=gte.' + prev + '&shift_date=lte.' + addDaysISO(prev, 6))
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) {
+        var today = todayKL();
+        // Already-taken slots and days that have gone are skipped rather than
+        // refused, so one tap does as much as it legitimately can.
+        var taken = {};
+        rsShifts.forEach(function (s) {
+          taken[s.crew_id + '|' + s.shift_date + '|' + s.start_time] = true;
+        });
+        var out = rows.map(function (s) {
+          return { crew_id: s.crew_id, shift_date: addDaysISO(s.shift_date, 7),
+                   start_time: s.start_time, end_time: s.end_time,
+                   location_id: s.location_id, category_id: s.category_id };
+        }).filter(function (s) {
+          return s.shift_date >= today
+            && !taken[s.crew_id + '|' + s.shift_date + '|' + s.start_time];
+        });
+        if (!out.length) { throw new Error('Nothing to copy that is not already here.'); }
+        return api('/rest/v1/shifts', { method: 'POST', body: JSON.stringify(out) })
+          .then(function (r) {
+            if (!r.ok) return r.text().then(function (t) { throw new Error(readableError(t)); });
+            return out.length;
+          });
+      })
+      .then(function (n) {
+        btn.removeAttribute('data-sure');
+        rosterNote(n + ' session' + (n === 1 ? '' : 's') + ' copied from last week.');
+        return loadRoster();
+      })
+      .catch(function (e) {
+        btn.removeAttribute('data-sure');
+        rosterNote(e.message, true);
+      })
+      .then(function () { btn.disabled = false; btn.textContent = '⧉ Copy last week'; });
+  }
+
+  // ── Alerts ─────────────────────────────────────────────────────────────
+  function loadHrAlerts() {
+    $('hrAlertList').innerHTML = '<p class="empty">Loading…</p>';
+    return loadHrRefs().then(function () {
+      return api('/rest/v1/alerts?select=id,shift_id,crew_id,type,status,raised_at,'
+        + 'worker_reason,worker_reason_code,resolution_action'
+        + '&status=eq.' + hrAlertSeg + '&order=raised_at.desc&limit=100')
+        .then(function (r) { return r.ok ? r.json() : []; });
+    }).then(function (rows) {
+      hrAlerts = rows || [];
+      renderHrAlerts();
+      refreshBadges();
+    }).catch(function (e) {
+      $('hrAlertList').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  var ALERT_NAME = {
+    late: 'Late', early_leave: 'Left early', absent: 'Absent',
+    no_checkin: 'No check-in', no_checkout: 'No check-out', geofence: 'Wrong place'
+  };
+
+  function renderHrAlerts() {
+    var crewName = {}; hrCrew.forEach(function (c) { crewName[c.id] = c.full_name; });
+    $('hrAlertList').innerHTML = hrAlerts.length
+      ? hrAlerts.map(function (a) {
+          var said = [REASONS[a.worker_reason_code], a.worker_reason].filter(Boolean).join(' — ');
+          return '<div class="al-card s-' + esc(a.type === 'late' ? 'late' : a.type === 'absent' ? 'absent' : 'incomplete') + '">'
+            + '<div class="t1"><span class="who">' + esc(crewName[a.crew_id] || 'Someone') + '</span>'
+            +   '<span class="pill p-' + esc(a.type === 'late' ? 'late' : 'incomplete') + '">'
+            +   esc(ALERT_NAME[a.type] || a.type) + '</span></div>'
+            + '<div class="meta">' + esc(fmtWhen(a.raised_at)) + '</div>'
+            + (said ? '<div class="said">“' + esc(said) + '”</div>'
+                    : (a.status === 'open' ? '<div class="meta">No reason given yet.</div>' : ''))
+            + (a.resolution_action ? '<div class="meta">Closed: ' + esc(a.resolution_action.replace(/_/g, ' ')) + '</div>' : '')
+            + '</div>';
+        }).join('')
+      : '<p class="empty">' + (hrAlertSeg === 'open' ? 'Nothing open.' : 'Nothing settled yet.') + '</p>';
+  }
+
+  function fmtWhen(iso) {
+    try {
+      return new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'short',
+        day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true })
+        .format(new Date(iso));
+    } catch (e) { return iso; }
+  }
+
+  // ── Leave approvals ────────────────────────────────────────────────────
+  function loadApprovals() {
+    $('apprList').innerHTML = '<p class="empty">Loading…</p>';
+    return Promise.all([
+      loadHrRefs(),
+      api('/rest/v1/leave_types?select=id,label,is_paid&order=sort_order.asc')
+        .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }),
+      api('/rest/v1/leave_requests?select=id,crew_id,leave_type_id,start_date,end_date,days,'
+        + 'reason,status,document_path,applied_at,decision_note&order=applied_at.desc&limit=100')
+        .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
+    ]).then(function (res) {
+      apprList = { types: res[1] || [], rows: res[2] || [] };
+      renderApprovals();
+      refreshBadges();
+    });
+  }
+
+  function renderApprovals() {
+    var crewName = {}; hrCrew.forEach(function (c) { crewName[c.id] = c.full_name; });
+    var typeLabel = {}; (apprList.types || []).forEach(function (t) { typeLabel[t.id] = t.label; });
+    var rows = (apprList.rows || []).filter(function (r) {
+      return apprSeg === 'all' || r.status === 'pending';
+    });
+    $('apprList').innerHTML = rows.length
+      ? rows.map(function (r) {
+          return '<div class="lv-req st-' + esc(r.status) + '" data-appr="' + esc(r.id) + '">'
+            + '<div class="top"><div class="kind">' + esc(crewName[r.crew_id] || 'Someone') + '</div>'
+            +   '<span class="lv-pill">' + esc(LV_STATUS[r.status] || r.status) + '</span></div>'
+            + '<div class="when">' + esc(typeLabel[r.leave_type_id] || 'Leave') + ' · '
+            +   esc(leaveRange(r)) + ' · ' + esc(Number(r.days).toFixed(Number(r.days) % 1 ? 1 : 0))
+            +   ' day' + (Number(r.days) === 1 ? '' : 's') + '</div>'
+            + (r.reason ? '<div class="why">' + esc(r.reason) + '</div>' : '')
+            + (r.document_path ? '<button class="btn small-btn" data-doc="' + esc(r.document_path)
+                + '" style="background:var(--slate-tx)">📎 Open document</button>' : '')
+            + (r.status === 'pending'
+                ? '<div style="display:flex;gap:8px;margin-top:9px">'
+                  + '<button class="btn small-btn" data-no="' + esc(r.id) + '"'
+                  +   ' style="flex:1;margin-top:0;background:var(--slate-tx)">Reject</button>'
+                  + '<button class="btn small-btn" data-yes="' + esc(r.id) + '"'
+                  +   ' style="flex:1;margin-top:0;background:var(--green-tx)">Approve</button></div>'
+                : (r.decision_note ? '<div class="note info">Note: ' + esc(r.decision_note) + '</div>' : ''))
+            + '</div>';
+        }).join('')
+      : '<p class="empty">' + (apprSeg === 'pending' ? 'Nothing waiting.' : 'No applications yet.') + '</p>';
+
+    function decide(id, status, btn) {
+      btn.disabled = true; btn.textContent = '…';
+      rpc('decide_leave', { p_request_id: id, p_status: status })
+        .then(function () {
+          apprNote(status === 'approved' ? 'Approved.' : 'Rejected.');
+          return loadApprovals();
+        })
+        .catch(function (e) {
+          btn.disabled = false; btn.textContent = status === 'approved' ? 'Approve' : 'Reject';
+          apprNote(e.message, true);
+        });
+    }
+    Array.prototype.forEach.call($('apprList').querySelectorAll('[data-yes]'), function (b) {
+      b.addEventListener('click', function () { decide(b.getAttribute('data-yes'), 'approved', b); });
+    });
+    Array.prototype.forEach.call($('apprList').querySelectorAll('[data-no]'), function (b) {
+      b.addEventListener('click', function () { decide(b.getAttribute('data-no'), 'rejected', b); });
+    });
+    Array.prototype.forEach.call($('apprList').querySelectorAll('[data-doc]'), function (b) {
+      b.addEventListener('click', function () { openLeaveDoc(b.getAttribute('data-doc'), b); });
+    });
+  }
+
+  function apprNote(msg, bad) {
+    $('apprMsg').innerHTML = msg
+      ? '<div class="note ' + (bad ? 'err' : 'ok') + '">' + esc(msg) + '</div>' : '';
+  }
+
+  // A signed link that expires. The bucket is private; these are medical
+  // certificates and must not be reachable by guessing a URL.
+  function openLeaveDoc(path, btn) {
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Opening…';
+    fetch(cfg.supabaseUrl + '/storage/v1/object/sign/leave-docs/' + path, {
+      method: 'POST', headers: authHeaders(), body: JSON.stringify({ expiresIn: 300 })
+    }).catch(asOffline).then(function (r) {
+      if (!r.ok) throw new Error('Could not open that document.');
+      return r.json();
+    }).then(function (d) {
+      window.open(cfg.supabaseUrl + '/storage/v1' + (d.signedURL || d.signedUrl), '_blank', 'noopener');
+    }).catch(function (e) {
+      apprNote(e.message, true);
+    }).then(function () { btn.disabled = false; btn.textContent = label; });
+  }
+
+  // Counts on the HR tabs, so neither has to be opened to find out.
+  function refreshBadges() {
+    Promise.all([
+      api('/rest/v1/alerts?select=id&status=eq.open').then(function (r) { return r.ok ? r.json() : []; }),
+      api('/rest/v1/leave_requests?select=id&status=eq.pending').then(function (r) { return r.ok ? r.json() : []; })
+    ]).then(function (res) {
+      var a = (res[0] || []).length, l = (res[1] || []).length;
+      $('alertBadge').textContent = a;
+      $('alertBadge').classList.toggle('hidden', !a);
+      $('apprBadge').textContent = l;
+      $('apprBadge').classList.toggle('hidden', !l);
+    }).catch(function () {});
+  }
+
   // Used by Today, History, and a box re-opened for editing.
   function wireExplain(root) {
     Array.prototype.forEach.call(root.querySelectorAll('.chip'), function (c) {
@@ -1201,21 +1704,46 @@
 
   $('leaveApplyBtn').addEventListener('click', openLeaveForm);
 
+  // ── HR wiring ──
+  $('hrToggle').addEventListener('click', function () { setMode(!hrMode); });
+  $('wkPrev').addEventListener('click', function () {
+    rsWeekStart = addDaysISO(rsWeekStart, -7); rsDay = rsWeekStart; rosterNote(''); loadRoster();
+  });
+  $('wkNext').addEventListener('click', function () {
+    rsWeekStart = addDaysISO(rsWeekStart, 7); rsDay = rsWeekStart; rosterNote(''); loadRoster();
+  });
+  $('rsAdd').addEventListener('click', function () { openShiftSheet(null); });
+  $('rsCopy').addEventListener('click', copyLastWeek);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheet(); });
+
+  Array.prototype.forEach.call($('alertSeg').querySelectorAll('[data-seg]'), function (b) {
+    b.addEventListener('click', function () {
+      hrAlertSeg = b.getAttribute('data-seg');
+      Array.prototype.forEach.call($('alertSeg').querySelectorAll('[data-seg]'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+      loadHrAlerts();
+    });
+  });
+  Array.prototype.forEach.call($('apprSeg').querySelectorAll('[data-seg]'), function (b) {
+    b.addEventListener('click', function () {
+      apprSeg = b.getAttribute('data-seg');
+      Array.prototype.forEach.call($('apprSeg').querySelectorAll('[data-seg]'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+      renderApprovals();
+    });
+  });
+
   $('consentSignOut').addEventListener('click', signOut);
   $('signOutBtn').addEventListener('click', signOut);
 
   Array.prototype.forEach.call(document.querySelectorAll('nav button'), function (b) {
     b.addEventListener('click', function () {
       var v = b.getAttribute('data-view');
-      Array.prototype.forEach.call(document.querySelectorAll('nav button'), function (x) {
-        x.classList.toggle('active', x === b);
-      });
-      ['Today', 'History', 'Leave', 'Summary'].forEach(function (name) {
-        $('view' + name).classList.toggle('hidden', name !== v);
-      });
-      if (v === 'History') loadHistory();
-      if (v === 'Leave')   { closeLeaveForm(); loadLeave(); }
-      if (v === 'Summary') loadSummary();
+      // The Me button on the HR bar is a way back, not a seventh view.
+      if (hrMode && v === 'Today') { setMode(false); return; }
+      showView(v);
       if (v === 'Today') loadToday();
     });
   });

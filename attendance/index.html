@@ -128,6 +128,74 @@
   .explain{margin-top:10px; padding:10px 11px; border-radius:9px;
            background:var(--amber-bg); border:1px solid var(--amber-bd)}
   .explain.done{background:var(--green-bg); border-color:var(--green-bd)}
+  /* HR mode. A switch, not a seventh tab: a phone's bottom bar holds four
+     things legibly and this app already needs four on each side. */
+  .hr-toggle{margin-left:auto; margin-right:8px; font-size:12px; font-weight:800;
+    padding:6px 12px; border-radius:999px; cursor:pointer;
+    background:var(--primary-soft); color:var(--primary-on-soft); border:1px solid #BAE6FD}
+  .hr-toggle.on{background:var(--primary); color:#fff; border-color:var(--primary)}
+  .nav-badge{position:absolute; top:5px; left:50%; margin-left:6px;
+    background:var(--red-tx); color:#fff; border-radius:999px;
+    font-size:10px; font-weight:800; padding:0 5px; line-height:15px; min-width:15px}
+  nav button{position:relative}
+
+  /* Roster on a phone: a week you move through, a day at a time. */
+  .wk-head{display:flex; align-items:center; gap:8px; margin-bottom:10px}
+  .wk-label{flex:1; text-align:center; font-size:15px; font-weight:700}
+  .wk-arrow{width:38px; height:38px; flex:none; border-radius:10px; font-size:19px;
+    background:var(--surface); border:1px solid var(--border); color:var(--text)}
+  .wk-arrow:active{background:var(--slate-bg)}
+  .day-strip{display:flex; gap:6px; overflow-x:auto; padding:2px 0 6px;
+    -webkit-overflow-scrolling:touch; scrollbar-width:none}
+  .day-strip::-webkit-scrollbar{display:none}
+  .day-chip{flex:0 0 auto; min-width:52px; padding:7px 4px 6px; border-radius:11px;
+    background:var(--surface); border:1px solid var(--border); text-align:center;
+    cursor:pointer; position:relative}
+  .day-chip .dow{display:block; font-size:10.5px; font-weight:700; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.3px}
+  .day-chip .dnum{display:block; font-size:17px; font-weight:800; line-height:1.2}
+  .day-chip.on{background:var(--primary); border-color:var(--primary); color:#fff}
+  .day-chip.on .dow{color:rgba(255,255,255,.85)}
+  .day-chip.today:not(.on) .dnum{color:var(--primary)}
+  .day-chip .cnt{display:block; height:5px; width:5px; border-radius:50%;
+    background:var(--primary); margin:3px auto 0}
+  .day-chip.on .cnt{background:#fff}
+  .day-chip .cnt.none{background:transparent}
+  .day-chip.past{opacity:.5}
+  .rs-day{font-size:15px; font-weight:700; margin:14px 0 8px}
+  .rs-card{background:var(--surface); border:1px solid var(--border); border-left-width:5px;
+    border-radius:11px; padding:11px 13px; margin-bottom:8px; cursor:pointer}
+  .rs-card .t1{display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+  .rs-card .time{font-size:15px; font-weight:800}
+  .rs-card .who{font-size:14px; font-weight:700; margin-top:3px}
+  .rs-card .meta{font-size:12.5px; color:var(--muted); margin-top:2px}
+
+  /* The form arrives from the bottom, where the thumb is. */
+  .sheet-back{position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:40}
+  .sheet{position:fixed; left:0; right:0; bottom:0; z-index:41; max-height:88vh;
+    overflow-y:auto; background:var(--bg); border-radius:18px 18px 0 0;
+    padding:16px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow:0 -8px 30px rgba(15,23,42,.18)}
+  .sheet h3{font-size:17px; font-weight:800; margin:0 0 2px}
+  .sheet .grab{width:38px; height:4px; border-radius:999px; background:var(--slate-bd);
+    margin:0 auto 12px}
+  .sheet label{display:block; font-size:12px; font-weight:700; margin:12px 0 4px}
+  .sheet select, .sheet input{width:100%; padding:12px; font:inherit; font-size:16px;
+    border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text)}
+  .sheet .row{display:flex; gap:9px}
+  .sheet .row > div{flex:1; min-width:0}
+
+  .seg{display:flex; gap:6px; margin:10px 0 12px}
+  .seg button{flex:1; padding:9px 6px; font:inherit; font-size:13.5px; font-weight:700;
+    border-radius:9px; background:var(--surface); border:1px solid var(--border); color:var(--muted)}
+  .seg button.on{background:var(--primary); border-color:var(--primary); color:#fff}
+
+  .al-card{background:var(--surface); border:1px solid var(--border); border-left-width:5px;
+    border-radius:11px; padding:11px 13px; margin-bottom:8px}
+  .al-card .t1{display:flex; justify-content:space-between; gap:8px; align-items:baseline}
+  .al-card .who{font-size:14.5px; font-weight:700}
+  .al-card .meta{font-size:12.5px; color:var(--muted); margin-top:2px}
+  .al-card .said{font-size:13px; margin-top:5px; font-style:italic}
+
   /* Leave: what you have, and what you have asked for. */
   .lv-h2{font-size:15px; font-weight:700; margin:22px 0 8px}
   .lv-bal{display:grid; grid-template-columns:1fr auto; gap:2px 10px; align-items:baseline;
@@ -319,6 +387,7 @@
 <section id="appScreen" class="hidden">
   <header>
     <img src="./logo.png" alt="Star Swim" />
+    <button class="hr-toggle hidden" id="hrToggle" type="button">HR</button>
     <button class="who" id="whoBtn" aria-haspopup="menu" aria-expanded="false">
       <span><b id="whoName">—</b><span id="whoId"></span></span>
       <svg class="chev" width="11" height="7" viewBox="0 0 11 7" aria-hidden="true">
@@ -356,6 +425,42 @@
       <div id="leaveList"></div>
     </div>
 
+    <!-- ── HR ───────────────────────────────────────────────────────── -->
+    <div id="viewRoster" class="hidden">
+      <div class="wk-head">
+        <button class="wk-arrow" id="wkPrev" aria-label="Previous week">‹</button>
+        <div class="wk-label" id="wkLabel"></div>
+        <button class="wk-arrow" id="wkNext" aria-label="Next week">›</button>
+      </div>
+      <div class="day-strip" id="dayStrip"></div>
+      <h2 class="rs-day" id="rsDayLabel"></h2>
+      <div id="rosterMsg"></div>
+      <div id="rosterList"></div>
+      <button class="btn" id="rsAdd" type="button" style="margin-top:12px">+ Add session</button>
+      <button class="btn ghost" id="rsCopy" type="button" style="margin-top:8px">⧉ Copy last week</button>
+    </div>
+
+    <div id="viewAlerts" class="hidden">
+      <h1>Alerts</h1>
+      <p class="sub">Everything the system noticed, newest first.</p>
+      <div class="seg" id="alertSeg">
+        <button data-seg="open" class="on">Open</button>
+        <button data-seg="resolved">Settled</button>
+      </div>
+      <div id="hrAlertList"></div>
+    </div>
+
+    <div id="viewApprovals" class="hidden">
+      <h1>Leave approvals</h1>
+      <p class="sub">Applications from the crew.</p>
+      <div class="seg" id="apprSeg">
+        <button data-seg="pending" class="on">Pending</button>
+        <button data-seg="all">All</button>
+      </div>
+      <div id="apprMsg"></div>
+      <div id="apprList"></div>
+    </div>
+
     <div id="viewSummary" class="hidden">
       <h1>My summary</h1>
       <p class="sub">Hours by category.</p>
@@ -364,11 +469,18 @@
     </div>
   </main>
 
-  <nav>
+  <nav id="mainNav">
     <button data-view="Today"   class="active"><span class="ic">📅</span>Today</button>
     <button data-view="History"><span class="ic">🕘</span>History</button>
     <button data-view="Leave"><span class="ic">🏖</span>Leave</button>
     <button data-view="Summary"><span class="ic">📊</span>Summary</button>
+  </nav>
+
+  <nav id="hrNav" class="hidden">
+    <button data-view="Roster"><span class="ic">🗓</span>Roster</button>
+    <button data-view="Alerts"><span class="ic">🔔</span>Alerts<span class="nav-badge hidden" id="alertBadge"></span></button>
+    <button data-view="Approvals"><span class="ic">🏖</span>Leave<span class="nav-badge hidden" id="apprBadge"></span></button>
+    <button data-view="Today"><span class="ic">👤</span>Me</button>
   </nav>
 </section>
 
