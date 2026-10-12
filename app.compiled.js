@@ -820,6 +820,10 @@ function App({
   const [leaveFilter, setLeaveFilter] = useState('pending');
   // How much is waiting, without the Leave tab having to be the open one.
   const pendingLeaveCount = useMemo(() => (leaveRequests || []).filter(r => r.status === 'pending').length, [leaveRequests]);
+  // Crew who have filled in the onboarding form and are waiting to be let in.
+  const [crewApplications, setCrewApplications] = useState([]);
+  const [crewOnboardReady, setCrewOnboardReady] = useState(false);
+  const pendingCrewCount = useMemo(() => (crewApplications || []).filter(a => a.status === 'pending').length, [crewApplications]);
   // ── Attendance module (geofenced punch clock) ──
   // Reads RLS-protected tables, so these calls only succeed once the signed-in
   // user carries a Supabase JWT (Phase 2). Before that they fail closed and
@@ -2088,6 +2092,48 @@ function App({
       throw new Error(leaveErrText(err));
     }
   }
+  // ── Crew onboarding: the link, and what comes back through it ────────
+  // The link is fetched on demand rather than kept in state from load: it
+  // is one short string, and nobody wants a stale token in their clipboard
+  // because another admin rotated it an hour ago.
+  async function getOnboardLink(rotate) {
+    const rows = await rest(`rpc/${rotate ? 'rotate_crew_invite' : 'get_crew_invite'}`, {
+      method: 'POST',
+      body: '{}'
+    });
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row || !row.token) throw new Error('Could not get the onboarding link.');
+    return row;
+  }
+  async function loadCrewApplications() {
+    try {
+      const rows = await selectAllRows('crew_applications', '*', '&order=submitted_at.desc');
+      setCrewApplications(rows || []);
+      setCrewOnboardReady(true);
+    } catch (err) {
+      // The migration not being run yet is an ordinary state, not a fault:
+      // the Crew screen simply does not offer onboarding until it is.
+      setCrewOnboardReady(false);
+      setCrewApplications([]);
+    }
+  }
+  async function decideCrewApplication(id, approve, fields, note) {
+    const out = await rest('rpc/decide_crew_application', {
+      method: 'POST',
+      body: JSON.stringify({
+        p_id: id,
+        p_approve: !!approve,
+        p_fields: fields || {},
+        p_note: note || null
+      })
+    });
+    const r = Array.isArray(out) ? out[0] : out;
+    if (r && r.ok === false) throw new Error(r.error || 'Could not save that decision.');
+    await loadCrewApplications();
+    if (approve) await loadAdminAll(); // a new crew record is now on the roster
+    return r;
+  }
+
   // A signed link, not a public URL: the bucket is private and these are
   // medical certificates.
   async function leaveDocUrl(path) {
@@ -2105,6 +2151,12 @@ function App({
   useEffect(() => {
     if (!loading) loadLeave(); /* eslint-disable-next-line */
   }, [leaveYear]);
+  // Loaded whenever the system side is open, not only on the Crew screen,
+  // so the waiting count is on the tab before anyone goes looking.
+  useEffect(() => {
+    if (!loading && side === 'system' && canSystem) loadCrewApplications();
+    /* eslint-disable-next-line */
+  }, [loading, side, view]);
   async function loadAttendance() {
     try {
       const from = attWeekStart,
@@ -6220,7 +6272,17 @@ function App({
     title: "Crew"
   }, "👥 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
-  }, "Crew")), /*#__PURE__*/React.createElement("button", {
+  }, "Crew"), pendingCrewCount > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: 5,
+      background: '#EF4444',
+      color: '#fff',
+      borderRadius: 999,
+      fontSize: 10,
+      fontWeight: 800,
+      padding: '1px 6px'
+    }
+  }, pendingCrewCount)), /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'leave' ? 'active' : ''}`,
     onClick: () => setView('leave'),
     title: "Leave"
@@ -6675,7 +6737,11 @@ function App({
     leaveBalances: leaveBalances,
     leaveYear: leaveYear,
     setLeaveYear: setLeaveYear,
-    saveEntitlement: saveEntitlement
+    saveEntitlement: saveEntitlement,
+    applications: crewApplications,
+    onboardReady: crewOnboardReady,
+    getOnboardLink: getOnboardLink,
+    decideApplication: decideCrewApplication
   }), !loading && side === 'system' && view === 'leave' && canSystem && /*#__PURE__*/React.createElement(AdminLeaveView, {
     requests: leaveRequests,
     types: leaveTypes,
@@ -23757,6 +23823,523 @@ function AdminPayeesModal({
   })))));
 }
 
+// ── Crew onboarding: the link you send, and what comes back ──────────────
+// One live link at a time, enforced in the database rather than here. The
+// button that replaces it says what it costs, because somebody will press
+// it while ten people still have the old one open.
+function OnboardLinkPanel({
+  getOnboardLink
+}) {
+  const [link, setLink] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const urlFor = token => `${window.location.origin}/onboard.html?t=${token}`;
+  async function load(rotate) {
+    setBusy(true);
+    setErr('');
+    try {
+      setLink(await getOnboardLink(rotate));
+      setConfirming(false);
+    } catch (e) {
+      setErr(e.message || 'Could not get the link.');
+    }
+    setBusy(false);
+  }
+  useEffect(() => {
+    load(false); /* eslint-disable-next-line */
+  }, []);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(urlFor(link.token));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
+    } catch (e) {
+      setErr('This browser would not let the app copy. Select the link and copy it by hand.');
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 3
+    }
+  }, "🔗 Onboarding link"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12,
+      maxWidth: 620
+    }
+  }, "Send this to someone joining and they fill in their own details — name, IC, phone, emergency contact, bank. It arrives below as an application for you to check. Nobody joins the crew list until you approve them."), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B91C1C',
+      fontWeight: 700,
+      marginBottom: 10
+    }
+  }, err), link && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("code", {
+    id: "onboard-url",
+    style: {
+      flex: '1 1 320px',
+      minWidth: 260,
+      padding: '9px 11px',
+      background: 'var(--surface-2,#F3F1F8)',
+      border: '1px solid var(--border)',
+      borderRadius: 9,
+      fontSize: 12.5,
+      wordBreak: 'break-all'
+    }
+  }, urlFor(link.token)), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    onClick: copy,
+    disabled: busy
+  }, "🔗 Copy link")), copied && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#059669',
+      fontWeight: 700,
+      marginTop: 7
+    }
+  }, "Copied — paste it into WhatsApp."), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 9
+    }
+  }, "In use since ", new Date(link.created_at).toLocaleDateString(undefined, {
+    dateStyle: 'medium'
+  }), ". The same link works for everybody; there is no need for one each."), !confirming ? /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      marginTop: 11
+    },
+    onClick: () => setConfirming(true),
+    disabled: busy
+  }, "↻ Generate a new link") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 11,
+      padding: '11px 13px',
+      background: '#FFFBEB',
+      border: '1px solid #FDE68A',
+      borderRadius: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "Replace the link?"), /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 9
+    }
+  }, "The current one stops working straight away. Anyone part-way through filling it in will lose what they typed, and anybody you sent it to will need the new one. Details already sent in are kept — this only affects who can still send more."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setConfirming(false)
+  }, "Keep the current link"), /*#__PURE__*/React.createElement("button", {
+    className: "btn small",
+    style: {
+      background: '#B45309',
+      color: '#fff'
+    },
+    onClick: () => load(true),
+    disabled: busy
+  }, "Replace it")))), !link && busy && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Fetching the link…"));
+}
+
+// Reviewing one application. Everything the applicant typed can be
+// corrected here — people mistype their own IC — and the employment
+// fields, which were never on the public form, are added alongside.
+function CrewApplicationModal({
+  app,
+  onClose,
+  decide
+}) {
+  const theirs = ['full_name', 'ic_no', 'phone', 'email', 'emergency_name', 'emergency_phone', 'bank_name', 'bank_account'];
+  const LABEL = {
+    full_name: 'Full name',
+    ic_no: 'IC number',
+    phone: 'Phone',
+    email: 'Email',
+    emergency_name: 'Emergency contact',
+    emergency_phone: 'Emergency phone',
+    bank_name: 'Bank',
+    bank_account: 'Bank account',
+    emp_no: 'Employee #',
+    position: 'Position',
+    department: 'Department',
+    employment_type: 'Employment type',
+    start_date: 'Start date'
+  };
+  const [d, setD] = useState(() => {
+    const base = {};
+    theirs.forEach(k => {
+      base[k] = app[k] || '';
+    });
+    return {
+      ...base,
+      emp_no: '',
+      position: '',
+      department: '',
+      employment_type: 'Full-time',
+      start_date: '',
+      status: 'Active',
+      notes: ''
+    };
+  });
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [rejecting, setRejecting] = useState(false);
+  function up(k, v) {
+    setD(prev => ({
+      ...prev,
+      [k]: v
+    }));
+  }
+  async function go(approve) {
+    setBusy(true);
+    setErr('');
+    try {
+      await decide(app.id, approve, d, note);
+      onClose();
+    } catch (e) {
+      setErr(e.message || 'Could not save that.');
+      setBusy(false);
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card",
+    onClick: e => e.stopPropagation(),
+    style: {
+      maxWidth: 680
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 16
+    }
+  }, "Joining — ", app.full_name), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onClose,
+    "aria-label": "Close"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12
+    }
+  }, "Sent ", new Date(app.submitted_at).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }), ". Approving creates the crew record. It does ", /*#__PURE__*/React.createElement("b", null, "not"), " create an attendance login — do that from their row when you hand over a password."), /*#__PURE__*/React.createElement("div", {
+    className: "group-label",
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      letterSpacing: .6,
+      textTransform: 'uppercase',
+      color: 'var(--text-3,#6F6580)',
+      marginBottom: 8
+    }
+  }, "What they sent"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 9,
+      marginBottom: 4
+    }
+  }, theirs.map(k => /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    key: k,
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, LABEL[k]), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: d[k],
+    onChange: e => up(k, e.target.value)
+  })))), app.applicant_note && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10,
+      padding: '9px 11px',
+      background: 'var(--surface-2,#F3F1F8)',
+      border: '1px solid var(--border)',
+      borderRadius: 9
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      fontWeight: 700,
+      marginBottom: 3
+    }
+  }, "They added"), /*#__PURE__*/React.createElement("div", {
+    className: "small"
+  }, app.applicant_note)), /*#__PURE__*/React.createElement("div", {
+    className: "group-label",
+    style: {
+      fontSize: 11,
+      fontWeight: 800,
+      letterSpacing: .6,
+      textTransform: 'uppercase',
+      color: 'var(--text-3,#6F6580)',
+      margin: '18px 0 8px',
+      paddingTop: 14,
+      borderTop: '1px solid var(--border)'
+    }
+  }, "The job — yours to fill"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 9
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Employee #"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: d.emp_no,
+    onChange: e => up('emp_no', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Position"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: d.position,
+    onChange: e => up('position', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Department"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: d.department,
+    onChange: e => up('department', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Employment type"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: d.employment_type,
+    onChange: e => up('employment_type', e.target.value)
+  }, /*#__PURE__*/React.createElement("option", null, "Full-time"), /*#__PURE__*/React.createElement("option", null, "Part-time"), /*#__PURE__*/React.createElement("option", null, "Contract"))), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Start date"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: d.start_date,
+    onChange: e => up('start_date', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Status"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: d.status,
+    onChange: e => up('status', e.target.value)
+  }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive")))), rejecting && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      padding: '11px 13px',
+      background: '#FFFBEB',
+      border: '1px solid #FDE68A',
+      borderRadius: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      fontWeight: 700,
+      marginBottom: 5
+    }
+  }, "Why are you turning this down?"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: note,
+    onChange: e => setNote(e.target.value),
+    placeholder: "Kept on the record — not sent to them"
+  })), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B91C1C',
+      fontWeight: 700,
+      marginTop: 12
+    }
+  }, err)), /*#__PURE__*/React.createElement("div", {
+    className: "modal-foot"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: () => rejecting ? go(false) : setRejecting(true),
+    disabled: busy
+  }, rejecting ? 'Confirm reject' : 'Reject'), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose,
+    disabled: busy
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: () => go(true),
+    disabled: busy
+  }, busy ? 'Saving…' : 'Approve — add to crew')))));
+}
+function CrewApplicationsPanel({
+  applications,
+  decide
+}) {
+  const [open, setOpen] = useState(null);
+  const [showDone, setShowDone] = useState(false);
+  const pending = (applications || []).filter(a => a.status === 'pending');
+  const done = (applications || []).filter(a => a.status !== 'pending');
+  const when = iso => new Date(iso).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short'
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 9,
+      flexWrap: 'wrap',
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "📥 Waiting to join"), pending.length > 0 && /*#__PURE__*/React.createElement("span", {
+    style: {
+      background: '#EF4444',
+      color: '#fff',
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 800,
+      padding: '1px 8px'
+    }
+  }, pending.length), done.length > 0 && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: () => setShowDone(v => !v)
+  }, showDone ? 'Hide' : 'Show', " settled (", done.length, ")")), pending.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Nobody is waiting. Anyone who fills in the onboarding link appears here.") : /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 130
+    }
+  }, "IC"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 120
+    }
+  }, "Phone"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 80
+    }
+  }, "Sent"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right',
+      width: 100
+    }
+  }))), /*#__PURE__*/React.createElement("tbody", null, pending.map(a => /*#__PURE__*/React.createElement("tr", {
+    key: a.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 700
+    }
+  }, a.full_name), /*#__PURE__*/React.createElement("td", {
+    className: "small"
+  }, a.ic_no || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "small"
+  }, a.phone || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, when(a.submitted_at)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    style: {
+      padding: '2px 10px'
+    },
+    onClick: () => setOpen(a)
+  }, "Review…"))))))), showDone && done.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap",
+    style: {
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 110
+    }
+  }, "Outcome"), /*#__PURE__*/React.createElement("th", null, "Note"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 80
+    }
+  }, "Sent"))), /*#__PURE__*/React.createElement("tbody", null, done.map(a => /*#__PURE__*/React.createElement("tr", {
+    key: a.id
+  }, /*#__PURE__*/React.createElement("td", null, a.full_name), /*#__PURE__*/React.createElement("td", {
+    className: "small",
+    style: {
+      color: a.status === 'approved' ? '#059669' : '#B45309',
+      fontWeight: 700
+    }
+  }, a.status === 'approved' ? '✓ Added to crew' : 'Turned down'), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, a.review_note || '—'), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, when(a.submitted_at))))))), open && /*#__PURE__*/React.createElement(CrewApplicationModal, {
+    app: open,
+    decide: decide,
+    onClose: () => setOpen(null)
+  }));
+}
+
 // ── Attendance: the staff app, to hand out ───────────────────────────────
 // A fixed place to find the link and the QR code, so nobody has to ask for
 // it twice or keep a photo of a whiteboard on their phone.
@@ -26963,7 +27546,11 @@ function AdminCrewView({
   leaveBalances,
   leaveYear,
   setLeaveYear,
-  saveEntitlement
+  saveEntitlement,
+  applications,
+  onboardReady,
+  getOnboardLink,
+  decideApplication
 }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -27160,6 +27747,7 @@ function AdminCrewView({
   // archive would remove a login and then fail to write the date, leaving a
   // worker locked out and still on the roster — worse than not offering it.
   const archiveReady = (employees || []).some(e => Object.prototype.hasOwnProperty.call(e, 'archived_at'));
+  const pendingApplications = (applications || []).filter(a => a.status === 'pending').length;
   const live = useMemo(() => (employees || []).filter(e => !e.archived_at), [employees]);
   const archived = useMemo(() => (employees || []).filter(e => !!e.archived_at), [employees]);
   const showingArchive = statusFilter === 'archived';
@@ -27343,7 +27931,10 @@ function AdminCrewView({
       borderRadius: 8,
       padding: '7px 10px'
     }
-  }, "Archived crew keep every record — attendance history, dates worked, banking details — but are out of the crew roster and cannot be picked for a session. Restore puts them back as ", /*#__PURE__*/React.createElement("b", null, "Inactive"), ".")), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "Archived crew keep every record — attendance history, dates worked, banking details — but are out of the crew roster and cannot be picked for a session. Restore puts them back as ", /*#__PURE__*/React.createElement("b", null, "Inactive"), ".")), onboardReady && canManageLogins && pendingApplications > 0 && /*#__PURE__*/React.createElement(CrewApplicationsPanel, {
+    applications: applications,
+    decide: decideApplication
+  }), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "empty",
     style: {
       padding: 30
@@ -27526,7 +28117,12 @@ function AdminCrewView({
       color: '#DC2626'
     },
     onClick: () => deleteEmployee(e.id)
-  }, "×"))))))))), modal?.kind === 'edit' && /*#__PURE__*/React.createElement(AdminEmployeeModal, {
+  }, "×"))))))))), onboardReady && canManageLogins && /*#__PURE__*/React.createElement(OnboardLinkPanel, {
+    getOnboardLink: getOnboardLink
+  }), onboardReady && canManageLogins && pendingApplications === 0 && (applications || []).length > 0 && /*#__PURE__*/React.createElement(CrewApplicationsPanel, {
+    applications: applications,
+    decide: decideApplication
+  }), modal?.kind === 'edit' && /*#__PURE__*/React.createElement(AdminEmployeeModal, {
     existing: modal.data,
     canGrantAccess: canManageLogins,
     onSave: async d => {

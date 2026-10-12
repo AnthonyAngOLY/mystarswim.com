@@ -140,6 +140,24 @@
   nav button{position:relative}
 
   /* Roster on a phone: a week you move through, a day at a time. */
+  /* My week: the whole week down the page, one block per day. A day off
+     is shown as a day off rather than left out, so seven blocks always
+     means seven days and you can count your rest at a glance. */
+  .wkday{border:1px solid var(--border); border-radius:12px; background:var(--surface);
+    padding:10px 12px; margin-bottom:8px}
+  .wkday.is-today{border-color:var(--primary); box-shadow:0 0 0 2px rgba(14,165,233,.12)}
+  .wkday.is-past{opacity:.62}
+  .wkday-head{display:flex; align-items:center; gap:8px; margin-bottom:6px}
+  .wkday-name{font-weight:800; font-size:14px}
+  .wkday-tag{font-size:10.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+    color:#fff; background:var(--primary); border-radius:999px; padding:2px 7px}
+  .wkday-off{font-size:13px; color:var(--muted)}
+  .wkrow{display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 9px; padding:5px 0;
+    border-top:1px dashed var(--border)}
+  .wkrow:first-of-type{border-top:none}
+  .wkrow-time{font-weight:700; font-size:14px}
+  .wkrow-where{font-size:13px; color:var(--muted); flex:1 1 auto; min-width:0}
+
   .wk-head{display:flex; align-items:center; gap:8px; margin-bottom:10px}
   .wk-label{flex:1; text-align:center; font-size:15px; font-weight:700}
   .wk-arrow{width:38px; height:38px; flex:none; border-radius:10px; font-size:19px;
@@ -409,6 +427,17 @@
       <div id="todayList"></div>
     </div>
 
+    <div id="viewWeek" class="hidden">
+      <div class="wk-head">
+        <button class="wk-arrow" id="wkmPrev" aria-label="Previous week">‹</button>
+        <div class="wk-label" id="wkmLabel"></div>
+        <button class="wk-arrow" id="wkmNext" aria-label="Next week">›</button>
+      </div>
+      <p class="sub" id="wkmTotal"></p>
+      <div id="weekList"></div>
+      <button class="btn ghost" id="wkmToday" type="button" style="margin-top:12px">Back to this week</button>
+    </div>
+
     <div id="viewHistory" class="hidden">
       <h1>History</h1>
       <p class="sub">Your last 30 days.</p>
@@ -471,6 +500,7 @@
 
   <nav id="mainNav">
     <button data-view="Today"   class="active"><span class="ic">📅</span>Today</button>
+    <button data-view="Week"><span class="ic">🗓</span>Week</button>
     <button data-view="History"><span class="ic">🕘</span>History</button>
     <button data-view="Leave"><span class="ic">🏖</span>Leave</button>
     <button data-view="Summary"><span class="ic">📊</span>Summary</button>

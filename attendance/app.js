@@ -919,7 +919,7 @@
     showView(hrMode ? 'Roster' : 'Today');
   }
 
-  var ALL_VIEWS = ['Today','History','Leave','Summary','Roster','Alerts','Approvals'];
+  var ALL_VIEWS = ['Today','Week','History','Leave','Summary','Roster','Alerts','Approvals'];
   function showView(v) {
     ALL_VIEWS.forEach(function (name) {
       var el = $('view' + name);
@@ -929,6 +929,7 @@
     Array.prototype.forEach.call(nav.querySelectorAll('button'), function (b) {
       b.classList.toggle('active', b.getAttribute('data-view') === v);
     });
+    if (v === 'Week')      loadWeek();
     if (v === 'History')   loadHistory();
     if (v === 'Leave')     { closeLeaveForm(); loadLeave(); }
     if (v === 'Summary')   loadSummary();
@@ -1574,6 +1575,106 @@
   }
 
   // ── History ────────────────────────────────────────────────────────────
+  // ── My week ────────────────────────────────────────────────────────────
+  // The whole week at once, not a day at a time. "When am I working this
+  // week" is one question, and answering it should not cost seven taps —
+  // which is the difference between this and the HR roster screen, where
+  // you are editing one day and want it on its own.
+  var wkStart = null;
+
+  function weekLabel(startISO) {
+    var endISO = addDaysISO(startISO, 6);
+    var fmt = function (iso, opts) {
+      return new Intl.DateTimeFormat('en-GB',
+        Object.assign({ timeZone: TZ }, opts)).format(new Date(iso + 'T00:00:00+08:00'));
+    };
+    var sameMonth = startISO.slice(0, 7) === endISO.slice(0, 7);
+    return fmt(startISO, { day: 'numeric', month: sameMonth ? undefined : 'short' })
+         + ' – ' + fmt(endISO, { day: 'numeric', month: 'short' })
+         + (startISO.slice(0, 4) === todayKL().slice(0, 4) ? '' : ' ' + startISO.slice(0, 4));
+  }
+
+  // Hours between two 'HH:MM:SS' times. Sessions do not cross midnight here,
+  // and a negative span would mean bad data rather than a night shift.
+  function spanHours(start, end) {
+    var a = String(start).split(':'), b = String(end).split(':');
+    var mins = (b[0] * 60 + (+b[1] || 0)) - (a[0] * 60 + (+a[1] || 0));
+    return mins > 0 ? mins / 60 : 0;
+  }
+
+  function loadWeek() {
+    if (!wkStart) wkStart = mondayOf(todayKL());
+    var box = $('weekList');
+    var from = wkStart, to = addDaysISO(wkStart, 6);
+    $('wkmLabel').textContent = weekLabel(wkStart);
+    $('wkmToday').classList.toggle('hidden', wkStart === mondayOf(todayKL()));
+    box.innerHTML = '<p class="empty">Loading…</p>';
+    $('wkmTotal').textContent = '';
+
+    api('/rest/v1/shifts?select=id,shift_date,start_time,end_time,status,is_void,'
+      + 'locations(name),shift_categories(name)'
+      + '&shift_date=gte.' + from + '&shift_date=lte.' + to
+      + '&order=shift_date.asc,start_time.asc')
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (rows) {
+        rows = (rows || []).filter(function (s) { return !s.is_void; });
+        var today = todayKL();
+        var hours = 0;
+        rows.forEach(function (s) { hours += spanHours(s.start_time, s.end_time); });
+
+        $('wkmTotal').textContent = rows.length
+          ? rows.length + (rows.length === 1 ? ' session · ' : ' sessions · ')
+            + hours.toFixed(hours % 1 ? 1 : 0) + (hours === 1 ? ' hour' : ' hours')
+          : 'Nothing rostered this week.';
+
+        if (!rows.length) {
+          box.innerHTML = '<p class="empty">No sessions this week. '
+            + 'If that looks wrong, speak to your manager.</p>';
+          return;
+        }
+
+        var byDay = {};
+        rows.forEach(function (s) { (byDay[s.shift_date] = byDay[s.shift_date] || []).push(s); });
+
+        var out = '';
+        for (var i = 0; i < 7; i++) {
+          var iso = addDaysISO(wkStart, i);
+          var list = byDay[iso] || [];
+          var isToday = iso === today;
+          var past = iso < today;
+          out += '<div class="wkday' + (isToday ? ' is-today' : '') + (past ? ' is-past' : '') + '">'
+               + '<div class="wkday-head">'
+               +   '<span class="wkday-name">' + esc(prettyDate(iso).replace(/,.*$/, '')) + '</span>'
+               +   (isToday ? '<span class="wkday-tag">Today</span>' : '')
+               + '</div>';
+          if (!list.length) {
+            out += '<div class="wkday-off">Off</div>';
+          } else {
+            out += list.map(function (s) {
+              var place = (s.locations && s.locations.name) || '';
+              var cat   = (s.shift_categories && s.shift_categories.name) || '';
+              return '<div class="wkrow">'
+                   +   '<div class="wkrow-time">' + esc(prettyTime(s.start_time))
+                   +     ' – ' + esc(prettyTime(s.end_time)) + '</div>'
+                   +   '<div class="wkrow-where">' + esc([place, cat].filter(Boolean).join(' · ')) + '</div>'
+                   // Only once a session is over does its outcome mean
+                   // anything. A "Scheduled" chip on Thursday's work tells
+                   // nobody anything they did not already know.
+                   +   (s.status && s.status !== 'scheduled'
+                        ? '<span class="pill p-' + esc(s.status) + '">' + esc(statusLabel(s.status)) + '</span>'
+                        : '')
+                   + '</div>';
+            }).join('');
+          }
+          out += '</div>';
+        }
+        box.innerHTML = out;
+      })
+      .catch(function (e) {
+        box.innerHTML = '<div class="note err">' + esc(readableError(e.message, OFFLINE)) + '</div>';
+      });
+  }
+
   function loadHistory() {
     var box = $('historyList');
     box.innerHTML = '<p class="empty">Loading…</p>';
@@ -1736,6 +1837,17 @@
   });
 
   $('leaveApplyBtn').addEventListener('click', openLeaveForm);
+
+  // ── My week wiring ──
+  $('wkmPrev').addEventListener('click', function () {
+    wkStart = addDaysISO(wkStart || mondayOf(todayKL()), -7); loadWeek();
+  });
+  $('wkmNext').addEventListener('click', function () {
+    wkStart = addDaysISO(wkStart || mondayOf(todayKL()), 7); loadWeek();
+  });
+  $('wkmToday').addEventListener('click', function () {
+    wkStart = mondayOf(todayKL()); loadWeek();
+  });
 
   // ── HR wiring ──
   $('hrToggle').addEventListener('click', function () { setMode(!hrMode); });

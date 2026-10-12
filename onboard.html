@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Joining details — Star Swim Sdn Bhd</title>
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="apple-touch-icon" href="./logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <style>
+    :root{
+      --bg:#F7F6FB; --surface:#FFFFFF; --surface-2:#F3F1F8;
+      --border:#E8E6F0; --border-2:#E0DDE9;
+      --text:#1A1530; --text-2:#42384F; --text-3:#6F6580;
+      --primary:#6D5BD0; --primary-soft:#EDE9FB;
+      --red-bg:#FEE2E2; --red-tx:#B91C1C; --red-bd:#FCA5A5;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{background:var(--bg);color:var(--text);min-height:100%;
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+      -webkit-font-smoothing:antialiased;line-height:1.5}
+    button,input,select,textarea{font:inherit;color:inherit}
+
+    .page{max-width:560px;margin:0 auto;padding:22px 16px 72px}
+
+    .brand{display:flex;align-items:center;gap:13px;margin-bottom:18px;padding:0 2px}
+    .brand-logo{width:46px;height:46px;border-radius:11px;object-fit:contain;background:#fff;
+      border:1px solid var(--border);padding:4px}
+    .brand-title{font-size:17px;font-weight:800;letter-spacing:-.2px}
+    .brand-sub{font-size:13px;color:var(--text-3)}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+      padding:24px 22px;box-shadow:0 2px 14px rgba(26,21,48,.05)}
+    .card-title{font-size:19px;font-weight:800;margin-bottom:4px}
+    .muted{font-size:13.5px;color:var(--text-3)}
+    .bad-title{font-size:18px;font-weight:800;margin-bottom:8px}
+
+    .group-head{font-size:11px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;
+      color:var(--text-3);margin:22px 0 10px;padding-top:16px;border-top:1px solid var(--border-2)}
+
+    .field{margin-bottom:15px}
+    .field label{display:block;font-size:13px;font-weight:700;margin-bottom:5px;color:var(--text-2)}
+    .req{color:#DC2626}
+    .input{width:100%;height:48px;padding:0 13px;background:var(--surface);
+      border:1.5px solid var(--border-2);border-radius:11px;transition:.14s ease}
+    .input:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+    .input.area{height:auto;padding:11px 13px;resize:vertical;min-height:84px}
+    .hint{font-size:11.5px;color:var(--text-3);margin-top:4px}
+
+    .err{padding:12px 14px;background:var(--red-bg);border:1px solid var(--red-bd);
+      color:var(--red-tx);border-radius:10px;font-size:13px;font-weight:600;margin:16px 0 4px}
+
+    .submit{width:100%;margin-top:20px;padding:17px;background:var(--primary);color:#fff;
+      border:none;border-radius:13px;font-size:16px;font-weight:800;cursor:pointer;
+      box-shadow:0 6px 20px rgba(109,91,208,.3);transition:.15s ease}
+    .submit:hover:not(:disabled){background:#5C4BBF;transform:translateY(-1px)}
+    .submit:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;transform:none}
+
+    .done-card{background:linear-gradient(135deg,#15803D 0%,#22C55E 100%);color:#fff;
+      padding:34px 26px;border-radius:18px;text-align:center;
+      box-shadow:0 12px 40px rgba(22,163,74,.26)}
+    .done-icon{font-size:48px;line-height:1;margin-bottom:10px}
+    .done-title{font-size:21px;font-weight:800;margin-bottom:8px}
+    .done-sub{font-size:14px;opacity:.95;line-height:1.6}
+
+    .foot{margin-top:22px;text-align:center;font-size:11px;color:var(--text-3);line-height:1.7}
+
+    @media (max-width:520px){
+      .page{padding:16px 13px 56px}
+      .card{padding:19px 16px}
+      .brand-title{font-size:16px}
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="./config.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <!-- onboard.compiled.js is pre-built from onboard.js — edit onboard.js then re-run the Babel compile -->
+  <script src="./onboard.compiled.js"></script>
+</body>
+</html>
