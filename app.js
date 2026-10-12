@@ -12572,7 +12572,8 @@ function StaffAppView(){
     setTimeout(done, 1500);
   }
 
-  return <div className="card">
+  return <>
+  <div className="card">
     <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>📱 Staff attendance app</div>
     <div className="small subtle" style={{marginBottom:16,maxWidth:560}}>
       Where crew check in and out, apply for leave and see their roster. Send
@@ -12580,7 +12581,7 @@ function StaffAppView(){
       safe to print and pin up.
     </div>
 
-    <div id="qr-sheet" style={{display:'flex',gap:24,flexWrap:'wrap',alignItems:'flex-start'}}>
+    <div style={{display:'flex',gap:24,flexWrap:'wrap',alignItems:'flex-start'}}>
       <div style={{textAlign:'center'}}>
         <img className="qr-art" src="./attendance-qr.png" alt={`QR code for ${STAFF_APP_URL}`}
              width="220" height="220"
@@ -12617,7 +12618,26 @@ function StaffAppView(){
         </div>
       </div>
     </div>
-  </div>;
+  </div>
+
+  {/* The printed poster. A sibling of the card, not a part of it: every
+      print hides .wrap > .card, so anything inside it prints as a blank
+      page however visible it looks on screen. Written out separately
+      rather than reusing the screen markup, because a wall poster wants
+      different things said at a different size. */}
+  <div className="print-qr" aria-hidden="true">
+    <div className="pq-title">Star Swim — staff attendance</div>
+    <div className="pq-sub">Check in and out, see your roster, apply for leave</div>
+    <img src="./attendance-qr.png" alt="" />
+    <div className="pq-url">{STAFF_APP_URL}</div>
+    <div className="pq-steps">
+      <b>1.</b> Scan the code with your phone camera, or type the address above.<br />
+      <b>2.</b> Sign in with the staff ID and password you were given.<br />
+      <b>3.</b> <b>Android:</b> tap ⋮ then <b>Add to Home screen</b>.<br />
+      <span style={{paddingLeft:'7mm'}}><b>iPhone:</b> tap Share then <b>Add to Home Screen</b>.</span>
+    </div>
+  </div>
+  </>;
 }
 
 // ── Attendance: Live board ───────────────────────────────────────────────

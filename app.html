@@ -815,13 +815,6 @@
       body[data-print-view="receipt"] #receipt-sheet,
       body[data-print-view="receipt"] #receipt-sheet *{visibility:visible}
       body[data-print-view="receipt"] #receipt-sheet{position:fixed;top:0;left:0;width:100%;padding:14mm 18mm;border:none;background:#fff;color:#000}
-      /* The staff-app poster, same mechanism: everything hidden but the
-         sheet, which prints centred on its own page for a noticeboard. */
-      body[data-print-view="qr"] *{visibility:hidden}
-      body[data-print-view="qr"] #qr-sheet,
-      body[data-print-view="qr"] #qr-sheet *{visibility:visible}
-      body[data-print-view="qr"] #qr-sheet{position:fixed;top:0;left:0;width:100%;padding:20mm;border:none;background:#fff;color:#000;text-align:center}
-      body[data-print-view="qr"] #qr-sheet .qr-art{width:110mm;height:110mm;margin:0 auto}
     }
     /* Account sections in StudentEditor + ParentContactEditor — visually
        distinct from swimmer-form-section to signal "this is account-level
@@ -1215,6 +1208,7 @@
     .student-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--primary-soft);color:var(--primary-on-soft);font-size:9.5px;font-weight:800}
     .error-card{margin-top:16px;background:var(--red-bg);border-color:var(--red-bd);color:var(--red-tx)}
     .print-week{display:none}.print-rundown{display:none}.print-daily{display:none}.print-weekly-table{display:none}
+    .print-qr{display:none}
     @page{size:A4 portrait;margin:8mm}
     @media print{
       @page{size:A4 portrait;margin:8mm}
@@ -1223,6 +1217,20 @@
       .header,.sub-bar,.wrap > .card,.legend,.small.subtle,.modal-backdrop,.btn,.tabs,.print-target,.daily-grid,.daily-day-tabs,.pill,.daily-screen-header,.app-footer{display:none !important}
       .wrap{max-width:none !important;padding:0 !important}
       .print-rundown,.print-daily,.print-weekly-table{display:none !important}
+      /* The staff-app poster. It is a sibling of the card, not inside it:
+         .wrap > .card is display:none for every print, and no amount of
+         visibility:visible on a descendant survives that. This is why the
+         first version printed a blank page. */
+      .print-qr{display:none !important}
+      body[data-print-view="qr"] .print-qr{display:block !important;
+        background:#fff !important;color:#000 !important;text-align:center;padding:14mm 10mm}
+      body[data-print-view="qr"] .print-qr img{width:120mm;height:120mm;display:block;margin:0 auto 8mm}
+      body[data-print-view="qr"] .print-qr .pq-title{font-size:26pt;font-weight:800;margin-bottom:3mm}
+      body[data-print-view="qr"] .print-qr .pq-sub{font-size:13pt;margin-bottom:10mm;color:#333 !important}
+      body[data-print-view="qr"] .print-qr .pq-url{font-family:ui-monospace,monospace;font-size:13pt;
+        margin-bottom:9mm;word-break:break-all}
+      body[data-print-view="qr"] .print-qr .pq-steps{font-size:12pt;line-height:1.9;text-align:left;
+        max-width:120mm;margin:0 auto}
       body[data-print-view="weekly"] .print-rundown{display:block !important;background:#fff !important;color:#000 !important}
       body[data-print-view="daily"] .print-daily{display:block !important;background:#fff !important;color:#000 !important}
       body[data-print-view="weekly-table"] .print-weekly-table{display:block !important;background:#fff !important;color:#000 !important}

@@ -24388,7 +24388,7 @@ function StaffAppView() {
     // app stays invisible on screen.
     setTimeout(done, 1500);
   }
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -24403,7 +24403,6 @@ function StaffAppView() {
       maxWidth: 560
     }
   }, "Where crew check in and out, apply for leave and see their roster. Send them the link, or let them scan the code. Nothing here changes, so it is safe to print and pin up."), /*#__PURE__*/React.createElement("div", {
-    id: "qr-sheet",
     style: {
       display: 'flex',
       gap: 24,
@@ -24508,7 +24507,25 @@ function StaffAppView() {
     style: {
       marginTop: 8
     }
-  }, "Installing is optional — it works in the browser either way. It just saves them hunting for the link every shift.")))));
+  }, "Installing is optional — it works in the browser either way. It just saves them hunting for the link every shift."))))), /*#__PURE__*/React.createElement("div", {
+    className: "print-qr",
+    "aria-hidden": "true"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "pq-title"
+  }, "Star Swim — staff attendance"), /*#__PURE__*/React.createElement("div", {
+    className: "pq-sub"
+  }, "Check in and out, see your roster, apply for leave"), /*#__PURE__*/React.createElement("img", {
+    src: "./attendance-qr.png",
+    alt: ""
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "pq-url"
+  }, STAFF_APP_URL), /*#__PURE__*/React.createElement("div", {
+    className: "pq-steps"
+  }, /*#__PURE__*/React.createElement("b", null, "1."), " Scan the code with your phone camera, or type the address above.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("b", null, "2."), " Sign in with the staff ID and password you were given.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("b", null, "3."), " ", /*#__PURE__*/React.createElement("b", null, "Android:"), " tap ⋮ then ", /*#__PURE__*/React.createElement("b", null, "Add to Home screen"), ".", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
+    style: {
+      paddingLeft: '7mm'
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "iPhone:"), " tap Share then ", /*#__PURE__*/React.createElement("b", null, "Add to Home Screen"), "."))));
 }
 
 // ── Attendance: Live board ───────────────────────────────────────────────
