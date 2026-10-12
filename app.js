@@ -4364,6 +4364,7 @@ function App({ currentUser, onLogout }){
           </button>
           <button className={`sub-tab ${attendanceSection==='report'?'active':''}`} onClick={()=>setAttendanceSection('report')}>Report</button>
           <button className={`sub-tab ${attendanceSection==='locations'?'active':''}`} onClick={()=>setAttendanceSection('locations')}>Locations</button>
+          <button className={`sub-tab ${attendanceSection==='staffapp'?'active':''}`} onClick={()=>setAttendanceSection('staffapp')}>Staff app</button>
         </div></div>
         {attBlocked && <div className="card" style={{borderColor:'#FCD34D',background:'#FFFBEB'}}>
           <div style={{fontWeight:700,marginBottom:4}}>Attendance data is not available for this login.</div>
@@ -4405,6 +4406,10 @@ function App({ currentUser, onLogout }){
           saveLocation={attSaveLocation}
           retireLocation={attRetireLocation}
         />}
+        {/* No attBlocked guard: this screen reads nothing. If a login cannot
+            reach the attendance tables, handing out the app link is exactly
+            what is still worth doing. */}
+        {attendanceSection==='staffapp' && <StaffAppView />}
         {!attBlocked && attendanceSection==='roster' && <AttendanceRosterView
           shifts={attShifts}
           locations={attLocations}
@@ -12243,6 +12248,96 @@ function AdminPayeesModal({ payees, savePayee, deletePayee, onClose }){
       </div>
     </div>
   </div></div>;
+}
+
+// ── Attendance: the staff app, to hand out ───────────────────────────────
+// A fixed place to find the link and the QR code, so nobody has to ask for
+// it twice or keep a photo of a whiteboard on their phone.
+//
+// The code is a committed image, not drawn here. The URL never changes, so
+// generating it at runtime would mean shipping an encoder — and a QR that
+// looks right and scans as nothing is worse than no QR at all. This one was
+// made once and read back with a scanner to prove it.
+const STAFF_APP_URL = 'https://attendance.mystarswim.com';
+
+function StaffAppView(){
+  const [copied,setCopied] = useState('');
+  const note = (what) => { setCopied(what); setTimeout(()=>setCopied(''), 2200); };
+
+  async function copy(text, what){
+    try {
+      await navigator.clipboard.writeText(text);
+      note(what);
+    } catch (e) {
+      // Clipboard access is refused outside a secure context and on some
+      // older phone browsers. Select the text so it can still be copied by
+      // hand rather than leaving a button that silently does nothing.
+      const el = document.getElementById('qr-url');
+      if (el && window.getSelection) {
+        const r = document.createRange(); r.selectNodeContents(el);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      }
+      note('select');
+    }
+  }
+
+  function print(){
+    document.body.setAttribute('data-print-view','qr');
+    const done = () => { document.body.removeAttribute('data-print-view');
+                         window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+    // Safari on iOS never fires afterprint; clear it on a timer too, or the
+    // app stays invisible on screen.
+    setTimeout(done, 1500);
+  }
+
+  return <div className="card">
+    <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>📱 Staff attendance app</div>
+    <div className="small subtle" style={{marginBottom:16,maxWidth:560}}>
+      Where crew check in and out, apply for leave and see their roster. Send
+      them the link, or let them scan the code. Nothing here changes, so it is
+      safe to print and pin up.
+    </div>
+
+    <div id="qr-sheet" style={{display:'flex',gap:24,flexWrap:'wrap',alignItems:'flex-start'}}>
+      <div style={{textAlign:'center'}}>
+        <img className="qr-art" src="./attendance-qr.png" alt={`QR code for ${STAFF_APP_URL}`}
+             width="220" height="220"
+             style={{width:220,height:220,border:'1px solid var(--border)',borderRadius:12,
+                     background:'#fff',display:'block'}} />
+        <div style={{fontWeight:800,marginTop:10,fontSize:14}}>Star Swim — staff attendance</div>
+        <div id="qr-url" style={{fontFamily:'ui-monospace,monospace',fontSize:12,marginTop:3,
+             color:'var(--text-3,#6F6580)',wordBreak:'break-all',maxWidth:240}}>{STAFF_APP_URL}</div>
+      </div>
+
+      <div style={{flex:'1 1 280px',minWidth:260}}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:14}}>
+          <button className="btn btn-primary" onClick={()=>copy(STAFF_APP_URL,'link')}>🔗 Copy link</button>
+          <a className="btn" href="./attendance-qr.png" download="star-swim-attendance-qr.png"
+             style={{textDecoration:'none'}}>⬇ Download code</a>
+          <button className="btn" onClick={print}>🖨 Print poster</button>
+        </div>
+        {copied==='link'   && <div className="small" style={{color:'#059669',fontWeight:700,marginBottom:12}}>Link copied — paste it into WhatsApp.</div>}
+        {copied==='select' && <div className="small" style={{color:'#B45309',fontWeight:700,marginBottom:12}}>This browser would not let the app copy for you. The link is selected — copy it by hand.</div>}
+
+        <div style={{padding:'12px 14px',background:'var(--surface-2,#F3F1F8)',
+             border:'1px solid var(--border)',borderRadius:10}}>
+          <div style={{fontWeight:800,fontSize:13,marginBottom:6}}>What to tell staff</div>
+          <ol className="small" style={{margin:0,paddingLeft:18,lineHeight:1.7}}>
+            <li>Open the link, or scan the code with the phone camera.</li>
+            <li>Sign in with the staff ID and password you gave them.</li>
+            <li><b>On Android:</b> tap the ⋮ menu, then <b>Add to Home screen</b>. It then opens like any other app.</li>
+            <li><b>On iPhone:</b> tap Share, then <b>Add to Home Screen</b>.</li>
+          </ol>
+          <div className="small subtle" style={{marginTop:8}}>
+            Installing is optional — it works in the browser either way. It
+            just saves them hunting for the link every shift.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>;
 }
 
 // ── Attendance: Live board ───────────────────────────────────────────────

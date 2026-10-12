@@ -6715,7 +6715,10 @@ function App({
   }, "Report"), /*#__PURE__*/React.createElement("button", {
     className: `sub-tab ${attendanceSection === 'locations' ? 'active' : ''}`,
     onClick: () => setAttendanceSection('locations')
-  }, "Locations"))), attBlocked && /*#__PURE__*/React.createElement("div", {
+  }, "Locations"), /*#__PURE__*/React.createElement("button", {
+    className: `sub-tab ${attendanceSection === 'staffapp' ? 'active' : ''}`,
+    onClick: () => setAttendanceSection('staffapp')
+  }, "Staff app"))), attBlocked && /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       borderColor: '#FCD34D',
@@ -6764,7 +6767,7 @@ function App({
     settings: attSettings,
     saveLocation: attSaveLocation,
     retireLocation: attRetireLocation
-  }), !attBlocked && attendanceSection === 'roster' && /*#__PURE__*/React.createElement(AttendanceRosterView, {
+  }), attendanceSection === 'staffapp' && /*#__PURE__*/React.createElement(StaffAppView, null), !attBlocked && attendanceSection === 'roster' && /*#__PURE__*/React.createElement(AttendanceRosterView, {
     shifts: attShifts,
     locations: attLocations,
     categories: attCategories,
@@ -23752,6 +23755,175 @@ function AdminPayeesModal({
       onClick: () => deletePayee(p.id)
     }, "×")));
   })))));
+}
+
+// ── Attendance: the staff app, to hand out ───────────────────────────────
+// A fixed place to find the link and the QR code, so nobody has to ask for
+// it twice or keep a photo of a whiteboard on their phone.
+//
+// The code is a committed image, not drawn here. The URL never changes, so
+// generating it at runtime would mean shipping an encoder — and a QR that
+// looks right and scans as nothing is worse than no QR at all. This one was
+// made once and read back with a scanner to prove it.
+const STAFF_APP_URL = 'https://attendance.mystarswim.com';
+function StaffAppView() {
+  const [copied, setCopied] = useState('');
+  const note = what => {
+    setCopied(what);
+    setTimeout(() => setCopied(''), 2200);
+  };
+  async function copy(text, what) {
+    try {
+      await navigator.clipboard.writeText(text);
+      note(what);
+    } catch (e) {
+      // Clipboard access is refused outside a secure context and on some
+      // older phone browsers. Select the text so it can still be copied by
+      // hand rather than leaving a button that silently does nothing.
+      const el = document.getElementById('qr-url');
+      if (el && window.getSelection) {
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const s = window.getSelection();
+        s.removeAllRanges();
+        s.addRange(r);
+      }
+      note('select');
+    }
+  }
+  function print() {
+    document.body.setAttribute('data-print-view', 'qr');
+    const done = () => {
+      document.body.removeAttribute('data-print-view');
+      window.removeEventListener('afterprint', done);
+    };
+    window.addEventListener('afterprint', done);
+    window.print();
+    // Safari on iOS never fires afterprint; clear it on a timer too, or the
+    // app stays invisible on screen.
+    setTimeout(done, 1500);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 20,
+      fontWeight: 800,
+      marginBottom: 4
+    }
+  }, "📱 Staff attendance app"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 16,
+      maxWidth: 560
+    }
+  }, "Where crew check in and out, apply for leave and see their roster. Send them the link, or let them scan the code. Nothing here changes, so it is safe to print and pin up."), /*#__PURE__*/React.createElement("div", {
+    id: "qr-sheet",
+    style: {
+      display: 'flex',
+      gap: 24,
+      flexWrap: 'wrap',
+      alignItems: 'flex-start'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("img", {
+    className: "qr-art",
+    src: "./attendance-qr.png",
+    alt: `QR code for ${STAFF_APP_URL}`,
+    width: "220",
+    height: "220",
+    style: {
+      width: 220,
+      height: 220,
+      border: '1px solid var(--border)',
+      borderRadius: 12,
+      background: '#fff',
+      display: 'block'
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginTop: 10,
+      fontSize: 14
+    }
+  }, "Star Swim — staff attendance"), /*#__PURE__*/React.createElement("div", {
+    id: "qr-url",
+    style: {
+      fontFamily: 'ui-monospace,monospace',
+      fontSize: 12,
+      marginTop: 3,
+      color: 'var(--text-3,#6F6580)',
+      wordBreak: 'break-all',
+      maxWidth: 240
+    }
+  }, STAFF_APP_URL)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: '1 1 280px',
+      minWidth: 260
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: () => copy(STAFF_APP_URL, 'link')
+  }, "🔗 Copy link"), /*#__PURE__*/React.createElement("a", {
+    className: "btn",
+    href: "./attendance-qr.png",
+    download: "star-swim-attendance-qr.png",
+    style: {
+      textDecoration: 'none'
+    }
+  }, "⬇ Download code"), /*#__PURE__*/React.createElement("button", {
+    className: "btn",
+    onClick: print
+  }, "🖨 Print poster")), copied === 'link' && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#059669',
+      fontWeight: 700,
+      marginBottom: 12
+    }
+  }, "Link copied — paste it into WhatsApp."), copied === 'select' && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 700,
+      marginBottom: 12
+    }
+  }, "This browser would not let the app copy for you. The link is selected — copy it by hand."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '12px 14px',
+      background: 'var(--surface-2,#F3F1F8)',
+      border: '1px solid var(--border)',
+      borderRadius: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 13,
+      marginBottom: 6
+    }
+  }, "What to tell staff"), /*#__PURE__*/React.createElement("ol", {
+    className: "small",
+    style: {
+      margin: 0,
+      paddingLeft: 18,
+      lineHeight: 1.7
+    }
+  }, /*#__PURE__*/React.createElement("li", null, "Open the link, or scan the code with the phone camera."), /*#__PURE__*/React.createElement("li", null, "Sign in with the staff ID and password you gave them."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("b", null, "On Android:"), " tap the ⋮ menu, then ", /*#__PURE__*/React.createElement("b", null, "Add to Home screen"), ". It then opens like any other app."), /*#__PURE__*/React.createElement("li", null, /*#__PURE__*/React.createElement("b", null, "On iPhone:"), " tap Share, then ", /*#__PURE__*/React.createElement("b", null, "Add to Home Screen"), ".")), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 8
+    }
+  }, "Installing is optional — it works in the browser either way. It just saves them hunting for the link every shift.")))));
 }
 
 // ── Attendance: Live board ───────────────────────────────────────────────

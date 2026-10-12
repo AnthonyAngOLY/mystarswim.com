@@ -815,6 +815,13 @@
       body[data-print-view="receipt"] #receipt-sheet,
       body[data-print-view="receipt"] #receipt-sheet *{visibility:visible}
       body[data-print-view="receipt"] #receipt-sheet{position:fixed;top:0;left:0;width:100%;padding:14mm 18mm;border:none;background:#fff;color:#000}
+      /* The staff-app poster, same mechanism: everything hidden but the
+         sheet, which prints centred on its own page for a noticeboard. */
+      body[data-print-view="qr"] *{visibility:hidden}
+      body[data-print-view="qr"] #qr-sheet,
+      body[data-print-view="qr"] #qr-sheet *{visibility:visible}
+      body[data-print-view="qr"] #qr-sheet{position:fixed;top:0;left:0;width:100%;padding:20mm;border:none;background:#fff;color:#000;text-align:center}
+      body[data-print-view="qr"] #qr-sheet .qr-art{width:110mm;height:110mm;margin:0 auto}
     }
     /* Account sections in StudentEditor + ParentContactEditor — visually
        distinct from swimmer-form-section to signal "this is account-level
