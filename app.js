@@ -13789,7 +13789,16 @@ function daysUntil(iso){
 }
 // How loudly to say it. Null means there is nothing to say.
 function probationState(e){
-  if(!e || !e.probation_until || e.archived_at) return null;
+  if(!e || e.archived_at) return null;
+  // Marked as on probation with no end date is the worst of both: the
+  // contract says probation and nothing will ever say when it is up. That
+  // is precisely the silent lapse this exists to catch, so it gets said
+  // out loud rather than sitting there looking fine.
+  if(!e.probation_until){
+    return e.employment_type === PROBATION_TYPE
+      ? { tone:'unset', days:null, label:'Probation — no end date set' }
+      : null;
+  }
   const d = daysUntil(e.probation_until);
   if(d === null) return null;
   if(d < 0)  return { tone:'over',  days:d, label:`Probation ended ${-d} day${-d===1?'':'s'} ago` };
@@ -14757,16 +14766,17 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
                 const pro = probationState(e);
                 // Amber a week out, red once it has passed. A tint on its own
                 // would be a mystery, so the name cell carries the words too.
-                const tint = pro && pro.tone==='over' ? '#FFF1F1'
-                           : pro && pro.tone==='soon' ? '#FFFBEB' : undefined;
+                const tint = pro && pro.tone==='over'  ? '#FFF1F1'
+                           : pro && pro.tone==='soon'  ? '#FFFBEB'
+                           : pro && pro.tone==='unset' ? '#F8FAFC' : undefined;
                 return <tr key={e.id} style={tint?{background:tint}:undefined}
                            title={pro ? pro.label : undefined}>
                   <td><div style={{width:30,height:30,borderRadius:'50%',background:'#0EA5E9',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:11}}>{adminIni(e.full_name)}</div></td>
                   <td style={{fontWeight:700}}>{e.full_name}
                     {pro && pro.tone!=='ok' && <span style={{marginLeft:6,
-                      background:pro.tone==='over'?'#FEE2E2':'#FEF3C7',
-                      color:pro.tone==='over'?'#B91C1C':'#92400E',
-                      border:'1px solid '+(pro.tone==='over'?'#FCA5A5':'#FCD34D'),
+                      background:pro.tone==='over'?'#FEE2E2':pro.tone==='unset'?'#F1F5F9':'#FEF3C7',
+                      color:pro.tone==='over'?'#B91C1C':pro.tone==='unset'?'#475569':'#92400E',
+                      border:'1px solid '+(pro.tone==='over'?'#FCA5A5':pro.tone==='unset'?'#CBD5E1':'#FCD34D'),
                       borderRadius:999,fontSize:9.5,fontWeight:800,padding:'1px 6px',
                       whiteSpace:'nowrap'}}>{pro.label}</span>}
                     <div className="small subtle" style={{fontWeight:400}}>{[e.phone,e.email].filter(Boolean).join(' · ')||'—'}</div></td>
