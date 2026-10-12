@@ -224,10 +224,12 @@ Deno.serve(async (req) => {
     if (punchErr) return json({ error: "Could not record the punch.", detail: punchErr.message }, 500);
 
     if (!inside) {
-      // Rejected, but logged above. Raise one open geofence alert per shift.
-      await db.from("alerts")
-        .insert({ shift_id, crew_id: crew.id, type: "geofence" })
-        .select().maybeSingle();          // unique partial index dedupes
+      // Rejected, and logged above — that punch row carries the time, the
+      // coordinates, the distance and the verdict, and Live shows it against
+      // the session with a map link. No alert is raised: an alert is a thing
+      // somebody must come and close, and there is nothing here to close.
+      // The worker was told at the moment they tapped, nobody is being asked
+      // to explain it, and the attempt is on the record either way.
       await db.from("shifts")
         .update({ status: "geofence_flag", updated_at: new Date().toISOString() })
         .eq("id", shift_id).eq("status", "scheduled");

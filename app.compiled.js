@@ -6209,6 +6209,12 @@ function App({
   }, "🧾 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
   }, "Vouchers")), /*#__PURE__*/React.createElement("button", {
+    className: `nav-btn ${view === 'adminPromos' ? 'active' : ''}`,
+    onClick: () => setView('adminPromos'),
+    title: "Website Promotions"
+  }, "📢 ", /*#__PURE__*/React.createElement("span", {
+    className: "nav-label"
+  }, "Promotions")), /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'adminCrew' ? 'active' : ''}`,
     onClick: () => setView('adminCrew'),
     title: "Crew"
@@ -6231,12 +6237,6 @@ function App({
       padding: '1px 6px'
     }
   }, pendingLeaveCount)), /*#__PURE__*/React.createElement("button", {
-    className: `nav-btn ${view === 'adminPromos' ? 'active' : ''}`,
-    onClick: () => setView('adminPromos'),
-    title: "Website Promotions"
-  }, "📢 ", /*#__PURE__*/React.createElement("span", {
-    className: "nav-label"
-  }, "Promotions")), /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'attendance' ? 'active' : ''}`,
     onClick: () => setView('attendance'),
     title: "Attendance"
@@ -6292,6 +6292,11 @@ function App({
   }, /*#__PURE__*/React.createElement("span", {
     className: "mtab-ic"
   }, "🧾"), "Vouchers"), /*#__PURE__*/React.createElement("button", {
+    className: `mtab ${view === 'adminPromos' ? 'active' : ''}`,
+    onClick: () => setView('adminPromos')
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mtab-ic"
+  }, "📢"), "Promos"), /*#__PURE__*/React.createElement("button", {
     className: `mtab ${view === 'adminCrew' ? 'active' : ''}`,
     onClick: () => setView('adminCrew')
   }, /*#__PURE__*/React.createElement("span", {
@@ -6311,12 +6316,7 @@ function App({
       fontWeight: 800,
       padding: '0 5px'
     }
-  }, pendingLeaveCount)), /*#__PURE__*/React.createElement("button", {
-    className: `mtab ${view === 'adminPromos' ? 'active' : ''}`,
-    onClick: () => setView('adminPromos')
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "mtab-ic"
-  }, "📢"), "Promos")), /*#__PURE__*/React.createElement("button", {
+  }, pendingLeaveCount))), /*#__PURE__*/React.createElement("button", {
     className: `mtab ${mobileMoreOpen ? 'active' : ''}`,
     onClick: () => setMobileMoreOpen(v => !v),
     style: {
@@ -24856,7 +24856,7 @@ function AttendanceAlertsView({
       style: {
         color: '#059669'
       }
-    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered' : a.resolution_action === 'marked_absent' ? 'Marked absent' : a.resolution_action === 'session_removed' ? 'Session removed' : a.resolution_action === 'superseded_by_absence' ? 'Became an absence' : a.resolution_action === 'checked_in_late' ? 'Checked in late' : a.resolution_action === 'on_approved_leave' ? 'On approved leave' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'))));
+    }, "✓ ", a.resolution_action === 'time_entered' ? 'Time entered' : a.resolution_action === 'marked_absent' ? 'Marked absent' : a.resolution_action === 'session_removed' ? 'Session removed' : a.resolution_action === 'superseded_by_absence' ? 'Became an absence' : a.resolution_action === 'checked_in_late' ? 'Checked in late' : a.resolution_action === 'on_approved_leave' ? 'On approved leave' : a.resolution_action === 'check_in_refused' ? 'Check-in refused' : 'Reviewed', a.pay_treatment && /*#__PURE__*/React.createElement(React.Fragment, null, " · ", a.pay_treatment === 'full' ? 'Full deduction' : a.pay_treatment === 'half' ? 'Half deduction' : 'No deduction'))));
   })))), modal && (() => {
     const t = modal.a.type,
       needsTime = NEEDS_TIME[t] && !modal.markAbsent;

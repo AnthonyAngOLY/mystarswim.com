@@ -4071,9 +4071,11 @@ function App({ currentUser, onLogout }){
         {side==='system' && <>
           <button className={`nav-btn ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')} title="Directory">📇 <span className="nav-label">Directory</span></button>
           <button className={`nav-btn ${view==='adminVouchers'?'active':''}`} onClick={()=>setView('adminVouchers')} title="Payment Vouchers">🧾 <span className="nav-label">Vouchers</span></button>
+          <button className={`nav-btn ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')} title="Website Promotions">📢 <span className="nav-label">Promotions</span></button>
+          {/* Crew, Leave and Attendance sit together at the end: they are the
+              three screens about the same people, in the order you work them. */}
           <button className={`nav-btn ${view==='adminCrew'?'active':''}`} onClick={()=>setView('adminCrew')} title="Crew">👥 <span className="nav-label">Crew</span></button>
           <button className={`nav-btn ${view==='leave'?'active':''}`} onClick={()=>setView('leave')} title="Leave">🏖 <span className="nav-label">Leave</span>{pendingLeaveCount>0 && <span style={{marginLeft:5,background:'#EF4444',color:'#fff',borderRadius:999,fontSize:10,fontWeight:800,padding:'1px 6px'}}>{pendingLeaveCount}</span>}</button>
-          <button className={`nav-btn ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')} title="Website Promotions">📢 <span className="nav-label">Promotions</span></button>
           <button className={`nav-btn ${view==='attendance'?'active':''}`} onClick={()=>setView('attendance')} title="Attendance">⏱️ <span className="nav-label">Attendance</span></button>
         </>}
         </div>
@@ -4092,9 +4094,9 @@ function App({ currentUser, onLogout }){
       </> : <>
         <button className={`mtab ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')}><span className="mtab-ic">📇</span>Directory</button>
         <button className={`mtab ${view==='adminVouchers'?'active':''}`} onClick={()=>setView('adminVouchers')}><span className="mtab-ic">🧾</span>Vouchers</button>
+        <button className={`mtab ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')}><span className="mtab-ic">📢</span>Promos</button>
         <button className={`mtab ${view==='adminCrew'?'active':''}`} onClick={()=>setView('adminCrew')}><span className="mtab-ic">👥</span>Crew</button>
         <button className={`mtab ${view==='leave'?'active':''}`} onClick={()=>setView('leave')}><span className="mtab-ic">🏖</span>Leave{pendingLeaveCount>0 && <span style={{marginLeft:4,background:'#EF4444',color:'#fff',borderRadius:999,fontSize:9,fontWeight:800,padding:'0 5px'}}>{pendingLeaveCount}</span>}</button>
-        <button className={`mtab ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')}><span className="mtab-ic">📢</span>Promos</button>
       </>}
       <button className={`mtab ${mobileMoreOpen?'active':''}`} onClick={()=>setMobileMoreOpen(v=>!v)} style={{position:'relative'}}>
         <span className="mtab-ic">☰</span>More
@@ -12779,6 +12781,7 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
                 : a.resolution_action==='superseded_by_absence' ? 'Became an absence'
                 : a.resolution_action==='checked_in_late'       ? 'Checked in late'
                 : a.resolution_action==='on_approved_leave'     ? 'On approved leave'
+                : a.resolution_action==='check_in_refused'      ? 'Check-in refused'
                 : 'Reviewed'}{a.pay_treatment && <> · {
                   a.pay_treatment==='full' ? 'Full deduction'
                 : a.pay_treatment==='half' ? 'Half deduction' : 'No deduction'}</>}</span>}
