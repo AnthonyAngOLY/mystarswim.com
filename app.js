@@ -1486,7 +1486,9 @@ function App({ currentUser, onLogout }){
     });
     const patch = {};
     if(out.markAbsent) patch.status = 'absent';
-    if(out.markUnpaidLeave) patch.is_unpaid_leave = true;
+    // is_unpaid_leave is deliberately not set here any more. It means "this
+    // day was approved unpaid leave", which is decided in the Leave module
+    // before the day happens — not by whoever clears the alert afterwards.
     if(out.pay_treatment) patch.pay_treatment = out.pay_treatment;
     if(out.remark) patch.remark = out.remark;
     if(Object.keys(patch).length){
@@ -12793,10 +12795,15 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
         worker:(empById[s.crew_id]||{}).full_name || 'Unknown worker',
         category:(catById[s.category_id]||{}).name || '—',
         scheduled:0, attended:0, absent:0, lateCount:0, lateMin:0,
-        earlyCount:0, earlyMin:0, hours:0, unpaidLeave:0, incomplete:0
+        earlyCount:0, earlyMin:0, hours:0, onLeave:0, unpaidLeave:0, incomplete:0
       };
       r.scheduled += 1;
-      if(s.status==='absent'){ r.absent += 1; }
+      // Three outcomes, not two. A day on approved leave is neither worked
+      // nor missed: counting it as attended inflates the hours somebody is
+      // paid for, and counting it as absent accuses them of something they
+      // had permission for.
+      if(s.status==='on_leave'){ r.onLeave += 1; }
+      else if(s.status==='absent'){ r.absent += 1; }
       else { r.attended += 1; r.hours += hoursOf(s); }
       if(s.status==='incomplete') r.incomplete += 1;
       if(s.late_min>0){ r.lateCount += 1; r.lateMin += s.late_min; }
@@ -12822,20 +12829,22 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
     });
     const locName = id => ((locations||[]).find(l=>l.id===id)||{}).name || '—';
     const DEC = { full:'Deduct full', half:'Deduct half', none:'No deduction' };
+    // Things that went wrong. Approved leave did not go wrong — it is
+    // planned, it has its own columns above, and listing it here would
+    // put a worker's agreed day off in a table headed "exceptions".
     return (shifts||[]).filter(x=>
         x.status==='absent' || x.late_min>0 || x.early_min>0 ||
-        x.status==='incomplete' || x.is_unpaid_leave)
+        x.status==='incomplete')
       .map(x=>{
         const as = byShift[x.id] || [];
         const withReason = as.find(a=>a.worker_reason || a.worker_reason_code) || {};
         const resolved   = as.find(a=>a.status==='resolved') || {};
         let what='', tone='red';
-        if(x.status==='absent')            what = x.is_unpaid_leave ? 'Absent · unpaid leave' : 'Absent';
+        if(x.status==='absent')            what = 'Absent';
         else if(x.late_min>0 && x.early_min>0) what = `Late ${x.late_min}m · early ${x.early_min}m`;
         else if(x.late_min>0)              what = `Late ${x.late_min}m`;
         else if(x.early_min>0)             what = `Left ${x.early_min}m early`;
         else if(x.status==='incomplete') { what = 'No check-out'; tone='amber'; }
-        if(x.is_unpaid_leave && x.status!=='absent'){ what += ' · unpaid leave'; }
         return {
           id:x.id, date:x.shift_date, worker:(empById[x.crew_id]||{}).full_name || 'Unknown worker',
           what, tone, location:locName(x.location_id),
@@ -12852,7 +12861,7 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
     ['worker','Worker'],['category','Category'],['scheduled','Scheduled'],
     ['attended','Attended'],['absent','Absent'],['lateCount','Late'],
     ['lateMin','Late min'],['earlyCount','Left early'],['earlyMin','Early min'],
-    ['hours','Hours'],['unpaidLeave','Unpaid leave']
+    ['hours','Hours'],['onLeave','On leave'],['unpaidLeave','Unpaid leave']
   ];
   function exportRows(){
     return rows.map(r=>{ const o={}; FIELDS.forEach(([k,label])=>{
@@ -12933,6 +12942,7 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
           <th className="num" style={{textAlign:'right'}}>Late</th>
           <th className="num" style={{textAlign:'right'}}>Left early</th>
           <th className="num" style={{textAlign:'right'}}>Hours</th>
+          <th className="num" style={{textAlign:'right'}}>On leave</th>
           <th className="num" style={{textAlign:'right'}}>Unpaid leave</th>
         </tr></thead>
         <tbody>{rows.map(r=>{
@@ -12951,6 +12961,9 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
             <td style={{textAlign:'right'}}>
               {r.earlyCount ? <Chip tone="red">{r.earlyCount} · {r.earlyMin}m</Chip> : '—'}</td>
             <td style={{textAlign:'right'}}>{r.hours.toFixed(1)}</td>
+            {/* Approved leave, all of it. It explains a low Attended count
+                without anybody having to go and look it up. */}
+            <td style={{textAlign:'right'}} className="small subtle">{r.onLeave || '—'}</td>
             <td style={{textAlign:'right'}}>
               {r.unpaidLeave ? <Chip tone="amber">{r.unpaidLeave}</Chip> : '—'}</td>
           </tr>;
@@ -12963,6 +12976,7 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
           <td style={{textAlign:'right'}}>{tot('lateCount')||'—'}</td>
           <td style={{textAlign:'right'}}>{tot('earlyCount')||'—'}</td>
           <td style={{textAlign:'right'}}>{tot('hours').toFixed(1)}</td>
+          <td style={{textAlign:'right'}}>{tot('onLeave')||'—'}</td>
           <td style={{textAlign:'right'}}>{tot('unpaidLeave')||'—'}</td>
         </tr></tfoot>
       </table></div>
@@ -12999,9 +13013,18 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
         <b>Reading this for payroll.</b> Regular staff are on a fixed monthly
         salary — the column that matters is <b>Unpaid leave</b>, which is
         deducted outside this app. Part-time staff are paid per session, so
-        theirs is <b>Attended</b>. Late and early-leave minutes are recorded
-        for every session; whether any of them reduce pay is a decision you
-        make per incident in the alerts, not something this report applies.
+        theirs is <b>Attended</b>. <b>On leave</b> is every approved day off,
+        paid and unpaid together; it is there to explain a low Attended
+        count, not to be deducted.
+        <br /><br />
+        <b>Absences are not leave.</b> A session somebody was rostered for
+        and did not work is an absence, and the deduction is decided on the
+        alert, one at a time — the Exceptions table below shows what was
+        decided and why. Unpaid leave means a day they asked for in advance
+        and you approved, usually because their annual leave was spent.
+        Late and early-leave minutes are recorded for every session;
+        whether any of them reduce pay is also a per-incident decision, not
+        something this report applies.
       </div>
     </>}
   </div>;
@@ -13046,10 +13069,14 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
   function open(a){
     const s = shiftById[a.shift_id] || {};
     setModal({ a, s,
-      pay_treatment: a.pay_treatment || 'none',
+      // An absence starts at "deduct", because a session somebody was
+      // rostered for and did not work is a deduction unless they told you
+      // and you agreed. Letting it go should be the deliberate act, not
+      // the thing that happens when nobody touches the dropdown.
+      pay_treatment: a.pay_treatment || (a.type==='absent' ? 'full' : 'none'),
       remark: a.remark || '',
       time: NEEDS_TIME[a.type] === 'in' ? hhmm(snap(a).start_time) : hhmm(snap(a).end_time),
-      markAbsent: false, markUnpaidLeave: false });
+      markAbsent: false });
   }
 
   async function submit(){
@@ -13059,7 +13086,13 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
     // A manually entered punch is the one place an admin writes attendance
     // history by hand, so the reason is not optional.
     if(needsTime && !remark){ alert('A remark is required when you enter a time by hand.'); return; }
-    if(a.type==='absent' && modal.markUnpaidLeave && !remark){ alert('A remark is required for unpaid leave.'); return; }
+    // Not docking a missed session is the exception, so it has to carry a
+    // reason. Six months on, "why was this one free" has to be answerable
+    // from the record rather than from somebody's memory.
+    if((a.type==='absent' || modal.markAbsent) && modal.pay_treatment==='none' && !remark){
+      alert('Say why this absence is not being deducted — they told you in advance, you agreed cover, and so on.');
+      return;
+    }
     setBusy(true);
     try{
       if(needsTime){
@@ -13071,8 +13104,7 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
                          : needsTime ? 'time_entered' : 'reviewed',
         pay_treatment: modal.pay_treatment,
         remark: remark || null,
-        markAbsent: modal.markAbsent,
-        markUnpaidLeave: modal.markUnpaidLeave
+        markAbsent: modal.markAbsent
       });
       setModal(null);
     } catch(ex){ alert(ex.message || 'Could not resolve that.'); }
@@ -13165,6 +13197,8 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
 
     {modal && (()=>{
       const t = modal.a.type, needsTime = NEEDS_TIME[t] && !modal.markAbsent;
+      // Either it arrived as an absence, or it is about to become one.
+      const isAbsence = t==='absent' || modal.markAbsent;
       return <div className="modal-backdrop"><div className="modal-card">
         <div className="modal-head">
           <div style={{minWidth:0,flex:1}}>
@@ -13176,12 +13210,6 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
           <button className="btn btn-ghost small" onClick={()=>setModal(null)} aria-label="Close">✕</button>
         </div>
         <div className="modal-body">
-          {t==='absent' && <label className="small" style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
-            <input type="checkbox" checked={modal.markUnpaidLeave}
-              onChange={e=>setModal({...modal,markUnpaidLeave:e.target.checked})} />
-            Mark as unpaid leave <span className="subtle">(counted in the report; deducted outside this app)</span>
-          </label>}
-
           {NEEDS_TIME[t] && <label className="small" style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
             <input type="checkbox" checked={modal.markAbsent}
               onChange={e=>setModal({...modal,markAbsent:e.target.checked})} />
@@ -13198,7 +13226,12 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
               differently from a real punch.
             </div></div>}
 
-          {t!=='absent' && <div className="field"><label>Pay treatment</label>
+          {/* Shown for every kind, absences included. An absence IS a pay
+              decision and nothing else — the question "was this unpaid
+              leave" does not belong here, because unpaid leave is asked for
+              in advance and approved in Leave, not decided after the fact
+              by whoever clears the alert. */}
+          <div className="field"><label>Pay treatment</label>
             <select className="input" value={modal.pay_treatment}
               onChange={e=>setModal({...modal,pay_treatment:e.target.value})}>
               <option value="none">No deduction</option>
@@ -13206,9 +13239,10 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
               <option value="full">Deduct full</option>
             </select>
             <div className="small subtle" style={{marginTop:4}}>
-              Recorded now so the history is complete. Nothing is calculated
-              from it until pay rates are set up.
-            </div></div>}
+              {isAbsence
+                ? 'A session they were rostered for and did not work is a deduction. Choose "No deduction" only if they told you and you agreed, and say so in the note.'
+                : 'Recorded now so the history is complete. Nothing is calculated from it until pay rates are set up.'}
+            </div></div>
 
           {(modal.a.worker_reason || modal.a.worker_reason_code) &&
             <div className="field"><label>Their reason</label>
@@ -13222,7 +13256,7 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
             </div>}
 
           <div className="field"><label>
-            Your note {(needsTime || (t==='absent' && modal.markUnpaidLeave)) && <span style={{color:'#DC2626'}}>*</span>}
+            Your note {(needsTime || (isAbsence && modal.pay_treatment==='none')) && <span style={{color:'#DC2626'}}>*</span>}
           </label>
             <input className="input" value={modal.remark} autoFocus
               placeholder={modal.a.worker_reason ? 'Accepted, or why not' : 'What you found out'}

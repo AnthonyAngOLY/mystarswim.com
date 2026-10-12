@@ -2309,7 +2309,9 @@ function App({
     });
     const patch = {};
     if (out.markAbsent) patch.status = 'absent';
-    if (out.markUnpaidLeave) patch.is_unpaid_leave = true;
+    // is_unpaid_leave is deliberately not set here any more. It means "this
+    // day was approved unpaid leave", which is decided in the Leave module
+    // before the day happens — not by whoever clears the alert afterwards.
     if (out.pay_treatment) patch.pay_treatment = out.pay_treatment;
     if (out.remark) patch.remark = out.remark;
     if (Object.keys(patch).length) {
@@ -24925,11 +24927,18 @@ function AttendanceReportView({
         earlyCount: 0,
         earlyMin: 0,
         hours: 0,
+        onLeave: 0,
         unpaidLeave: 0,
         incomplete: 0
       };
       r.scheduled += 1;
-      if (s.status === 'absent') {
+      // Three outcomes, not two. A day on approved leave is neither worked
+      // nor missed: counting it as attended inflates the hours somebody is
+      // paid for, and counting it as absent accuses them of something they
+      // had permission for.
+      if (s.status === 'on_leave') {
+        r.onLeave += 1;
+      } else if (s.status === 'absent') {
         r.absent += 1;
       } else {
         r.attended += 1;
@@ -24973,18 +24982,18 @@ function AttendanceReportView({
       half: 'Deduct half',
       none: 'No deduction'
     };
-    return (shifts || []).filter(x => x.status === 'absent' || x.late_min > 0 || x.early_min > 0 || x.status === 'incomplete' || x.is_unpaid_leave).map(x => {
+    // Things that went wrong. Approved leave did not go wrong — it is
+    // planned, it has its own columns above, and listing it here would
+    // put a worker's agreed day off in a table headed "exceptions".
+    return (shifts || []).filter(x => x.status === 'absent' || x.late_min > 0 || x.early_min > 0 || x.status === 'incomplete').map(x => {
       const as = byShift[x.id] || [];
       const withReason = as.find(a => a.worker_reason || a.worker_reason_code) || {};
       const resolved = as.find(a => a.status === 'resolved') || {};
       let what = '',
         tone = 'red';
-      if (x.status === 'absent') what = x.is_unpaid_leave ? 'Absent · unpaid leave' : 'Absent';else if (x.late_min > 0 && x.early_min > 0) what = `Late ${x.late_min}m · early ${x.early_min}m`;else if (x.late_min > 0) what = `Late ${x.late_min}m`;else if (x.early_min > 0) what = `Left ${x.early_min}m early`;else if (x.status === 'incomplete') {
+      if (x.status === 'absent') what = 'Absent';else if (x.late_min > 0 && x.early_min > 0) what = `Late ${x.late_min}m · early ${x.early_min}m`;else if (x.late_min > 0) what = `Late ${x.late_min}m`;else if (x.early_min > 0) what = `Left ${x.early_min}m early`;else if (x.status === 'incomplete') {
         what = 'No check-out';
         tone = 'amber';
-      }
-      if (x.is_unpaid_leave && x.status !== 'absent') {
-        what += ' · unpaid leave';
       }
       return {
         id: x.id,
@@ -24999,7 +25008,7 @@ function AttendanceReportView({
       };
     }).sort((a, b) => a.date.localeCompare(b.date) || a.worker.localeCompare(b.worker));
   }, [shifts, alerts, locations, empById]);
-  const FIELDS = [['worker', 'Worker'], ['category', 'Category'], ['scheduled', 'Scheduled'], ['attended', 'Attended'], ['absent', 'Absent'], ['lateCount', 'Late'], ['lateMin', 'Late min'], ['earlyCount', 'Left early'], ['earlyMin', 'Early min'], ['hours', 'Hours'], ['unpaidLeave', 'Unpaid leave']];
+  const FIELDS = [['worker', 'Worker'], ['category', 'Category'], ['scheduled', 'Scheduled'], ['attended', 'Attended'], ['absent', 'Absent'], ['lateCount', 'Late'], ['lateMin', 'Late min'], ['earlyCount', 'Left early'], ['earlyMin', 'Early min'], ['hours', 'Hours'], ['onLeave', 'On leave'], ['unpaidLeave', 'Unpaid leave']];
   function exportRows() {
     return rows.map(r => {
       const o = {};
@@ -25175,6 +25184,11 @@ function AttendanceReportView({
     style: {
       textAlign: 'right'
     }
+  }, "On leave"), /*#__PURE__*/React.createElement("th", {
+    className: "num",
+    style: {
+      textAlign: 'right'
+    }
   }, "Unpaid leave"))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => {
     // A row that affects pay is tinted, so a payroll run finds the
     // people who need a decision without reading every number.
@@ -25222,6 +25236,11 @@ function AttendanceReportView({
     }, r.hours.toFixed(1)), /*#__PURE__*/React.createElement("td", {
       style: {
         textAlign: 'right'
+      },
+      className: "small subtle"
+    }, r.onLeave || '—'), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right'
       }
     }, r.unpaidLeave ? /*#__PURE__*/React.createElement(Chip, {
       tone: "amber"
@@ -25258,6 +25277,10 @@ function AttendanceReportView({
       textAlign: 'right'
     }
   }, tot('hours').toFixed(1)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, tot('onLeave') || '—'), /*#__PURE__*/React.createElement("td", {
     style: {
       textAlign: 'right'
     }
@@ -25329,7 +25352,7 @@ function AttendanceReportView({
       marginTop: 14,
       lineHeight: 1.6
     }
-  }, /*#__PURE__*/React.createElement("b", null, "Reading this for payroll."), " Regular staff are on a fixed monthly salary — the column that matters is ", /*#__PURE__*/React.createElement("b", null, "Unpaid leave"), ", which is deducted outside this app. Part-time staff are paid per session, so theirs is ", /*#__PURE__*/React.createElement("b", null, "Attended"), ". Late and early-leave minutes are recorded for every session; whether any of them reduce pay is a decision you make per incident in the alerts, not something this report applies.")));
+  }, /*#__PURE__*/React.createElement("b", null, "Reading this for payroll."), " Regular staff are on a fixed monthly salary — the column that matters is ", /*#__PURE__*/React.createElement("b", null, "Unpaid leave"), ", which is deducted outside this app. Part-time staff are paid per session, so theirs is ", /*#__PURE__*/React.createElement("b", null, "Attended"), ". ", /*#__PURE__*/React.createElement("b", null, "On leave"), " is every approved day off, paid and unpaid together; it is there to explain a low Attended count, not to be deducted.", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("b", null, "Absences are not leave."), " A session somebody was rostered for and did not work is an absence, and the deduction is decided on the alert, one at a time — the Exceptions table below shows what was decided and why. Unpaid leave means a day they asked for in advance and you approved, usually because their annual leave was spent. Late and early-leave minutes are recorded for every session; whether any of them reduce pay is also a per-incident decision, not something this report applies.")));
 }
 
 // ── Attendance: Alerts inbox ─────────────────────────────────────────────
@@ -25414,11 +25437,14 @@ function AttendanceAlertsView({
     setModal({
       a,
       s,
-      pay_treatment: a.pay_treatment || 'none',
+      // An absence starts at "deduct", because a session somebody was
+      // rostered for and did not work is a deduction unless they told you
+      // and you agreed. Letting it go should be the deliberate act, not
+      // the thing that happens when nobody touches the dropdown.
+      pay_treatment: a.pay_treatment || (a.type === 'absent' ? 'full' : 'none'),
       remark: a.remark || '',
       time: NEEDS_TIME[a.type] === 'in' ? hhmm(snap(a).start_time) : hhmm(snap(a).end_time),
-      markAbsent: false,
-      markUnpaidLeave: false
+      markAbsent: false
     });
   }
   async function submit() {
@@ -25434,8 +25460,11 @@ function AttendanceAlertsView({
       alert('A remark is required when you enter a time by hand.');
       return;
     }
-    if (a.type === 'absent' && modal.markUnpaidLeave && !remark) {
-      alert('A remark is required for unpaid leave.');
+    // Not docking a missed session is the exception, so it has to carry a
+    // reason. Six months on, "why was this one free" has to be answerable
+    // from the record rather than from somebody's memory.
+    if ((a.type === 'absent' || modal.markAbsent) && modal.pay_treatment === 'none' && !remark) {
+      alert('Say why this absence is not being deducted — they told you in advance, you agreed cover, and so on.');
       return;
     }
     setBusy(true);
@@ -25452,8 +25481,7 @@ function AttendanceAlertsView({
         resolution_action: modal.markAbsent ? 'marked_absent' : needsTime ? 'time_entered' : 'reviewed',
         pay_treatment: modal.pay_treatment,
         remark: remark || null,
-        markAbsent: modal.markAbsent,
-        markUnpaidLeave: modal.markUnpaidLeave
+        markAbsent: modal.markAbsent
       });
       setModal(null);
     } catch (ex) {
@@ -25615,6 +25643,8 @@ function AttendanceAlertsView({
   })))), modal && (() => {
     const t = modal.a.type,
       needsTime = NEEDS_TIME[t] && !modal.markAbsent;
+    // Either it arrived as an absence, or it is about to become one.
+    const isAbsence = t === 'absent' || modal.markAbsent;
     return /*#__PURE__*/React.createElement("div", {
       className: "modal-backdrop"
     }, /*#__PURE__*/React.createElement("div", {
@@ -25644,24 +25674,7 @@ function AttendanceAlertsView({
       "aria-label": "Close"
     }, "✕")), /*#__PURE__*/React.createElement("div", {
       className: "modal-body"
-    }, t === 'absent' && /*#__PURE__*/React.createElement("label", {
-      className: "small",
-      style: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 12
-      }
-    }, /*#__PURE__*/React.createElement("input", {
-      type: "checkbox",
-      checked: modal.markUnpaidLeave,
-      onChange: e => setModal({
-        ...modal,
-        markUnpaidLeave: e.target.checked
-      })
-    }), "Mark as unpaid leave ", /*#__PURE__*/React.createElement("span", {
-      className: "subtle"
-    }, "(counted in the report; deducted outside this app)")), NEEDS_TIME[t] && /*#__PURE__*/React.createElement("label", {
+    }, NEEDS_TIME[t] && /*#__PURE__*/React.createElement("label", {
       className: "small",
       style: {
         display: 'flex',
@@ -25691,7 +25704,7 @@ function AttendanceAlertsView({
       style: {
         marginTop: 4
       }
-    }, "Recorded as entered by you, with no location, and shown differently from a real punch.")), t !== 'absent' && /*#__PURE__*/React.createElement("div", {
+    }, "Recorded as entered by you, with no location, and shown differently from a real punch.")), /*#__PURE__*/React.createElement("div", {
       className: "field"
     }, /*#__PURE__*/React.createElement("label", null, "Pay treatment"), /*#__PURE__*/React.createElement("select", {
       className: "input",
@@ -25711,7 +25724,7 @@ function AttendanceAlertsView({
       style: {
         marginTop: 4
       }
-    }, "Recorded now so the history is complete. Nothing is calculated from it until pay rates are set up.")), (modal.a.worker_reason || modal.a.worker_reason_code) && /*#__PURE__*/React.createElement("div", {
+    }, isAbsence ? 'A session they were rostered for and did not work is a deduction. Choose "No deduction" only if they told you and you agreed, and say so in the note.' : 'Recorded now so the history is complete. Nothing is calculated from it until pay rates are set up.')), (modal.a.worker_reason || modal.a.worker_reason_code) && /*#__PURE__*/React.createElement("div", {
       className: "field"
     }, /*#__PURE__*/React.createElement("label", null, "Their reason"), /*#__PURE__*/React.createElement("div", {
       className: "small",
@@ -25723,7 +25736,7 @@ function AttendanceAlertsView({
       }
     }, REASON_LABEL[modal.a.worker_reason_code] && /*#__PURE__*/React.createElement("b", null, REASON_LABEL[modal.a.worker_reason_code]), modal.a.worker_reason && /*#__PURE__*/React.createElement(React.Fragment, null, " ", modal.a.worker_reason_code ? '— ' : '', /*#__PURE__*/React.createElement("i", null, modal.a.worker_reason)))), /*#__PURE__*/React.createElement("div", {
       className: "field"
-    }, /*#__PURE__*/React.createElement("label", null, "Your note ", (needsTime || t === 'absent' && modal.markUnpaidLeave) && /*#__PURE__*/React.createElement("span", {
+    }, /*#__PURE__*/React.createElement("label", null, "Your note ", (needsTime || isAbsence && modal.pay_treatment === 'none') && /*#__PURE__*/React.createElement("span", {
       style: {
         color: '#DC2626'
       }
