@@ -1255,6 +1255,27 @@ function App({ currentUser, onLogout }){
     } catch(_){ setAdminCrewLoadFailed(true); }
   }
 
+  // ── Leave documents: how long they are kept, and clearing out what is due ──
+  const [docRetentionMonths,setDocRetentionMonths] = useState(60);
+  async function saveDocRetention(months){
+    try{
+      await rest('attendance_settings?id=eq.true', { method:'PATCH',
+        body: JSON.stringify({ leave_doc_retention_months: Number(months) }) });
+      setDocRetentionMonths(Number(months));
+    }catch(err){ throw new Error(leaveErrText(err)); }
+  }
+  // The purge runs as an Edge Function because deleting a file has to go
+  // through the storage API. It accepts a signed-in sysadmin, which is who is
+  // pressing the button.
+  async function runLeaveDocPurge(commit){
+    const res = await fetch(`${cfg.supabaseUrl}/functions/v1/leave-docs-purge`, {
+      method:'POST', headers: authHeadersFor(), body: JSON.stringify({ commit: !!commit }),
+    });
+    const d = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(d.error || `The purge could not run (HTTP ${res.status}).`);
+    return d;
+  }
+
   // ── Leave ───────────────────────────────────────────────────────────────
   async function loadLeave(){
     try{
@@ -1264,6 +1285,11 @@ function App({ currentUser, onLogout }){
         selectRows('v_leave_balances','*',`&year=eq.${leaveYear}`).catch(()=>[]),
       ]);
       setLeaveTypes(types||[]); setLeaveRequests(reqs||[]); setLeaveBalances(bals||[]);
+      try{
+        const st = await selectRows('attendance_settings','leave_doc_retention_months');
+        if(st && st[0] && st[0].leave_doc_retention_months!=null)
+          setDocRetentionMonths(Number(st[0].leave_doc_retention_months));
+      }catch(_){ /* the migration may not have run yet */ }
     }catch(_){ /* the screens show their own empty state */ }
   }
   // Entered per person, per type, per year. Upsert on that triple so editing
@@ -4573,8 +4599,11 @@ function App({ currentUser, onLogout }){
       {/* ── Settings: left-column nav + content ── */}
       {!loading && view==='settings' && canSettings && <div className="side-shell">
         <SectionNav ariaLabel="Settings section" value={adminSection} onChange={setAdminSection}
-          items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users']]} />
+          items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users'],...(isSysadmin?[['retention','Documents']]:[])]} />
         <div className="side-content">
+          {adminSection==='retention' && isSysadmin && <DocRetentionView
+            months={docRetentionMonths} setMonths={saveDocRetention}
+            runPurge={runLeaveDocPurge} />}
           {adminSection==='summary' && <SummaryView summary={summary} pools={activePools()} />}
           {adminSection==='branches' && <BranchesAdminView
             branches={options.branches||[]}
@@ -13291,6 +13320,128 @@ function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogi
       </>}
     </div>
   </div></div>;
+}
+
+// ── Documents & retention ─────────────────────────────────────────────────
+// Medical certificates are the most sensitive thing this system holds, and a
+// retention policy nobody can see or check is not a policy. This is the whole
+// of it on one screen: how long, what is due, and a way to clear it out —
+// with a look-before-you-leap step, because deleting them is permanent.
+function DocRetentionView({ months, setMonths, runPurge }){
+  const [draft,setDraft]=useState(String(months||60));
+  const [saving,setSaving]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [report,setReport]=useState(null);
+  const [err,setErr]=useState('');
+  const [armed,setArmed]=useState(false);
+
+  useEffect(()=>{ setDraft(String(months||60)); }, [months]);
+
+  const years = (Number(draft)/12);
+  const yearText = Number.isFinite(years)
+    ? (years === Math.round(years) ? `${Math.round(years)} year${Math.round(years)===1?'':'s'}`
+                                   : `${years.toFixed(1)} years`)
+    : '';
+
+  async function save(){
+    setErr(''); setSaving(true);
+    try{ await setMonths(draft); }
+    catch(e){ setErr(e.message||'Could not save that.'); }
+    finally{ setSaving(false); }
+  }
+  async function check(commit){
+    setErr(''); setBusy(true);
+    try{
+      const d = await runPurge(commit);
+      setReport(d);
+      setArmed(false);
+    }catch(e){ setErr(e.message||'Could not run the check.'); setReport(null); }
+    finally{ setBusy(false); }
+  }
+
+  const due = report ? (report.would_delete ?? report.deleted ?? 0) : null;
+
+  return <>
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>📄 Leave documents</div>
+      <div className="small subtle" style={{marginBottom:14,maxWidth:720,lineHeight:1.5}}>
+        Medical certificates and death certificates attached to leave applications. They are
+        held in a private store and opened through a link that expires, never a public URL.
+        <b> Only the document expires.</b> The leave record — dates, kind, who approved it and
+        their note — is kept as long as the employment record is, so a question about what
+        happened in a given year still has an answer long after the image has gone.
+      </div>
+
+      <div style={{display:'flex',gap:10,alignItems:'flex-end',flexWrap:'wrap'}}>
+        <div className="field" style={{margin:0}}>
+          <label>Keep documents for</label>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <input className="input" type="number" min="1" max="240" style={{width:110}}
+              value={draft} onChange={e=>setDraft(e.target.value)} />
+            <span className="small subtle">months{yearText?` · ${yearText}`:''}</span>
+          </div>
+        </div>
+        <button className="btn btn-primary" style={{height:38}}
+          disabled={saving || !draft || Number(draft)<1 || Number(draft)>240 || String(months)===draft}
+          onClick={save}>{saving?'Saving…':'Save'}</button>
+      </div>
+      <div className="small subtle" style={{marginTop:6}}>
+        Counted from the date the application was made. Changing this takes effect at the next
+        clear-out; it does not bring anything back.
+      </div>
+    </div>
+
+    <div className="card">
+      <div style={{fontSize:15,fontWeight:800,marginBottom:4}}>Clearing out what is past its date</div>
+      <div className="small subtle" style={{marginBottom:12,maxWidth:720,lineHeight:1.5}}>
+        Checking changes nothing — it only counts. Two kinds of file are counted: documents
+        whose application is past the period above, and uploads that were never attached to an
+        application, which happens when somebody starts a form and abandons it. Those are given
+        a month before they count.
+      </div>
+
+      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+        <button className="btn btn-ghost" disabled={busy} onClick={()=>check(false)}>
+          {busy && !armed ? 'Checking…' : '🔍 Check what is due'}
+        </button>
+        {report && due > 0 && !armed &&
+          <button className="btn btn-ghost" style={{color:'#DC2626'}} disabled={busy}
+            onClick={()=>setArmed(true)}>Delete these {due} permanently…</button>}
+        {armed && <>
+          <button className="btn btn-ghost" disabled={busy} onClick={()=>setArmed(false)}>Cancel</button>
+          <button className="btn btn-primary" style={{background:'#DC2626'}} disabled={busy}
+            onClick={()=>check(true)}>{busy?'Deleting…':`Yes, delete ${due} document${due===1?'':'s'}`}</button>
+        </>}
+      </div>
+
+      {armed && <div className="small" style={{marginTop:10,background:'#FFF1F1',border:'1px solid #FCA5A5',
+        borderRadius:9,padding:'10px 12px',color:'#B91C1C',maxWidth:720}}>
+        This cannot be undone. The {due} file{due===1?'':'s'} go; the leave records they were
+        attached to stay, without their document.
+      </div>}
+
+      {err && <div className="small" style={{marginTop:10,color:'#DC2626',fontWeight:600}}>{err}</div>}
+
+      {report && <div style={{marginTop:14}}>
+        <div className="table-wrap"><table><tbody>
+          <tr><td>Documents held</td><td style={{textAlign:'right',fontWeight:700}}>{report.in_bucket ?? '—'}</td></tr>
+          <tr><td>Past their date</td><td style={{textAlign:'right',fontWeight:700}}>{report.expired ?? 0}</td></tr>
+          <tr><td>Uploads never attached to an application</td>
+              <td style={{textAlign:'right',fontWeight:700}}>{report.orphaned ?? report.orphans_removed ?? 0}</td></tr>
+          <tr><td style={{fontWeight:700}}>{report.dry_run===false?'Deleted':'Would be deleted'}</td>
+              <td style={{textAlign:'right',fontWeight:800,
+                   color: due>0 ? '#B45309' : '#047857'}}>{due}</td></tr>
+        </tbody></table></div>
+        <div className="small subtle" style={{marginTop:8}}>
+          {report.dry_run===false
+            ? `Done. ${report.applications_cleared ?? 0} leave record${(report.applications_cleared??0)===1?'':'s'} no longer carry a document.`
+            : due > 0
+              ? `Anything older than ${report.cutoff} is past its date. Nothing has been deleted.`
+              : `Nothing is past its date. The oldest anything may be is ${report.cutoff}.`}
+        </div>
+      </div>}
+    </div>
+  </>;
 }
 
 // ── Leave ─────────────────────────────────────────────────────────────────

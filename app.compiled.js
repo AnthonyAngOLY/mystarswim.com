@@ -2002,6 +2002,37 @@ function App({
     }
   }
 
+  // ── Leave documents: how long they are kept, and clearing out what is due ──
+  const [docRetentionMonths, setDocRetentionMonths] = useState(60);
+  async function saveDocRetention(months) {
+    try {
+      await rest('attendance_settings?id=eq.true', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          leave_doc_retention_months: Number(months)
+        })
+      });
+      setDocRetentionMonths(Number(months));
+    } catch (err) {
+      throw new Error(leaveErrText(err));
+    }
+  }
+  // The purge runs as an Edge Function because deleting a file has to go
+  // through the storage API. It accepts a signed-in sysadmin, which is who is
+  // pressing the button.
+  async function runLeaveDocPurge(commit) {
+    const res = await fetch(`${cfg.supabaseUrl}/functions/v1/leave-docs-purge`, {
+      method: 'POST',
+      headers: authHeadersFor(),
+      body: JSON.stringify({
+        commit: !!commit
+      })
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || `The purge could not run (HTTP ${res.status}).`);
+    return d;
+  }
+
   // ── Leave ───────────────────────────────────────────────────────────────
   async function loadLeave() {
     try {
@@ -2009,6 +2040,10 @@ function App({
       setLeaveTypes(types || []);
       setLeaveRequests(reqs || []);
       setLeaveBalances(bals || []);
+      try {
+        const st = await selectRows('attendance_settings', 'leave_doc_retention_months');
+        if (st && st[0] && st[0].leave_doc_retention_months != null) setDocRetentionMonths(Number(st[0].leave_doc_retention_months));
+      } catch (_) {/* the migration may not have run yet */}
     } catch (_) {/* the screens show their own empty state */}
   }
   // Entered per person, per type, per year. Upsert on that triple so editing
@@ -6990,10 +7025,14 @@ function App({
     ariaLabel: "Settings section",
     value: adminSection,
     onChange: setAdminSection,
-    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users']]
+    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isSysadmin ? [['retention', 'Documents']] : [])]
   }), /*#__PURE__*/React.createElement("div", {
     className: "side-content"
-  }, adminSection === 'summary' && /*#__PURE__*/React.createElement(SummaryView, {
+  }, adminSection === 'retention' && isSysadmin && /*#__PURE__*/React.createElement(DocRetentionView, {
+    months: docRetentionMonths,
+    setMonths: saveDocRetention,
+    runPurge: runLeaveDocPurge
+  }), adminSection === 'summary' && /*#__PURE__*/React.createElement(SummaryView, {
     summary: summary,
     pools: activePools()
   }), adminSection === 'branches' && /*#__PURE__*/React.createElement(BranchesAdminView, {
@@ -25946,6 +25985,213 @@ function CrewLoginModal({
     className: "btn btn-ghost",
     onClick: onClose
   }, "Cancel"))))));
+}
+
+// ── Documents & retention ─────────────────────────────────────────────────
+// Medical certificates are the most sensitive thing this system holds, and a
+// retention policy nobody can see or check is not a policy. This is the whole
+// of it on one screen: how long, what is due, and a way to clear it out —
+// with a look-before-you-leap step, because deleting them is permanent.
+function DocRetentionView({
+  months,
+  setMonths,
+  runPurge
+}) {
+  const [draft, setDraft] = useState(String(months || 60));
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState(null);
+  const [err, setErr] = useState('');
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    setDraft(String(months || 60));
+  }, [months]);
+  const years = Number(draft) / 12;
+  const yearText = Number.isFinite(years) ? years === Math.round(years) ? `${Math.round(years)} year${Math.round(years) === 1 ? '' : 's'}` : `${years.toFixed(1)} years` : '';
+  async function save() {
+    setErr('');
+    setSaving(true);
+    try {
+      await setMonths(draft);
+    } catch (e) {
+      setErr(e.message || 'Could not save that.');
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function check(commit) {
+    setErr('');
+    setBusy(true);
+    try {
+      const d = await runPurge(commit);
+      setReport(d);
+      setArmed(false);
+    } catch (e) {
+      setErr(e.message || 'Could not run the check.');
+      setReport(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const due = report ? report.would_delete ?? report.deleted ?? 0 : null;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 18,
+      fontWeight: 800,
+      marginBottom: 4
+    }
+  }, "📄 Leave documents"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 14,
+      maxWidth: 720,
+      lineHeight: 1.5
+    }
+  }, "Medical certificates and death certificates attached to leave applications. They are held in a private store and opened through a link that expires, never a public URL.", /*#__PURE__*/React.createElement("b", null, " Only the document expires."), " The leave record — dates, kind, who approved it and their note — is kept as long as the employment record is, so a question about what happened in a given year still has an answer long after the image has gone."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'flex-end',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Keep documents for"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: "1",
+    max: "240",
+    style: {
+      width: 110
+    },
+    value: draft,
+    onChange: e => setDraft(e.target.value)
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, "months", yearText ? ` · ${yearText}` : ''))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    style: {
+      height: 38
+    },
+    disabled: saving || !draft || Number(draft) < 1 || Number(draft) > 240 || String(months) === draft,
+    onClick: save
+  }, saving ? 'Saving…' : 'Save')), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 6
+    }
+  }, "Counted from the date the application was made. Changing this takes effect at the next clear-out; it does not bring anything back.")), /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 15,
+      fontWeight: 800,
+      marginBottom: 4
+    }
+  }, "Clearing out what is past its date"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12,
+      maxWidth: 720,
+      lineHeight: 1.5
+    }
+  }, "Checking changes nothing — it only counts. Two kinds of file are counted: documents whose application is past the period above, and uploads that were never attached to an application, which happens when somebody starts a form and abandons it. Those are given a month before they count."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    disabled: busy,
+    onClick: () => check(false)
+  }, busy && !armed ? 'Checking…' : '🔍 Check what is due'), report && due > 0 && !armed && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    style: {
+      color: '#DC2626'
+    },
+    disabled: busy,
+    onClick: () => setArmed(true)
+  }, "Delete these ", due, " permanently…"), armed && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    disabled: busy,
+    onClick: () => setArmed(false)
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    style: {
+      background: '#DC2626'
+    },
+    disabled: busy,
+    onClick: () => check(true)
+  }, busy ? 'Deleting…' : `Yes, delete ${due} document${due === 1 ? '' : 's'}`))), armed && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 10,
+      background: '#FFF1F1',
+      border: '1px solid #FCA5A5',
+      borderRadius: 9,
+      padding: '10px 12px',
+      color: '#B91C1C',
+      maxWidth: 720
+    }
+  }, "This cannot be undone. The ", due, " file", due === 1 ? '' : 's', " go; the leave records they were attached to stay, without their document."), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 10,
+      color: '#DC2626',
+      fontWeight: 600
+    }
+  }, err), report && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("tbody", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Documents held"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 700
+    }
+  }, report.in_bucket ?? '—')), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Past their date"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 700
+    }
+  }, report.expired ?? 0)), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", null, "Uploads never attached to an application"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 700
+    }
+  }, report.orphaned ?? report.orphans_removed ?? 0)), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 700
+    }
+  }, report.dry_run === false ? 'Deleted' : 'Would be deleted'), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 800,
+      color: due > 0 ? '#B45309' : '#047857'
+    }
+  }, due))))), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 8
+    }
+  }, report.dry_run === false ? `Done. ${report.applications_cleared ?? 0} leave record${(report.applications_cleared ?? 0) === 1 ? '' : 's'} no longer carry a document.` : due > 0 ? `Anything older than ${report.cutoff} is past its date. Nothing has been deleted.` : `Nothing is past its date. The oldest anything may be is ${report.cutoff}.`))));
 }
 
 // ── Leave ─────────────────────────────────────────────────────────────────
