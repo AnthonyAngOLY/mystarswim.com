@@ -18,6 +18,13 @@
 //
 // Dry run by default. Pass { "commit": true } to actually delete.
 //
+// WHO MAY CALL IT. Leave "Verify JWT" ON in the dashboard, but do not mistake
+// that for the gate: it is satisfied by the anon key, which ships to every
+// browser in config.js. A function that permanently deletes records has to
+// know who is asking, so it checks for itself — the service role key, which
+// is what the cron job presents, or a signed-in sysadmin. Nobody else, and a
+// dry run is no exception: what it reports is a map of what is held.
+//
 // Deploy:  supabase functions deploy leave-docs-purge
 // Secrets: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are injected.
 // ─────────────────────────────────────────────────────────────────────────
@@ -73,6 +80,23 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
+    // ── Who is asking ───────────────────────────────────────────────────
+    const bearer = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+    if (!bearer) return json({ error: "Not signed in." }, 401);
+
+    let allowed = false;
+    // The scheduled job, presenting the service role key.
+    if (bearer === SERVICE_ROLE) {
+      allowed = true;
+    } else {
+      const { data: userData } = await db.auth.getUser(bearer);
+      const role = (userData?.user?.app_metadata as Record<string, unknown> | null)?.ssb_role;
+      allowed = role === "sysadmin";
+    }
+    if (!allowed) {
+      return json({ error: "Only a sysadmin, or the scheduled job, can run this." }, 403);
+    }
+
     const body = await req.json().catch(() => ({})) as { commit?: boolean };
     const commit = body.commit === true;
 
