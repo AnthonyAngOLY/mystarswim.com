@@ -36,8 +36,6 @@
 --  is, on the Crew screen.
 -- ════════════════════════════════════════════════════════════════════════
 
-create extension if not exists pgcrypto;
-
 -- ── 1. The link ─────────────────────────────────────────────────────────
 create table if not exists crew_invites (
   id          uuid primary key default gen_random_uuid(),
@@ -104,6 +102,18 @@ begin
 end $$;
 
 -- ── 3. Generating and rotating the link ─────────────────────────────────
+-- 32 random hex characters, from gen_random_uuid() rather than pgcrypto's
+-- gen_random_bytes. Both draw on the same randomness, but gen_random_uuid
+-- is core Postgres, while pgcrypto lives in the "extensions" schema on
+-- Supabase — invisible to a function pinned to search_path = public, which
+-- is where the first version of this failed with
+--   function gen_random_bytes(integer) does not exist
+-- 122 bits is far past guessing, and the endpoint it guards can only write.
+create or replace function new_invite_token()
+returns text
+language sql volatile
+as $$ select replace(gen_random_uuid()::text, '-', '') $$;
+
 create or replace function get_crew_invite()
 returns table (token text, created_at timestamptz)
 language plpgsql security definer set search_path = public
@@ -116,7 +126,7 @@ begin
 
   select ci.token into v_token from crew_invites ci where ci.revoked_at is null limit 1;
   if v_token is null then
-    v_token := encode(gen_random_bytes(16), 'hex');
+    v_token := new_invite_token();
     insert into crew_invites (token, created_by) values (v_token, auth.uid());
   end if;
 
@@ -140,7 +150,7 @@ begin
      set revoked_at = now(), revoked_by = auth.uid()
    where revoked_at is null;
 
-  v_token := encode(gen_random_bytes(16), 'hex');
+  v_token := new_invite_token();
   insert into crew_invites (token, created_by) values (v_token, auth.uid());
 
   return query
