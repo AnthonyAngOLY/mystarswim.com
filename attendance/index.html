@@ -341,7 +341,12 @@
          the save prompt is hit and miss. -->
     <form id="loginForm" method="post" autocomplete="on">
       <label for="staffId">Staff ID</label>
-      <input id="staffId" name="username" type="text" inputmode="text" autocapitalize="characters"
+      <!-- autocapitalize="none": the keyboard should not force caps, or
+           quietly capitalise the first letter either. Case has never
+           mattered here — the ID is lower-cased before it is sent — so
+           the only thing forcing it did was fight whoever was typing. -->
+      <input id="staffId" name="username" type="text" inputmode="text" autocapitalize="none"
+             autocorrect="off" spellcheck="false"
              autocomplete="username" placeholder="SS-012" required />
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required />
