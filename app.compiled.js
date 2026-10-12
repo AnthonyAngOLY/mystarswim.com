@@ -2092,6 +2092,115 @@ function App({
       throw new Error(leaveErrText(err));
     }
   }
+  // ── HR: one login for somebody who is both, files, probation ─────────
+  // All through RPCs rather than table writes: each one has a rule that
+  // has to hold whoever calls it, and a rule enforced in the browser is a
+  // suggestion.
+  async function rpcOne(name, body) {
+    const out = await rest('rpc/' + name, {
+      method: 'POST',
+      body: JSON.stringify(body || {})
+    });
+    const r = Array.isArray(out) ? out[0] : out;
+    if (r && r.ok === false) throw new Error(r.error || 'That did not work.');
+    return r;
+  }
+  async function listOfficeLogins() {
+    try {
+      return (await rest('rpc/office_logins_for_linking', {
+        method: 'POST',
+        body: '{}'
+      })) || [];
+    } catch (_) {
+      return [];
+    }
+  }
+  async function linkOfficeLogin(crewId, username) {
+    const r = await rpcOne('link_office_login', {
+      p_crew_id: crewId,
+      p_username: username
+    });
+    await loadAdminAll();
+    return r;
+  }
+  async function unlinkOfficeLogin(crewId) {
+    await rpcOne('unlink_office_login', {
+      p_crew_id: crewId
+    });
+    await loadAdminAll();
+  }
+
+  // Crew files. The bucket is private, so everything is a signed URL.
+  async function loadCrewDocs(crewId) {
+    return await selectAllRows('crew_documents', '*', `&crew_id=eq.${crewId}&order=uploaded_at.desc`);
+  }
+  async function uploadCrewDoc(crewId, file, kind, note) {
+    const safe = (file.name || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 80);
+    const path = `${crewId}/${Date.now()}-${safe}`;
+    const res = await fetch(`${cfg.supabaseUrl}/storage/v1/object/crew-docs/${encodeURI(path)}`, {
+      method: 'POST',
+      headers: {
+        ...authHeadersFor(),
+        'Content-Type': file.type || 'application/octet-stream'
+      },
+      body: file
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(/mime|content type/i.test(t) ? 'That kind of file is not accepted here — PDF, JPG or PNG.' : /exceeded|too large/i.test(t) ? 'That file is over the 10 MB limit.' : 'Could not upload that file.');
+    }
+    await insertRows('crew_documents', {
+      crew_id: crewId,
+      kind,
+      file_path: path,
+      file_name: file.name || safe,
+      mime: file.type || null,
+      bytes: file.size || null,
+      note: (note || '').trim() || null
+    });
+  }
+  async function crewDocUrl(path) {
+    const res = await fetch(`${cfg.supabaseUrl}/storage/v1/object/sign/crew-docs/${encodeURI(path)}`, {
+      method: 'POST',
+      headers: authHeadersFor(),
+      body: JSON.stringify({
+        expiresIn: 300
+      })
+    });
+    if (!res.ok) throw new Error('Could not open that file.');
+    const d = await res.json();
+    return `${cfg.supabaseUrl}/storage/v1${d.signedURL || d.signedUrl}`;
+  }
+  // The row goes first and hands back the path, then the object. If the
+  // object delete fails the file is orphaned, which is recoverable; the
+  // other order leaves a row pointing at nothing, which reads as data loss.
+  async function deleteCrewDoc(id) {
+    const r = await rpcOne('delete_crew_document', {
+      p_id: id
+    });
+    if (r && r.file_path) {
+      await fetch(`${cfg.supabaseUrl}/storage/v1/object/crew-docs/${encodeURI(r.file_path)}`, {
+        method: 'DELETE',
+        headers: authHeadersFor()
+      }).catch(() => {});
+    }
+  }
+  async function setProbation(crewId, until, note) {
+    await rpcOne('set_probation', {
+      p_crew_id: crewId,
+      p_until: until,
+      p_note: note || null
+    });
+    await loadAdminAll();
+  }
+  async function confirmProbation(crewId, note) {
+    await rpcOne('confirm_probation', {
+      p_crew_id: crewId,
+      p_note: note || null
+    });
+    await loadAdminAll();
+  }
+
   // ── Crew onboarding: the link, and what comes back through it ────────
   // The link is fetched on demand rather than kept in state from load: it
   // is one short string, and nobody wants a stale token in their clipboard
@@ -6743,7 +6852,16 @@ function App({
     applications: crewApplications,
     onboardReady: crewOnboardReady,
     getOnboardLink: getOnboardLink,
-    decideApplication: decideCrewApplication
+    decideApplication: decideCrewApplication,
+    listOfficeLogins: listOfficeLogins,
+    linkOfficeLogin: linkOfficeLogin,
+    unlinkOfficeLogin: unlinkOfficeLogin,
+    loadCrewDocs: loadCrewDocs,
+    uploadCrewDoc: uploadCrewDoc,
+    crewDocUrl: crewDocUrl,
+    deleteCrewDoc: deleteCrewDoc,
+    setProbation: setProbation,
+    confirmProbation: confirmProbation
   }), !loading && side === 'system' && view === 'leave' && canSystem && /*#__PURE__*/React.createElement(AdminLeaveView, {
     requests: leaveRequests,
     types: leaveTypes,
@@ -24157,7 +24275,12 @@ function CrewApplicationModal({
     className: "input",
     value: d.employment_type,
     onChange: e => up('employment_type', e.target.value)
-  }, /*#__PURE__*/React.createElement("option", null, "Full-time"), /*#__PURE__*/React.createElement("option", null, "Part-time"), /*#__PURE__*/React.createElement("option", null, "Contract"))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("option", null, "Full-time"), /*#__PURE__*/React.createElement("option", null, PROBATION_TYPE), /*#__PURE__*/React.createElement("option", null, "Part-time"), /*#__PURE__*/React.createElement("option", null, "Contract")), d.employment_type === PROBATION_TYPE && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "Set how long it runs from the ⏳ button on their row.")), /*#__PURE__*/React.createElement("div", {
     className: "field",
     style: {
       margin: 0
@@ -26626,12 +26749,476 @@ function ssPrefixed(v) {
   if (!t) return '';
   return /^ss/i.test(t) ? t : 'ss' + t.replace(/^[-\s]+/, '');
 }
+// ── Probation ─────────────────────────────────────────────────────────────
+// A probation that quietly lapses is a confirmation nobody decided — in
+// Malaysia an employee who works past the end of their probation without
+// being told otherwise is generally taken to be confirmed. So the end date
+// is tracked, and the row says so a week out, while there is still time to
+// extend or confirm on purpose.
+const PROBATION_TERMS = [['2w', '2 weeks', 14], ['3w', '3 weeks', 21], ['1m', '1 month', 30], ['2m', '2 months', 60], ['3m', '3 months', 90], ['6m', '6 months', 180]];
+const PROBATION_TYPE = 'Full-time (probation)';
+function isoPlusDays(fromISO, days) {
+  // Anchored at noon UTC so no timezone offset tips the date backwards.
+  const d = new Date((fromISO || new Date().toISOString().slice(0, 10)) + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function daysUntil(iso) {
+  if (!iso) return null;
+  const a = new Date(iso + 'T12:00:00Z');
+  const b = new Date(new Date().toISOString().slice(0, 10) + 'T12:00:00Z');
+  return Math.round((a - b) / 86400000);
+}
+// How loudly to say it. Null means there is nothing to say.
+function probationState(e) {
+  if (!e || !e.probation_until || e.archived_at) return null;
+  const d = daysUntil(e.probation_until);
+  if (d === null) return null;
+  if (d < 0) return {
+    tone: 'over',
+    days: d,
+    label: `Probation ended ${-d} day${-d === 1 ? '' : 's'} ago`
+  };
+  if (d === 0) return {
+    tone: 'over',
+    days: d,
+    label: 'Probation ends today'
+  };
+  if (d <= 7) return {
+    tone: 'soon',
+    days: d,
+    label: `Probation ends in ${d} day${d === 1 ? '' : 's'}`
+  };
+  return {
+    tone: 'ok',
+    days: d,
+    label: `Probation until ${new Date(e.probation_until + 'T12:00:00Z').toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    })}`
+  };
+}
+function ProbationModal({
+  employee,
+  setProbation,
+  confirmProbation,
+  onClose
+}) {
+  const current = employee.probation_until || null;
+  const [term, setTerm] = useState(current ? '1m' : '3m');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [mode, setMode] = useState(current ? 'extend' : 'start');
+
+  // An extension runs from the date it replaces; a fresh probation from
+  // the day they started work.
+  const base = mode === 'extend' && current ? current : employee.start_date || null;
+  const days = (PROBATION_TERMS.find(t => t[0] === term) || [,, 90])[2];
+  const until = isoPlusDays(base, days);
+  const pretty = iso => new Date(iso + 'T12:00:00Z').toLocaleDateString(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+  async function go() {
+    setErr('');
+    setBusy(true);
+    try {
+      if (mode === 'confirm') await confirmProbation(employee.id, note);else await setProbation(employee.id, until, note);
+      onClose();
+    } catch (ex) {
+      setErr(ex.message || 'Could not save that.');
+      setBusy(false);
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card",
+    onClick: ev => ev.stopPropagation(),
+    style: {
+      maxWidth: 560
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 800
+    }
+  }, "Probation — ", employee.full_name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontSize: 10.5
+    }
+  }, employee.start_date ? 'Started ' + pretty(employee.start_date) : 'No start date on record')), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onClose,
+    "aria-label": "Close"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, current && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: '10px 12px',
+      background: 'var(--surface-2,#F3F1F8)',
+      border: '1px solid var(--border)',
+      borderRadius: 9,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      fontWeight: 700
+    }
+  }, "Currently until ", pretty(current)), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, probationState(employee)?.label)), !employee.start_date && mode !== 'confirm' && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 600,
+      marginBottom: 12
+    }
+  }, "There is no start date on this record, so the period is counted from today. Add the start date on their row for the dates to mean anything."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap',
+      marginBottom: 14
+    }
+  }, (current ? ['extend', 'confirm'] : ['start']).map(m => /*#__PURE__*/React.createElement("button", {
+    key: m,
+    className: `btn small ${mode === m ? 'btn-primary' : 'btn-ghost'}`,
+    onClick: () => setMode(m)
+  }, m === 'start' ? 'Set a probation period' : m === 'extend' ? 'Extend' : 'Confirm them'))), mode !== 'confirm' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, mode === 'extend' ? 'Extend by' : 'How long'), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: term,
+    onChange: ev => setTerm(ev.target.value)
+  }, PROBATION_TERMS.map(([v, l]) => /*#__PURE__*/React.createElement("option", {
+    key: v,
+    value: v
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 6,
+      fontWeight: 700
+    }
+  }, "Ends ", pretty(until)), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 2
+    }
+  }, mode === 'extend' ? 'Counted from the date it replaces, not from today.' : 'Counted from their start date.'))) : /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 12
+    }
+  }, "This ends the probation today and makes them ", /*#__PURE__*/React.createElement("b", null, "Full-time"), ". The dates and every extension stay on the record."), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Note (optional)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: note,
+    onChange: ev => setNote(ev.target.value),
+    placeholder: mode === 'confirm' ? 'Confirmed at the January review' : mode === 'extend' ? 'Why the extra time' : 'Anything worth remembering'
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "Kept with the decision. An extension is a thing you may have to account for later.")), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      fontWeight: 600,
+      marginTop: 8
+    }
+  }, err), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy,
+    onClick: go
+  }, busy ? 'Saving…' : mode === 'confirm' ? 'Confirm them' : mode === 'extend' ? 'Extend' : 'Set probation'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Cancel")))));
+}
+
+// ── Crew files ────────────────────────────────────────────────────────────
+// Offer letters and the rest of somebody's file. Visible to sysadmin,
+// Centre Owner and Administrator only — and deliberately not to the person
+// themselves, which is the opposite of the leave-document rule. A medical
+// certificate is something they sent us; an offer letter is correspondence
+// the office keeps about them.
+const CREW_DOC_KINDS = [['offer_letter', 'Offer letter'], ['contract', 'Employment contract'], ['amendment', 'Contract amendment'], ['id_document', 'IC or passport'], ['certificate', 'Certificate or licence'], ['appraisal', 'Appraisal'], ['warning', 'Warning letter'], ['resignation', 'Resignation'], ['other', 'Other']];
+function CrewFilesModal({
+  employee,
+  loadDocs,
+  uploadDoc,
+  docUrl,
+  deleteDoc,
+  onClose
+}) {
+  const [docs, setDocs] = useState(null);
+  const [kind, setKind] = useState('offer_letter');
+  const [note, setNote] = useState('');
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [confirming, setConfirming] = useState(null);
+  const fileRef = React.useRef(null);
+  const refresh = () => loadDocs(employee.id).then(setDocs).catch(() => setDocs([]));
+  useEffect(() => {
+    refresh(); /* eslint-disable-next-line */
+  }, []);
+  const size = b => b == null ? '' : b < 1024 * 1024 ? Math.round(b / 1024) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
+  const kindLabel = k => (CREW_DOC_KINDS.find(x => x[0] === k) || [, k])[1];
+  async function add() {
+    setErr('');
+    if (!file) {
+      setErr('Choose a file first.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await uploadDoc(employee.id, file, kind, note);
+      setFile(null);
+      setNote('');
+      if (fileRef.current) fileRef.current.value = '';
+      await refresh();
+    } catch (ex) {
+      setErr(ex.message || 'Could not upload that.');
+    }
+    setBusy(false);
+  }
+  async function open(d) {
+    setErr('');
+    try {
+      window.open(await docUrl(d.file_path), '_blank', 'noopener,noreferrer');
+    } catch (ex) {
+      setErr(ex.message || 'Could not open that file.');
+    }
+  }
+  async function remove(d) {
+    setBusy(true);
+    setErr('');
+    try {
+      await deleteDoc(d.id);
+      setConfirming(null);
+      await refresh();
+    } catch (ex) {
+      setErr(ex.message || 'Could not remove that.');
+    }
+    setBusy(false);
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card",
+    onClick: ev => ev.stopPropagation(),
+    style: {
+      maxWidth: 640
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 800
+    }
+  }, "📁 Files — ", employee.full_name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontSize: 10.5
+    }
+  }, "Only sysadmin, Centre Owner and Administrator can see these")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onClose,
+    "aria-label": "Close"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body"
+  }, docs === null && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…"), docs && docs.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 16
+    }
+  }, "Nothing on file yet. Their offer letter is the usual first one."), docs && docs.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap",
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "File"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 150
+    }
+  }, "Kind"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 90
+    }
+  }, "Added"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 92
+    }
+  }))), /*#__PURE__*/React.createElement("tbody", null, docs.map(d => /*#__PURE__*/React.createElement("tr", {
+    key: d.id
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: 0,
+      fontWeight: 700,
+      textDecoration: 'underline',
+      color: 'var(--primary-on-soft,#0369A1)'
+    },
+    onClick: () => open(d)
+  }, d.file_name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontSize: 10.5
+    }
+  }, size(d.bytes), d.note ? ' · ' + d.note : '')), /*#__PURE__*/React.createElement("td", {
+    className: "small"
+  }, kindLabel(d.kind)), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, new Date(d.uploaded_at).toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: '2-digit'
+  })), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, confirming === d.id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '1px 5px',
+      fontSize: 10
+    },
+    onClick: () => setConfirming(null)
+  }, "Keep"), /*#__PURE__*/React.createElement("button", {
+    className: "btn small",
+    disabled: busy,
+    style: {
+      padding: '1px 5px',
+      fontSize: 10,
+      background: '#DC2626',
+      color: '#fff',
+      marginLeft: 3
+    },
+    onClick: () => remove(d)
+  }, "Delete")) : /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '1px 6px',
+      fontSize: 10,
+      color: '#DC2626'
+    },
+    onClick: () => setConfirming(d.id)
+  }, "Remove"))))))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: '1px solid var(--border)',
+      paddingTop: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 12.5,
+      marginBottom: 9
+    }
+  }, "Add a file"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 9
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Kind"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: kind,
+    onChange: ev => setKind(ev.target.value)
+  }, CREW_DOC_KINDS.map(([v, l]) => /*#__PURE__*/React.createElement("option", {
+    key: v,
+    value: v
+  }, l)))), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Note (optional)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: note,
+    onChange: ev => setNote(ev.target.value),
+    placeholder: "Signed copy, 2026 revision…"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginTop: 9
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "File"), /*#__PURE__*/React.createElement("input", {
+    ref: fileRef,
+    className: "input",
+    type: "file",
+    accept: "application/pdf,image/jpeg,image/png",
+    onChange: ev => {
+      setFile(ev.target.files[0] || null);
+      setErr('');
+    }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "PDF, JPG or PNG, up to 10 MB. Stored privately \\u2014 every link to it expires after five minutes.")), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      fontWeight: 600,
+      marginTop: 8
+    }
+  }, err), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    disabled: busy || !file,
+    style: {
+      marginTop: 12
+    },
+    onClick: add
+  }, busy ? 'Uploading…' : 'Add to file')))));
+}
 function CrewLoginModal({
   employee,
   mode,
   provisionLogin,
   resetLogin,
   unlinkLogin,
+  listOfficeLogins,
+  linkOfficeLogin,
+  unlinkOfficeLogin,
   onClose
 }) {
   const [staffId, setStaffId] = useState(() => ssPrefixed(employee.staff_id || employee.emp_no || ''));
@@ -26639,9 +27226,16 @@ function CrewLoginModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState('');
+  const [office, setOffice] = useState(null); // null while loading
+  const [pick, setPick] = useState('');
+  useEffect(() => {
+    if (mode === 'link' && listOfficeLogins) listOfficeLogins().then(rows => setOffice(rows || [])).catch(() => setOffice([]));
+    /* eslint-disable-next-line */
+  }, [mode]);
+  const needsPassword = mode === 'provision' || mode === 'reset';
   async function submit() {
     setErr('');
-    if (mode !== 'unlink') {
+    if (needsPassword) {
       if (mode === 'provision' && !staffId.trim()) {
         setErr('Enter a staff ID.');
         return;
@@ -26653,7 +27247,18 @@ function CrewLoginModal({
     }
     setBusy(true);
     try {
-      if (mode === 'provision') {
+      if (mode === 'link') {
+        if (!pick) {
+          setErr('Choose which login belongs to them.');
+          setBusy(false);
+          return;
+        }
+        const r = await linkOfficeLogin(employee.id, pick);
+        setDone(`${employee.full_name} now signs in to the attendance app with their ` + `existing "${r.staff_id}" login — same password as the scheduler. ` + `Nothing new to hand over.`);
+      } else if (mode === 'unlinkOffice') {
+        await unlinkOfficeLogin(employee.id);
+        setDone('Unlinked. Their office login is untouched — they can still sign in to the scheduler.');
+      } else if (mode === 'provision') {
         await provisionLogin(employee.id, staffId.trim(), password);
         setDone(`Login created. Give ${employee.full_name} their staff ID and password.`);
       } else if (mode === 'reset') {
@@ -26669,7 +27274,7 @@ function CrewLoginModal({
       setBusy(false);
     }
   }
-  const title = mode === 'provision' ? 'Create attendance login' : mode === 'reset' ? 'Reset password' : 'Remove login';
+  const title = mode === 'provision' ? 'Create attendance login' : mode === 'reset' ? 'Reset password' : mode === 'link' ? 'Use their office login' : mode === 'unlinkOffice' ? 'Unlink office login' : 'Remove login';
   return /*#__PURE__*/React.createElement("div", {
     className: "modal-backdrop"
   }, /*#__PURE__*/React.createElement("div", {
@@ -26714,7 +27319,45 @@ function CrewLoginModal({
     style: {
       marginBottom: 14
     }
-  }, "This removes their sign-in only. The employee record and every past session, punch and alert stay exactly as they are."), mode === 'provision' && /*#__PURE__*/React.createElement("div", {
+  }, "This removes their sign-in only. The employee record and every past session, punch and alert stay exactly as they are."), mode === 'unlinkOffice' && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 14
+    }
+  }, "This only stops the attendance app recognising them. Their office login carries on working for the scheduler — it was never ours to delete, which is why this is a different button from Remove."), mode === 'link' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 12
+    }
+  }, "For somebody who is both: an employee with their own roster and leave, ", /*#__PURE__*/React.createElement("i", null, "and"), " a manager who approves it. Pick the login they already use and they keep one password for both. What they can do on the HR side follows their seat in Users & Logins — there is nothing to tick here."), office === null && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Fetching the office logins…"), office && office.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 600
+    }
+  }, "No office logins to link. Create one in Settings → Users & Logins first."), office && office.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Which login"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: pick,
+    onChange: ev => setPick(ev.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Choose…"), office.map(u => {
+    const taken = u.linked_to && u.linked_to !== employee.full_name;
+    return /*#__PURE__*/React.createElement("option", {
+      key: u.username,
+      value: u.username,
+      disabled: taken || !u.has_signed_in
+    }, u.display_name, " — ", roleLabel(u.role), taken ? ` · already ${u.linked_to}` : '', !u.has_signed_in ? ' · never signed in' : '');
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, "A login that has never been used cannot be linked yet — signing in is what creates the account this points at. Ask them to sign in to the scheduler once, then come back."))), mode === 'provision' && /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Staff ID"), /*#__PURE__*/React.createElement("input", {
     className: "input",
@@ -26735,7 +27378,7 @@ function CrewLoginModal({
       color: '#B45309',
       fontWeight: 600
     }
-  }, "“", staffId.trim(), "” has no ", /*#__PURE__*/React.createElement("b", null, "ss"), " prefix. It will be refused if it matches a manager’s username.")), mode !== 'unlink' && /*#__PURE__*/React.createElement("div", {
+  }, "“", staffId.trim(), "” has no ", /*#__PURE__*/React.createElement("b", null, "ss"), " prefix. It will be refused if it matches a manager’s username.")), needsPassword && /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Password"), /*#__PURE__*/React.createElement("input", {
     className: "input",
@@ -26766,7 +27409,7 @@ function CrewLoginModal({
     className: "btn btn-primary",
     disabled: busy,
     onClick: submit
-  }, busy ? 'Working…' : mode === 'provision' ? 'Create login' : mode === 'reset' ? 'Reset password' : 'Remove login'), /*#__PURE__*/React.createElement("button", {
+  }, busy ? 'Working…' : mode === 'provision' ? 'Create login' : mode === 'reset' ? 'Reset password' : mode === 'link' ? 'Link this login' : mode === 'unlinkOffice' ? 'Unlink' : 'Remove login'), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost",
     onClick: onClose
   }, "Cancel"))))));
@@ -27580,7 +28223,16 @@ function AdminCrewView({
   applications,
   onboardReady,
   getOnboardLink,
-  decideApplication
+  decideApplication,
+  listOfficeLogins,
+  linkOfficeLogin,
+  unlinkOfficeLogin,
+  loadCrewDocs,
+  uploadCrewDoc,
+  crewDocUrl,
+  deleteCrewDoc,
+  setProbation,
+  confirmProbation
 }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -28002,152 +28654,238 @@ function AdminCrewView({
       textAlign: 'right',
       width: 100
     }
-  }, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, filtered.map(e => /*#__PURE__*/React.createElement("tr", {
-    key: e.id
-  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      width: 30,
-      height: 30,
-      borderRadius: '50%',
-      background: '#0EA5E9',
-      color: '#fff',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontWeight: 700,
-      fontSize: 11
-    }
-  }, adminIni(e.full_name))), /*#__PURE__*/React.createElement("td", {
-    style: {
-      fontWeight: 700
-    }
-  }, e.full_name, /*#__PURE__*/React.createElement("div", {
-    className: "small subtle",
-    style: {
-      fontWeight: 400
-    }
-  }, [e.phone, e.email].filter(Boolean).join(' · ') || '—')), /*#__PURE__*/React.createElement("td", {
-    className: "small"
-  }, e.emp_no || '—'), /*#__PURE__*/React.createElement("td", null, e.position || '—', /*#__PURE__*/React.createElement("div", {
-    className: "small subtle"
-  }, e.employment_type || '')), /*#__PURE__*/React.createElement("td", null, e.department || '—'), /*#__PURE__*/React.createElement("td", null, e.archived_at ? /*#__PURE__*/React.createElement("span", {
-    className: "small subtle",
-    title: e.archived_at
-  }, "🗄 Archived", /*#__PURE__*/React.createElement("div", {
-    className: "small subtle"
-  }, archivedOn(e))) : /*#__PURE__*/React.createElement("select", {
-    className: "select",
-    style: {
-      padding: '3px 6px',
-      fontSize: 12
-    },
-    value: e.status || 'Active',
-    onChange: ev => saveEmployee({
-      status: ev.target.value
-    }, e.id)
-  }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive"))), canManageLogins && /*#__PURE__*/React.createElement("td", null, e.archived_at ? e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "small",
-    style: {
-      color: '#B45309',
-      fontWeight: 700
-    }
-  }, "⚠ login still active"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      padding: '1px 6px',
-      fontSize: 10,
-      color: '#DC2626'
-    },
-    onClick: () => setModal({
-      kind: 'login',
-      data: e,
-      mode: 'unlink'
-    })
-  }, "Remove")) : /*#__PURE__*/React.createElement("span", {
-    className: "small subtle"
-  }, "—") : e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
-    className: "small",
-    style: {
-      fontWeight: 700
-    }
-  }, e.staff_id || '—'), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      padding: '1px 6px',
-      fontSize: 10
-    },
-    onClick: () => setModal({
-      kind: 'login',
-      data: e,
-      mode: 'reset'
-    })
-  }, "Reset password"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      padding: '1px 6px',
-      fontSize: 10,
-      marginLeft: 4,
-      color: '#DC2626'
-    },
-    onClick: () => setModal({
-      kind: 'login',
-      data: e,
-      mode: 'unlink'
-    })
-  }, "Remove")) : /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      padding: '2px 8px',
-      fontSize: 11
-    },
-    onClick: () => setModal({
-      kind: 'login',
-      data: e,
-      mode: 'provision'
-    })
-  }, "+ Create login")), /*#__PURE__*/React.createElement("td", {
-    style: {
-      textAlign: 'right',
-      whiteSpace: 'nowrap'
-    }
-  }, e.archived_at ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    title: "Put this person back in the crew list as Inactive",
-    onClick: () => doRestore(e)
-  }, "↩ Restore"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      color: '#DC2626'
-    },
-    title: "Delete the record outright",
-    onClick: () => deleteEmployee(e.id)
-  }, "×")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    onClick: () => setModal({
-      kind: 'edit',
-      data: e
-    })
-  }, "✎"), leaveTypes && leaveTypes.length > 0 && /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    title: "Leave allowance and what is left of it",
-    onClick: () => setModal({
-      kind: 'leave',
-      data: e
-    })
-  }, "🏖"), archiveReady && e.status === 'Inactive' && /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    title: "They have left — keep the record, clear them off the roster",
-    onClick: () => setModal({
-      kind: 'archive',
-      data: e
-    })
-  }, "🗄"), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      color: '#DC2626'
-    },
-    onClick: () => deleteEmployee(e.id)
-  }, "×"))))))))), onboardReady && canManageLogins && /*#__PURE__*/React.createElement(OnboardLinkPanel, {
+  }, "Actions"))), /*#__PURE__*/React.createElement("tbody", null, filtered.map(e => {
+    const pro = probationState(e);
+    // Amber a week out, red once it has passed. A tint on its own
+    // would be a mystery, so the name cell carries the words too.
+    const tint = pro && pro.tone === 'over' ? '#FFF1F1' : pro && pro.tone === 'soon' ? '#FFFBEB' : undefined;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: e.id,
+      style: tint ? {
+        background: tint
+      } : undefined,
+      title: pro ? pro.label : undefined
+    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        width: 30,
+        height: 30,
+        borderRadius: '50%',
+        background: '#0EA5E9',
+        color: '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 700,
+        fontSize: 11
+      }
+    }, adminIni(e.full_name))), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 700
+      }
+    }, e.full_name, pro && pro.tone !== 'ok' && /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 6,
+        background: pro.tone === 'over' ? '#FEE2E2' : '#FEF3C7',
+        color: pro.tone === 'over' ? '#B91C1C' : '#92400E',
+        border: '1px solid ' + (pro.tone === 'over' ? '#FCA5A5' : '#FCD34D'),
+        borderRadius: 999,
+        fontSize: 9.5,
+        fontWeight: 800,
+        padding: '1px 6px',
+        whiteSpace: 'nowrap'
+      }
+    }, pro.label), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontWeight: 400
+      }
+    }, [e.phone, e.email].filter(Boolean).join(' · ') || '—')), /*#__PURE__*/React.createElement("td", {
+      className: "small"
+    }, e.emp_no || '—'), /*#__PURE__*/React.createElement("td", null, e.position || '—', /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, e.employment_type || '')), /*#__PURE__*/React.createElement("td", null, e.department || '—'), /*#__PURE__*/React.createElement("td", null, e.archived_at ? /*#__PURE__*/React.createElement("span", {
+      className: "small subtle",
+      title: e.archived_at
+    }, "🗄 Archived", /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, archivedOn(e))) : /*#__PURE__*/React.createElement("select", {
+      className: "select",
+      style: {
+        padding: '3px 6px',
+        fontSize: 12
+      },
+      value: e.status || 'Active',
+      onChange: ev => saveEmployee({
+        status: ev.target.value
+      }, e.id)
+    }, /*#__PURE__*/React.createElement("option", null, "Active"), /*#__PURE__*/React.createElement("option", null, "Inactive"))), canManageLogins && /*#__PURE__*/React.createElement("td", null, e.archived_at ? e.auth_user_id ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        color: '#B45309',
+        fontWeight: 700
+      }
+    }, "⚠ login still active"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10,
+        color: '#DC2626'
+      },
+      onClick: () => setModal({
+        kind: 'login',
+        data: e,
+        mode: 'unlink'
+      })
+    }, "Remove")) : /*#__PURE__*/React.createElement("span", {
+      className: "small subtle"
+    }, "—") : e.auth_user_id ? e.login_is_office ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        fontWeight: 700
+      }
+    }, e.staff_id || '—', /*#__PURE__*/React.createElement("span", {
+      style: {
+        marginLeft: 5,
+        background: '#EEF7FD',
+        color: '#0369A1',
+        border: '1px solid #BAE6FD',
+        borderRadius: 999,
+        fontSize: 9.5,
+        fontWeight: 800,
+        padding: '0 5px'
+      }
+    }, "OFFICE")), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontSize: 10
+      }
+    }, "Signs in with their scheduler password"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10,
+        color: '#B45309'
+      },
+      onClick: () => setModal({
+        kind: 'login',
+        data: e,
+        mode: 'unlinkOffice'
+      })
+    }, "Unlink")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "small",
+      style: {
+        fontWeight: 700
+      }
+    }, e.staff_id || '—'), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10
+      },
+      onClick: () => setModal({
+        kind: 'login',
+        data: e,
+        mode: 'reset'
+      })
+    }, "Reset password"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '1px 6px',
+        fontSize: 10,
+        marginLeft: 4,
+        color: '#DC2626'
+      },
+      onClick: () => setModal({
+        kind: 'login',
+        data: e,
+        mode: 'unlink'
+      })
+    }, "Remove")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '2px 8px',
+        fontSize: 11
+      },
+      onClick: () => setModal({
+        kind: 'login',
+        data: e,
+        mode: 'provision'
+      })
+    }, "+ Create login"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        padding: '2px 8px',
+        fontSize: 11,
+        marginLeft: 4
+      },
+      title: "For somebody who already signs in to the scheduler",
+      onClick: () => setModal({
+        kind: 'login',
+        data: e,
+        mode: 'link'
+      })
+    }, "↪ Use office login"))), /*#__PURE__*/React.createElement("td", {
+      style: {
+        textAlign: 'right',
+        whiteSpace: 'nowrap'
+      }
+    }, e.archived_at ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "Put this person back in the crew list as Inactive",
+      onClick: () => doRestore(e)
+    }, "↩ Restore"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        color: '#DC2626'
+      },
+      title: "Delete the record outright",
+      onClick: () => deleteEmployee(e.id)
+    }, "×")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: () => setModal({
+        kind: 'edit',
+        data: e
+      })
+    }, "✎"), leaveTypes && leaveTypes.length > 0 && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "Leave allowance and what is left of it",
+      onClick: () => setModal({
+        kind: 'leave',
+        data: e
+      })
+    }, "🏖"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "Offer letter and other files",
+      onClick: () => setModal({
+        kind: 'files',
+        data: e
+      })
+    }, "📁"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: pro && pro.tone !== 'ok' ? {
+        color: pro.tone === 'over' ? '#B91C1C' : '#B45309',
+        fontWeight: 800
+      } : undefined,
+      title: pro ? pro.label : 'Set a probation period',
+      onClick: () => setModal({
+        kind: 'probation',
+        data: e
+      })
+    }, "⏳"), archiveReady && e.status === 'Inactive' && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "They have left — keep the record, clear them off the roster",
+      onClick: () => setModal({
+        kind: 'archive',
+        data: e
+      })
+    }, "🗄"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        color: '#DC2626'
+      },
+      onClick: () => deleteEmployee(e.id)
+    }, "×"))));
+  }))))), onboardReady && canManageLogins && /*#__PURE__*/React.createElement(OnboardLinkPanel, {
     getOnboardLink: getOnboardLink
   }), onboardReady && canManageLogins && pendingApplications === 0 && (applications || []).length > 0 && /*#__PURE__*/React.createElement(CrewApplicationsPanel, {
     applications: applications,
@@ -28173,13 +28911,28 @@ function AdminCrewView({
     busy: archiveBusy,
     onArchive: doArchive,
     onClose: () => !archiveBusy && setModal(null)
+  }), modal?.kind === 'files' && /*#__PURE__*/React.createElement(CrewFilesModal, {
+    employee: modal.data,
+    loadDocs: loadCrewDocs,
+    uploadDoc: uploadCrewDoc,
+    docUrl: crewDocUrl,
+    deleteDoc: deleteCrewDoc,
+    onClose: () => setModal(null)
+  }), modal?.kind === 'probation' && /*#__PURE__*/React.createElement(ProbationModal, {
+    employee: modal.data,
+    setProbation: setProbation,
+    confirmProbation: confirmProbation,
+    onClose: () => setModal(null)
   }), modal?.kind === 'login' && /*#__PURE__*/React.createElement(CrewLoginModal, {
     employee: modal.data,
     mode: modal.mode,
     provisionLogin: provisionLogin,
     resetLogin: resetLogin,
     unlinkLogin: unlinkLogin,
-    onClose: () => setModal(null)
+    onClose: () => setModal(null),
+    listOfficeLogins: listOfficeLogins,
+    linkOfficeLogin: linkOfficeLogin,
+    unlinkOfficeLogin: unlinkOfficeLogin
   }), modal?.kind === 'importPreview' && (() => {
     const byEmpNo = {},
       byName = {};
@@ -29210,7 +29963,7 @@ function AdminEmployeeModal({
     className: "select",
     value: d.employment_type,
     onChange: e => up('employment_type', e.target.value)
-  }, /*#__PURE__*/React.createElement("option", null, "Full-time"), /*#__PURE__*/React.createElement("option", null, "Part-time"), /*#__PURE__*/React.createElement("option", null, "Contract"), /*#__PURE__*/React.createElement("option", null, "Intern"), /*#__PURE__*/React.createElement("option", null, "Other"))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("option", null, "Full-time"), /*#__PURE__*/React.createElement("option", null, PROBATION_TYPE), /*#__PURE__*/React.createElement("option", null, "Part-time"), /*#__PURE__*/React.createElement("option", null, "Contract"), /*#__PURE__*/React.createElement("option", null, "Intern"), /*#__PURE__*/React.createElement("option", null, "Other"))), /*#__PURE__*/React.createElement("div", {
     className: "field",
     style: {
       margin: 0
