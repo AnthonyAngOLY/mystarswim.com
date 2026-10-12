@@ -12777,6 +12777,8 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
                 : a.resolution_action==='marked_absent'         ? 'Marked absent'
                 : a.resolution_action==='session_removed'       ? 'Session removed'
                 : a.resolution_action==='superseded_by_absence' ? 'Became an absence'
+                : a.resolution_action==='checked_in_late'       ? 'Checked in late'
+                : a.resolution_action==='on_approved_leave'     ? 'On approved leave'
                 : 'Reviewed'}{a.pay_treatment && <> · {
                   a.pay_treatment==='full' ? 'Full deduction'
                 : a.pay_treatment==='half' ? 'Half deduction' : 'No deduction'}</>}</span>}

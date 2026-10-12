@@ -271,6 +271,26 @@ Deno.serve(async (req) => {
         .select().maybeSingle();          // unique partial index dedupes
     }
 
+    // A check-in answers the "they have not checked in" alert the scan raised
+    // while waiting for it. Leaving it open would ask the worker to explain
+    // not turning up, on a session they did turn up for — and they would carry
+    // two alerts for one event, the late one and a question with no answer.
+    //
+    // Closed, not deleted: the log still shows that nobody had tapped by the
+    // threshold, which is the thing worth remembering. If they were late, the
+    // late alert is the one that says so.
+    if (type === "in") {
+      await db.from("alerts")
+        .update({
+          status: "resolved",
+          resolution_action: "checked_in_late",
+          resolved_at: new Date().toISOString(),
+        })
+        .eq("shift_id", shift_id)
+        .eq("type", "no_checkin")
+        .eq("status", "open");
+    }
+
     return json({
       ok: true,
       punch_id: punch.id,
