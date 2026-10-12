@@ -418,15 +418,16 @@ function App({ currentUser, onLogout }){
   const [programmeCategories,setProgrammeCategories] = useState([]);
   const [billingTerms,setBillingTerms] = useState([]);
   const [products,setProducts] = useState([]);
-  const isSysadmin = (currentUser?.role === 'sysadmin');
+  const isSysadmin = (roleOf(currentUser?.role) === 'sysadmin');
   const canSchedule = canUseScheduler(currentUser?.role);
   const canSystem = canUseAdminSystem(currentUser?.role);
-  // Two-side app: 'schedule' or 'system'. Sysadmin defaults to schedule side
-  // and can toggle. Admin (procurement) is pinned to system side. Anyone with
-  // scheduler-only access is pinned to schedule side.
+  const canSettings = canUseSettings(currentUser?.role);
+  // Two-side app: 'schedule' or 'system'. Which one a person opens on follows
+  // from their seat, and anyone with both can cross over.
   const [side,setSide] = useState(()=>{
     if(!canSchedule && canSystem) return 'system';
-    return 'schedule';
+    if(!canSystem) return 'schedule';
+    return defaultSideFor(currentUser?.role);
   });
   const isMobile = useIsMobile();
   const [mobileMoreOpen,setMobileMoreOpen] = useState(false);
@@ -4039,7 +4040,7 @@ function App({ currentUser, onLogout }){
           <button className={`nav-btn ${view==='messages'?'active':''}`} onClick={()=>setView('messages')} title="Messages" style={{position:'relative'}}>✉️ <span className="nav-label">Messages</span>{newMsgCount>0&&<span style={{position:'absolute',top:2,right:2,background:'#EF4444',color:'#fff',fontSize:10,fontWeight:800,borderRadius:999,minWidth:16,height:16,lineHeight:'16px',padding:'0 4px',textAlign:'center'}}>{newMsgCount>99?'99+':newMsgCount}</span>}</button>
           <button className={`nav-btn ${view==='enroll'?'active':''}`} onClick={()=>setView('enroll')} title="Explore">🔍 <span className="nav-label">Explore</span></button>
           <button type="button" className="nav-btn nav-btn-link" onClick={()=>window.open('./intake.html','_blank','noopener,noreferrer')} title="Intake form (new tab)">📝 <span className="nav-label">Intake ↗</span></button>
-          {isSysadmin && <button className={`nav-btn ${view==='settings'?'active':''}`} onClick={()=>{ setView('settings'); setAdminSection('pools'); }} title="Settings">⚙️ <span className="nav-label">Settings</span></button>}
+          {canSettings && <button className={`nav-btn ${view==='settings'?'active':''}`} onClick={()=>{ setView('settings'); setAdminSection('pools'); }} title="Settings">⚙️ <span className="nav-label">Settings</span></button>}
         </>}
         {side==='system' && <>
           <button className={`nav-btn ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')} title="Directory">📇 <span className="nav-label">Directory</span></button>
@@ -4083,7 +4084,7 @@ function App({ currentUser, onLogout }){
           <button className="more-item" onClick={()=>{ setView('messages'); }}>✉️ Messages {newMsgCount>0&&<span className="more-badge">{newMsgCount>99?'99+':newMsgCount}</span>}</button>
           <button className="more-item" onClick={()=>{ setView('enroll'); }}>🔍 Explore</button>
           <button className="more-item" onClick={()=>{ window.open('./intake.html','_blank','noopener,noreferrer'); setMobileMoreOpen(false); }}>📝 Intake form ↗</button>
-          {isSysadmin && <button className="more-item" onClick={()=>{ setView('settings'); setAdminSection('pools'); }}>⚙️ Settings</button>}
+          {canSettings && <button className="more-item" onClick={()=>{ setView('settings'); setAdminSection('pools'); }}>⚙️ Settings</button>}
         </>}
         {side==='system' && <button className="more-item" onClick={()=>{ setView('attendance'); }}>⏱️ Attendance</button>}
         {canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) &&
@@ -4299,7 +4300,7 @@ function App({ currentUser, onLogout }){
         deleteContact={adminDeleteContact}
         onRefresh={loadAdminAll}
       />}
-      {!loading && side==='system' && view==='adminVouchers' && canSystem && <AdminVouchersView isSysadmin={isSysadmin}
+      {!loading && side==='system' && view==='adminVouchers' && canSystem && <AdminVouchersView isSysadmin={canSystem}
         vouchers={adminVouchers}
         payees={adminPayees}
         savePayee={adminSavePayee}
@@ -4310,7 +4311,7 @@ function App({ currentUser, onLogout }){
       />}
       {!loading && side==='system' && view==='adminCrew' && canSystem && <AdminCrewView loadFailed={adminCrewLoadFailed} importEmployees={adminImportEmployees}
         employees={adminEmployees}
-        canManageLogins={isSysadmin}
+        canManageLogins={canSystem}
         provisionLogin={crewProvisionLogin}
         resetLogin={crewResetLogin}
         unlinkLogin={crewUnlinkLogin}
@@ -4402,7 +4403,7 @@ function App({ currentUser, onLogout }){
       {/* ── Accounts: left-column nav + content ── */}
       {!loading && view==='accounts' && <div className="side-shell">
         <SectionNav ariaLabel="Accounts section" value={accountSection} onChange={setAccountSection}
-          items={[['accounts','Accounts'],['familyGroups','Groups'],['swimmers','Swimmers'],['invoices','Invoices'],['receipts','Receipts'],['pendingCredits','Pending Credits'],['aging','Aging'],['codes','Discounts'],...(isSysadmin?[['reports','Reports']]:[])]} />
+          items={[['accounts','Accounts'],['familyGroups','Groups'],['swimmers','Swimmers'],['invoices','Invoices'],['receipts','Receipts'],['pendingCredits','Pending Credits'],['aging','Aging'],['codes','Discounts'],...(canSystem?[['reports','Reports']]:[])]} />
         <div className="side-content">
           {['accounts','familyGroups','swimmers','invoices','receipts'].includes(accountSection) && <div style={{marginBottom:12,maxWidth:440}}>
             <input className="input" value={accountSearchQ} onChange={e=>setAccountSearchQ(e.target.value)}
@@ -4519,7 +4520,7 @@ function App({ currentUser, onLogout }){
         packageById={packageById} onConfirm={confirmCredit} onReverse={reverseCredit}
       />}
       {!loading && view==='accounts' && accountSection==='aging' && <AgingReportView invoices={invoices} pmts={pmts} branches={options.branches||[]} />}
-      {!loading && view==='accounts' && accountSection==='reports' && isSysadmin && <ReportsView
+      {!loading && view==='accounts' && accountSection==='reports' && canSystem && <ReportsView
         invoices={invoices} pmts={pmts} pendingCredits={pendingCredits}
         students={students} sessions={sessions}
         creditBalances={creditBalances}
@@ -4570,7 +4571,7 @@ function App({ currentUser, onLogout }){
       />}
 
       {/* ── Settings: left-column nav + content ── */}
-      {!loading && view==='settings' && isSysadmin && <div className="side-shell">
+      {!loading && view==='settings' && canSettings && <div className="side-shell">
         <SectionNav ariaLabel="Settings section" value={adminSection} onChange={setAdminSection}
           items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users']]} />
         <div className="side-content">
@@ -13197,8 +13198,17 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
 // unroutable internal one — so this form asks only for the ID and a password.
 // All three actions go through the staff-auth Edge Function, which holds the
 // service role; nothing privileged happens in the browser.
+// Crew staff IDs carry an "ss" prefix. Scheduler logins and staff logins share
+// one Auth namespace, so an unprefixed ID can collide with a manager's
+// username and become the same account; the prefix makes that impossible by
+// construction rather than by anybody remembering.
+function ssPrefixed(v){
+  const t = String(v||'').trim();
+  if(!t) return '';
+  return /^ss/i.test(t) ? t : 'ss' + t.replace(/^[-\s]+/,'');
+}
 function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogin, onClose }){
-  const [staffId,setStaffId]=useState(employee.staff_id||employee.emp_no||'');
+  const [staffId,setStaffId]=useState(()=>ssPrefixed(employee.staff_id||employee.emp_no||''));
   const [password,setPassword]=useState('');
   const [busy,setBusy]=useState(false);
   const [err,setErr]=useState('');
@@ -13248,11 +13258,20 @@ function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogi
         </div>}
 
         {mode==='provision' && <div className="field"><label>Staff ID</label>
-          <input className="input" autoFocus value={staffId} placeholder="SS-012"
-            onChange={ev=>setStaffId(ev.target.value)} />
+          <input className="input" autoFocus value={staffId} placeholder="sstony"
+            onChange={ev=>setStaffId(ev.target.value)}
+            onBlur={ev=>setStaffId(ssPrefixed(ev.target.value))} />
           <div className="small subtle" style={{marginTop:4}}>
-            This is what they type to sign in. Short and memorable works best.
-          </div></div>}
+            This is what they type to sign in. Crew IDs start with <b>ss</b> — the manager
+            logins live in the same place, so the prefix is what keeps a crew ID from
+            becoming somebody’s manager account. Leave the box and it is added for you.
+          </div>
+          {staffId.trim() && !/^ss/i.test(staffId.trim()) &&
+            <div className="small" style={{marginTop:4,color:'#B45309',fontWeight:600}}>
+              “{staffId.trim()}” has no <b>ss</b> prefix. It will be refused if it matches a
+              manager’s username.
+            </div>}
+        </div>}
 
         {mode!=='unlink' && <div className="field"><label>Password</label>
           <input className="input" type="text" value={password} placeholder="min 8 characters"
@@ -13723,14 +13742,7 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
               <tbody>
                 {filtered.map(e=><tr key={e.id}>
                   <td><div style={{width:30,height:30,borderRadius:'50%',background:'#0EA5E9',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:11}}>{adminIni(e.full_name)}</div></td>
-                  <td style={{fontWeight:700}}>{e.full_name}
-                    {e.is_hr && <span title="Can approve leave and open medical certificates"
-                      style={{marginLeft:6,fontSize:9.5,fontWeight:800,padding:'1px 5px',borderRadius:999,
-                      background:'#FFF1F1',color:'#DC2626',border:'1px solid #FCA5A5'}}>HR</span>}
-                    {!e.is_hr && e.is_admin && <span title="Can roster and see alerts from the phone"
-                      style={{marginLeft:6,fontSize:9.5,fontWeight:800,padding:'1px 5px',borderRadius:999,
-                      background:'#EFF6FF',color:'#1D4ED8',border:'1px solid #BFDBFE'}}>ROSTER</span>}
-                    <div className="small subtle" style={{fontWeight:400}}>{[e.phone,e.email].filter(Boolean).join(' · ')||'—'}</div></td>
+                  <td style={{fontWeight:700}}>{e.full_name}<div className="small subtle" style={{fontWeight:400}}>{[e.phone,e.email].filter(Boolean).join(' · ')||'—'}</div></td>
                   <td className="small">{e.emp_no||'—'}</td>
                   <td>{e.position||'—'}<div className="small subtle">{e.employment_type||''}</div></td>
                   <td>{e.department||'—'}</td>
@@ -14121,8 +14133,6 @@ function AdminPromoPreviewModal({ promo, onClose }){
 }
 function AdminEmployeeModal({ existing, onSave, onClose, canGrantAccess }){
   const [d,setD]=useState({
-    is_admin: existing?.is_admin===true,
-    is_hr: existing?.is_hr===true,
     full_name: existing?.full_name||'',
     emp_no: existing?.emp_no||'',
     ic_no: existing?.ic_no||'',
@@ -14149,9 +14159,10 @@ function AdminEmployeeModal({ existing, onSave, onClose, canGrantAccess }){
       payload[k] = (v===''?null:v);
     });
     payload.full_name = d.full_name.trim();
-    // Only a sysadmin's edit may carry these. Anyone else's save leaves
-    // whatever is on the record alone rather than writing false over it.
-    if(!canGrantAccess){ delete payload.is_admin; delete payload.is_hr; }
+    // Never written from here. Access is a property of the person's role, and
+    // a crew record that could also grant it would be a second answer to the
+    // same question — which is how two sources of truth start.
+    delete payload.is_admin; delete payload.is_hr;
     await onSave(payload);
     setBusy(false);
   }
@@ -14179,24 +14190,13 @@ function AdminEmployeeModal({ existing, onSave, onClose, canGrantAccess }){
       </div>
       <div className="field" style={{margin:0}}><label>Notes</label><textarea className="textarea" value={d.notes} onChange={e=>up('notes',e.target.value)} /></div>
       {canGrantAccess && <div style={{background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:10,padding:'11px 13px'}}>
-        <div style={{fontWeight:800,fontSize:13,marginBottom:2}}>Access from the attendance app</div>
-        <div className="small subtle" style={{marginBottom:9}}>
-          What this person can do on their phone, beyond their own sessions. Neither is granted by
-          creating a login — both start off. A change reaches them at their next sign-in.
+        <div style={{fontWeight:800,fontSize:13,marginBottom:2}}>Management access on the phone</div>
+        <div className="small subtle">
+          Rostering, alerts and leave approvals follow a person's role under
+          <b> Settings › Users &amp; Logins</b>, not their crew record — an owner or an
+          administrator reaches them with the same username they use here. There is nothing
+          to set on this form.
         </div>
-        <label style={{display:'flex',gap:9,alignItems:'flex-start',cursor:'pointer',marginBottom:8}}>
-          <input type="checkbox" checked={!!d.is_admin} onChange={e=>up('is_admin',e.target.checked)} style={{marginTop:3}} />
-          <span className="small"><b>Can roster from the phone.</b> Sees the whole roster and every
-            worker's alerts, and can add, change or remove sessions. No leave, no documents.</span>
-        </label>
-        <label style={{display:'flex',gap:9,alignItems:'flex-start',cursor:'pointer'}}>
-          <input type="checkbox" checked={!!d.is_hr} onChange={e=>up('is_hr',e.target.checked)} style={{marginTop:3}} />
-          <span className="small"><b>Can approve leave.</b> Everything above, plus approving and
-            rejecting leave and opening the medical certificates attached to it.</span>
-        </label>
-        {d.is_hr && <div className="small" style={{marginTop:9,color:'#B45309',fontWeight:600}}>
-          ⚠ This lets them open anybody's MC from a phone. Grant it to people, not to roles.
-        </div>}
       </div>}
       <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
         <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -14260,7 +14260,7 @@ function UsersAdminView({ users, currentUser, createUser, setPassword, patchUser
   const [username,setUsername]=useState('');
   const [displayName,setDisplayName]=useState('');
   const [password,setPasswordVal]=useState('');
-  const [role,setRole]=useState('schedule_admin');
+  const [role,setRole]=useState('scheduler');
   const [busy,setBusy]=useState(false);
   const [pwFor,setPwFor]=useState(null);
   const [pwVal,setPwVal]=useState('');
@@ -14268,12 +14268,24 @@ function UsersAdminView({ users, currentUser, createUser, setPassword, patchUser
   return <>
     <div className="card" style={{marginBottom:12}}>
       <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>👥 Users & Logins</div>
-      <div className="small subtle" style={{marginBottom:14}}>Create logins and manage passwords. <strong>Sysadmin</strong> — full access to both the scheduler and the Admin & Procurement system. <strong>Schedule Admin</strong> — this scheduler only (no Settings or Reports). <strong>Admin (Procurement)</strong> — signs in here but is redirected to the Admin & Procurement system. <strong>HR Admin</strong> — crew records and leave approvals, including the medical certificates attached to them. A role change reaches them at their next sign-in, not immediately.</div>
+      <div className="small subtle" style={{marginBottom:12}}>
+      Create logins and manage passwords. A role change reaches the person at their next
+      sign-in, not immediately.
+    </div>
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:8,marginBottom:14}}>
+      {ROLE_ORDER.map(r=><div key={r} style={{background:'var(--surface-2)',border:'1px solid var(--border)',
+        borderRadius:9,padding:'9px 11px'}}>
+        <div style={{fontWeight:800,fontSize:12.5}}>{ROLE_INFO[r].label}</div>
+        <div className="small subtle" style={{marginTop:2,lineHeight:1.4}}>{ROLE_INFO[r].note}</div>
+      </div>)}
+    </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 130px auto',gap:10,alignItems:'end'}}>
         <div className="field" style={{margin:0}}><label>Username</label><input className="input" autoCapitalize="none" value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. jsmith" /></div>
         <div className="field" style={{margin:0}}><label>Display name</label><input className="input" value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. John Smith" /></div>
         <div className="field" style={{margin:0}}><label>Password</label><input className="input" type="text" value={password} onChange={e=>setPasswordVal(e.target.value)} placeholder="min 8 chars" /></div>
-        <div className="field" style={{margin:0}}><label>Role</label><select className="select" value={role} onChange={e=>setRole(e.target.value)}><option value="schedule_admin">Schedule Admin</option><option value="admin">Admin (Procurement)</option><option value="hr_admin">HR Admin</option><option value="sysadmin">Sysadmin</option></select></div>
+        <div className="field" style={{margin:0}}><label>Role</label><select className="select" value={role} onChange={e=>setRole(e.target.value)}>
+          {ROLE_ORDER.map(r=><option key={r} value={r}>{ROLE_INFO[r].label}</option>)}
+        </select></div>
         <button className="btn btn-primary" style={{height:38}} disabled={busy||!username.trim()||password.length<8} onClick={async()=>{ setBusy(true); try{ await createUser({username,displayName,password,role}); setUsername('');setDisplayName('');setPasswordVal(''); } finally{ setBusy(false);} }}>+ Create User</button>
       </div>
       {password&&password.length<8&&<div className="small" style={{color:'#DC2626',marginTop:6}}>Password must be at least 8 characters.</div>}
@@ -14281,16 +14293,30 @@ function UsersAdminView({ users, currentUser, createUser, setPassword, patchUser
     <div className="card" style={{padding:0,overflow:'hidden'}}>
       <div className="table-wrap" style={{border:'none',borderRadius:0}}>
         <table>
-          <thead><tr><th>Username</th><th>Name</th><th style={{width:170}}>Role</th><th style={{width:90}}>Status</th><th style={{width:150}}>Last login</th><th style={{width:250,textAlign:'right'}}>Actions</th></tr></thead>
+          <thead><tr><th>Username</th><th>Name</th><th style={{width:180}}>Role</th><th>Reaches</th><th style={{width:90}}>Status</th><th style={{width:140}}>Last login</th><th style={{width:250,textAlign:'right'}}>Actions</th></tr></thead>
           <tbody>
             {(users||[]).map(u=>{ const me=u.username===currentUser?.username; return <React.Fragment key={u.id}>
               <tr>
                 <td style={{fontWeight:700}}>{u.username}{me&&<span className="small subtle"> (you)</span>}</td>
                 <td>{u.display_name||'—'}</td>
                 <td>
-                  <select className="select" style={{padding:'3px 6px',fontSize:12,minWidth:150}} value={u.role||'schedule_admin'} disabled={me} onChange={e=>patchUser(u.id,{role:e.target.value})}>
-                    <option value="schedule_admin">Schedule Admin</option><option value="admin">Admin (Procurement)</option><option value="hr_admin">HR Admin</option><option value="sysadmin">Sysadmin</option>
+                  <select className="select" style={{padding:'3px 6px',fontSize:12,minWidth:160}}
+                    value={roleOf(u.role)||'scheduler'} disabled={me}
+                    onChange={e=>patchUser(u.id,{role:e.target.value})}>
+                    {ROLE_ORDER.map(r=><option key={r} value={r}>{ROLE_INFO[r].label}</option>)}
                   </select>
+                  {u.role && roleOf(u.role)!==u.role && <div className="small subtle" style={{marginTop:2}}>
+                    was “{u.role}”</div>}
+                </td>
+                <td className="small subtle">
+                  {[canUseScheduler(u.role)   && 'Scheduling',
+                    canUseAdminSystem(u.role) && 'System',
+                    canUseSettings(u.role)    && 'Settings',
+                    canApproveLeave(u.role)   && 'Leave',
+                    canUseAdminSystem(u.role) && 'Phone'].filter(Boolean).map(x=>
+                    <span key={x} style={{display:'inline-block',fontSize:10,fontWeight:700,
+                      padding:'1px 6px',borderRadius:999,marginRight:4,marginBottom:2,
+                      background:'#EFF6FF',color:'#1D4ED8',border:'1px solid #BFDBFE'}}>{x}</span>)}
                 </td>
                 <td>{u.is_active!==false?<span style={{color:'var(--green-tx)',fontWeight:700,fontSize:12}}>Active</span>:<span style={{color:'#DC2626',fontWeight:700,fontSize:12}}>Disabled</span>}</td>
                 <td className="small subtle">{fmt(u.last_login_at)}</td>
@@ -14300,7 +14326,7 @@ function UsersAdminView({ users, currentUser, createUser, setPassword, patchUser
                   {!me&&<button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>deleteUser(u.id)}>Delete</button>}
                 </td>
               </tr>
-              {pwFor===u.id&&<tr><td colSpan={6} style={{background:'var(--surface-2)'}}>
+              {pwFor===u.id&&<tr><td colSpan={7} style={{background:'var(--surface-2)'}}>
                 <div style={{display:'flex',gap:8,alignItems:'center',padding:'4px 0'}}>
                   <span className="small" style={{fontWeight:700}}>New password for {u.username}:</span>
                   <input className="input" type="text" style={{maxWidth:220}} value={pwVal} onChange={e=>setPwVal(e.target.value)} placeholder="min 8 chars" />
@@ -14884,11 +14910,56 @@ const ADMIN_SYSTEM_URL='https://system.mystarswim.com/';
 //   sysadmin       — full access to BOTH apps.
 //   schedule_admin — scheduler only (this app). Was 'admin' before.
 //   admin          — Admin & Procurement system only.
-function canUseScheduler(role){ return role==='sysadmin' || role==='schedule_admin'; }
-function canUseAdminSystem(role){ return role==='sysadmin' || role==='admin' || role==='hr_admin'; }
-// Approving leave. Deliberately narrower than canUseAdminSystem: procurement
-// reaches the System side without reaching anybody's medical certificate.
-function canApproveLeave(role){ return role==='sysadmin' || role==='hr_admin'; }
+// ── Roles ────────────────────────────────────────────────────────────────
+// Four seats, named for what the person does rather than for which screen
+// they happened to need first:
+//
+//   sysadmin       everything, lands on the scheduling side
+//   center_owner   everything, lands on the system side
+//   administrator  as the owner, minus the scheduler's Settings. The HR seat.
+//   scheduler      lessons and invoices only
+//
+// The three older names still arrive from accounts nobody has reassigned yet.
+// They are folded onto their successor rather than locking anybody out while
+// the roles are being set.
+const ROLE_ALIASES = { schedule_admin:'scheduler', admin:'administrator', hr_admin:'administrator' };
+function roleOf(role){ return ROLE_ALIASES[role] || role || ''; }
+
+const ROLE_INFO = {
+  sysadmin:      { label:'Sysadmin',
+                   note:'Everything, on both sides. Settings, Reports, user logins and the invoice deletion toggle. Signs in on the scheduling side.' },
+  center_owner:  { label:'Centre Owner',
+                   note:'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling.' },
+  administrator: { label:'Administrator / HR',
+                   note:'Both sides, staff records, leave approvals and procurement. No access to the scheduler’s Settings module.' },
+  scheduler:     { label:'Scheduler',
+                   note:'Lesson sessions and invoices only. No Settings, and no way across to the system side.' },
+};
+const ROLE_ORDER = ['sysadmin','center_owner','administrator','scheduler'];
+function roleLabel(role){ return (ROLE_INFO[roleOf(role)] || {}).label || role || '—'; }
+function roleNote(role){ return (ROLE_INFO[roleOf(role)] || {}).note || ''; }
+
+function canUseScheduler(role){
+  const r = roleOf(role);
+  return r==='sysadmin' || r==='center_owner' || r==='administrator' || r==='scheduler';
+}
+function canUseAdminSystem(role){
+  const r = roleOf(role);
+  return r==='sysadmin' || r==='center_owner' || r==='administrator';
+}
+// The scheduler's Settings module — pools, terms, products, user logins. The
+// one thing an administrator does not get.
+function canUseSettings(role){
+  const r = roleOf(role);
+  return r==='sysadmin' || r==='center_owner';
+}
+function canApproveLeave(role){ return canUseAdminSystem(role); }
+// Where a person lands. An owner and an administrator work from the system
+// side; everyone else starts where the lessons are.
+function defaultSideFor(role){
+  const r = roleOf(role);
+  return (r==='center_owner' || r==='administrator') ? 'system' : 'schedule';
+}
 // Legacy client-side hash — used ONLY by the login fallback below, for the
 // window between shipping the edge-function wiring and deploying the `login`
 // function. Once app_users is locked down (Phase 0 SQL), this path reads no

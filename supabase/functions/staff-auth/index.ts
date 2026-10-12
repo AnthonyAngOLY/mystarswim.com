@@ -175,10 +175,15 @@ Deno.serve(async (req) => {
       // Scheduler logins and staff logins share one Auth namespace: both are
       // minted as <name>@staff.mystarswim.internal. A staff ID equal to a
       // scheduler username is therefore the SAME account, and provisioning it
-      // would quietly hand two people one identity and one password. Caught
-      // here, by name, rather than surfacing later as a login that behaves
-      // like somebody else's.
+      // would quietly hand two people one identity and one password — which
+      // would surface later as a login behaving like somebody else's, about
+      // the worst shape a bug can take in a system that records who was where.
+      //
+      // The convention that prevents it is the "ss" prefix on every staff ID.
+      // A prefixed ID is refused only if it genuinely collides; an unprefixed
+      // one is refused on collision too, and told why the prefix exists.
       {
+        const prefixed = /^ss/i.test(sid);
         const { data: clash } = await db
           .from("app_users")
           .select("username")
@@ -186,9 +191,12 @@ Deno.serve(async (req) => {
           .maybeSingle();
         if (clash) {
           return json({
-            error: `"${sid}" is already a scheduler username. A staff ID and a ` +
-                   `scheduler username share one account, so this one needs to be ` +
-                   `different — try adding their employee number.`,
+            error: prefixed
+              ? `"${sid}" is already a scheduler username, so it would be the same ` +
+                `account. Pick a different staff ID.`
+              : `"${sid}" is already a scheduler username — and a staff ID and a ` +
+                `scheduler username share one account. Staff IDs start with "ss" for ` +
+                `exactly this reason: try "ss${sid}".`,
           }, 409);
         }
       }

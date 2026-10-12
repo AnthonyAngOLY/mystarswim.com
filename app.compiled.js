@@ -764,15 +764,16 @@ function App({
   const [programmeCategories, setProgrammeCategories] = useState([]);
   const [billingTerms, setBillingTerms] = useState([]);
   const [products, setProducts] = useState([]);
-  const isSysadmin = currentUser?.role === 'sysadmin';
+  const isSysadmin = roleOf(currentUser?.role) === 'sysadmin';
   const canSchedule = canUseScheduler(currentUser?.role);
   const canSystem = canUseAdminSystem(currentUser?.role);
-  // Two-side app: 'schedule' or 'system'. Sysadmin defaults to schedule side
-  // and can toggle. Admin (procurement) is pinned to system side. Anyone with
-  // scheduler-only access is pinned to schedule side.
+  const canSettings = canUseSettings(currentUser?.role);
+  // Two-side app: 'schedule' or 'system'. Which one a person opens on follows
+  // from their seat, and anyone with both can cross over.
   const [side, setSide] = useState(() => {
     if (!canSchedule && canSystem) return 'system';
-    return 'schedule';
+    if (!canSystem) return 'schedule';
+    return defaultSideFor(currentUser?.role);
   });
   const isMobile = useIsMobile();
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -6151,7 +6152,7 @@ function App({
     title: "Intake form (new tab)"
   }, "📝 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
-  }, "Intake ↗")), isSysadmin && /*#__PURE__*/React.createElement("button", {
+  }, "Intake ↗")), canSettings && /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'settings' ? 'active' : ''}`,
     onClick: () => {
       setView('settings');
@@ -6317,7 +6318,7 @@ function App({
       window.open('./intake.html', '_blank', 'noopener,noreferrer');
       setMobileMoreOpen(false);
     }
-  }, "📝 Intake form ↗"), isSysadmin && /*#__PURE__*/React.createElement("button", {
+  }, "📝 Intake form ↗"), canSettings && /*#__PURE__*/React.createElement("button", {
     className: "more-item",
     onClick: () => {
       setView('settings');
@@ -6616,7 +6617,7 @@ function App({
     deleteContact: adminDeleteContact,
     onRefresh: loadAdminAll
   }), !loading && side === 'system' && view === 'adminVouchers' && canSystem && /*#__PURE__*/React.createElement(AdminVouchersView, {
-    isSysadmin: isSysadmin,
+    isSysadmin: canSystem,
     vouchers: adminVouchers,
     payees: adminPayees,
     savePayee: adminSavePayee,
@@ -6628,7 +6629,7 @@ function App({
     loadFailed: adminCrewLoadFailed,
     importEmployees: adminImportEmployees,
     employees: adminEmployees,
-    canManageLogins: isSysadmin,
+    canManageLogins: canSystem,
     provisionLogin: crewProvisionLogin,
     resetLogin: crewResetLogin,
     unlinkLogin: crewUnlinkLogin,
@@ -6752,7 +6753,7 @@ function App({
     ariaLabel: "Accounts section",
     value: accountSection,
     onChange: setAccountSection,
-    items: [['accounts', 'Accounts'], ['familyGroups', 'Groups'], ['swimmers', 'Swimmers'], ['invoices', 'Invoices'], ['receipts', 'Receipts'], ['pendingCredits', 'Pending Credits'], ['aging', 'Aging'], ['codes', 'Discounts'], ...(isSysadmin ? [['reports', 'Reports']] : [])]
+    items: [['accounts', 'Accounts'], ['familyGroups', 'Groups'], ['swimmers', 'Swimmers'], ['invoices', 'Invoices'], ['receipts', 'Receipts'], ['pendingCredits', 'Pending Credits'], ['aging', 'Aging'], ['codes', 'Discounts'], ...(canSystem ? [['reports', 'Reports']] : [])]
   }), /*#__PURE__*/React.createElement("div", {
     className: "side-content"
   }, ['accounts', 'familyGroups', 'swimmers', 'invoices', 'receipts'].includes(accountSection) && /*#__PURE__*/React.createElement("div", {
@@ -6905,7 +6906,7 @@ function App({
     invoices: invoices,
     pmts: pmts,
     branches: options.branches || []
-  }), !loading && view === 'accounts' && accountSection === 'reports' && isSysadmin && /*#__PURE__*/React.createElement(ReportsView, {
+  }), !loading && view === 'accounts' && accountSection === 'reports' && canSystem && /*#__PURE__*/React.createElement(ReportsView, {
     invoices: invoices,
     pmts: pmts,
     pendingCredits: pendingCredits,
@@ -6983,7 +6984,7 @@ function App({
     updateStudent: updateStudent,
     deleteStudent: deleteStudent,
     deleteAccount: deleteAccount
-  }), !loading && view === 'settings' && isSysadmin && /*#__PURE__*/React.createElement("div", {
+  }), !loading && view === 'settings' && canSettings && /*#__PURE__*/React.createElement("div", {
     className: "side-shell"
   }, /*#__PURE__*/React.createElement(SectionNav, {
     ariaLabel: "Settings section",
@@ -25792,6 +25793,15 @@ function AttendanceRosterView({
 // unroutable internal one — so this form asks only for the ID and a password.
 // All three actions go through the staff-auth Edge Function, which holds the
 // service role; nothing privileged happens in the browser.
+// Crew staff IDs carry an "ss" prefix. Scheduler logins and staff logins share
+// one Auth namespace, so an unprefixed ID can collide with a manager's
+// username and become the same account; the prefix makes that impossible by
+// construction rather than by anybody remembering.
+function ssPrefixed(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  return /^ss/i.test(t) ? t : 'ss' + t.replace(/^[-\s]+/, '');
+}
 function CrewLoginModal({
   employee,
   mode,
@@ -25800,7 +25810,7 @@ function CrewLoginModal({
   unlinkLogin,
   onClose
 }) {
-  const [staffId, setStaffId] = useState(employee.staff_id || employee.emp_no || '');
+  const [staffId, setStaffId] = useState(() => ssPrefixed(employee.staff_id || employee.emp_no || ''));
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -25886,14 +25896,22 @@ function CrewLoginModal({
     className: "input",
     autoFocus: true,
     value: staffId,
-    placeholder: "SS-012",
-    onChange: ev => setStaffId(ev.target.value)
+    placeholder: "sstony",
+    onChange: ev => setStaffId(ev.target.value),
+    onBlur: ev => setStaffId(ssPrefixed(ev.target.value))
   }), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginTop: 4
     }
-  }, "This is what they type to sign in. Short and memorable works best.")), mode !== 'unlink' && /*#__PURE__*/React.createElement("div", {
+  }, "This is what they type to sign in. Crew IDs start with ", /*#__PURE__*/React.createElement("b", null, "ss"), " — the manager logins live in the same place, so the prefix is what keeps a crew ID from becoming somebody’s manager account. Leave the box and it is added for you."), staffId.trim() && !/^ss/i.test(staffId.trim()) && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 4,
+      color: '#B45309',
+      fontWeight: 600
+    }
+  }, "“", staffId.trim(), "” has no ", /*#__PURE__*/React.createElement("b", null, "ss"), " prefix. It will be refused if it matches a manager’s username.")), mode !== 'unlink' && /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Password"), /*#__PURE__*/React.createElement("input", {
     className: "input",
@@ -26964,31 +26982,7 @@ function AdminCrewView({
     style: {
       fontWeight: 700
     }
-  }, e.full_name, e.is_hr && /*#__PURE__*/React.createElement("span", {
-    title: "Can approve leave and open medical certificates",
-    style: {
-      marginLeft: 6,
-      fontSize: 9.5,
-      fontWeight: 800,
-      padding: '1px 5px',
-      borderRadius: 999,
-      background: '#FFF1F1',
-      color: '#DC2626',
-      border: '1px solid #FCA5A5'
-    }
-  }, "HR"), !e.is_hr && e.is_admin && /*#__PURE__*/React.createElement("span", {
-    title: "Can roster and see alerts from the phone",
-    style: {
-      marginLeft: 6,
-      fontSize: 9.5,
-      fontWeight: 800,
-      padding: '1px 5px',
-      borderRadius: 999,
-      background: '#EFF6FF',
-      color: '#1D4ED8',
-      border: '1px solid #BFDBFE'
-    }
-  }, "ROSTER"), /*#__PURE__*/React.createElement("div", {
+  }, e.full_name, /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       fontWeight: 400
@@ -28024,8 +28018,6 @@ function AdminEmployeeModal({
   canGrantAccess
 }) {
   const [d, setD] = useState({
-    is_admin: existing?.is_admin === true,
-    is_hr: existing?.is_hr === true,
     full_name: existing?.full_name || '',
     emp_no: existing?.emp_no || '',
     ic_no: existing?.ic_no || '',
@@ -28055,12 +28047,11 @@ function AdminEmployeeModal({
       payload[k] = v === '' ? null : v;
     });
     payload.full_name = d.full_name.trim();
-    // Only a sysadmin's edit may carry these. Anyone else's save leaves
-    // whatever is on the record alone rather than writing false over it.
-    if (!canGrantAccess) {
-      delete payload.is_admin;
-      delete payload.is_hr;
-    }
+    // Never written from here. Access is a property of the person's role, and
+    // a crew record that could also grant it would be a second answer to the
+    // same question — which is how two sources of truth start.
+    delete payload.is_admin;
+    delete payload.is_hr;
     await onSave(payload);
     setBusy(false);
   }
@@ -28260,52 +28251,9 @@ function AdminEmployeeModal({
       fontSize: 13,
       marginBottom: 2
     }
-  }, "Access from the attendance app"), /*#__PURE__*/React.createElement("div", {
-    className: "small subtle",
-    style: {
-      marginBottom: 9
-    }
-  }, "What this person can do on their phone, beyond their own sessions. Neither is granted by creating a login — both start off. A change reaches them at their next sign-in."), /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      gap: 9,
-      alignItems: 'flex-start',
-      cursor: 'pointer',
-      marginBottom: 8
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: !!d.is_admin,
-    onChange: e => up('is_admin', e.target.checked),
-    style: {
-      marginTop: 3
-    }
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "small"
-  }, /*#__PURE__*/React.createElement("b", null, "Can roster from the phone."), " Sees the whole roster and every worker's alerts, and can add, change or remove sessions. No leave, no documents.")), /*#__PURE__*/React.createElement("label", {
-    style: {
-      display: 'flex',
-      gap: 9,
-      alignItems: 'flex-start',
-      cursor: 'pointer'
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    checked: !!d.is_hr,
-    onChange: e => up('is_hr', e.target.checked),
-    style: {
-      marginTop: 3
-    }
-  }), /*#__PURE__*/React.createElement("span", {
-    className: "small"
-  }, /*#__PURE__*/React.createElement("b", null, "Can approve leave."), " Everything above, plus approving and rejecting leave and opening the medical certificates attached to it.")), d.is_hr && /*#__PURE__*/React.createElement("div", {
-    className: "small",
-    style: {
-      marginTop: 9,
-      color: '#B45309',
-      fontWeight: 600
-    }
-  }, "⚠ This lets them open anybody's MC from a phone. Grant it to people, not to roles.")), /*#__PURE__*/React.createElement("div", {
+  }, "Management access on the phone"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Rostering, alerts and leave approvals follow a person's role under", /*#__PURE__*/React.createElement("b", null, " Settings › Users & Logins"), ", not their crew record — an owner or an administrator reaches them with the same username they use here. There is nothing to set on this form.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'flex-end',
@@ -28519,7 +28467,7 @@ function UsersAdminView({
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPasswordVal] = useState('');
-  const [role, setRole] = useState('schedule_admin');
+  const [role, setRole] = useState('scheduler');
   const [busy, setBusy] = useState(false);
   const [pwFor, setPwFor] = useState(null);
   const [pwVal, setPwVal] = useState('');
@@ -28550,9 +28498,35 @@ function UsersAdminView({
   }, "👥 Users & Logins"), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
+      marginBottom: 12
+    }
+  }, "Create logins and manage passwords. A role change reaches the person at their next sign-in, not immediately."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))',
+      gap: 8,
       marginBottom: 14
     }
-  }, "Create logins and manage passwords. ", /*#__PURE__*/React.createElement("strong", null, "Sysadmin"), " — full access to both the scheduler and the Admin & Procurement system. ", /*#__PURE__*/React.createElement("strong", null, "Schedule Admin"), " — this scheduler only (no Settings or Reports). ", /*#__PURE__*/React.createElement("strong", null, "Admin (Procurement)"), " — signs in here but is redirected to the Admin & Procurement system. ", /*#__PURE__*/React.createElement("strong", null, "HR Admin"), " — crew records and leave approvals, including the medical certificates attached to them. A role change reaches them at their next sign-in, not immediately."), /*#__PURE__*/React.createElement("div", {
+  }, ROLE_ORDER.map(r => /*#__PURE__*/React.createElement("div", {
+    key: r,
+    style: {
+      background: 'var(--surface-2)',
+      border: '1px solid var(--border)',
+      borderRadius: 9,
+      padding: '9px 11px'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      fontSize: 12.5
+    }
+  }, ROLE_INFO[r].label), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 2,
+      lineHeight: 1.4
+    }
+  }, ROLE_INFO[r].note)))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: '1fr 1fr 1fr 130px auto',
@@ -28600,15 +28574,10 @@ function UsersAdminView({
     className: "select",
     value: role,
     onChange: e => setRole(e.target.value)
-  }, /*#__PURE__*/React.createElement("option", {
-    value: "schedule_admin"
-  }, "Schedule Admin"), /*#__PURE__*/React.createElement("option", {
-    value: "admin"
-  }, "Admin (Procurement)"), /*#__PURE__*/React.createElement("option", {
-    value: "hr_admin"
-  }, "HR Admin"), /*#__PURE__*/React.createElement("option", {
-    value: "sysadmin"
-  }, "Sysadmin"))), /*#__PURE__*/React.createElement("button", {
+  }, ROLE_ORDER.map(r => /*#__PURE__*/React.createElement("option", {
+    key: r,
+    value: r
+  }, ROLE_INFO[r].label)))), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
     style: {
       height: 38
@@ -28650,15 +28619,15 @@ function UsersAdminView({
     }
   }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Username"), /*#__PURE__*/React.createElement("th", null, "Name"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 170
+      width: 180
     }
-  }, "Role"), /*#__PURE__*/React.createElement("th", {
+  }, "Role"), /*#__PURE__*/React.createElement("th", null, "Reaches"), /*#__PURE__*/React.createElement("th", {
     style: {
       width: 90
     }
   }, "Status"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 150
+      width: 140
     }
   }, "Last login"), /*#__PURE__*/React.createElement("th", {
     style: {
@@ -28680,22 +28649,38 @@ function UsersAdminView({
       style: {
         padding: '3px 6px',
         fontSize: 12,
-        minWidth: 150
+        minWidth: 160
       },
-      value: u.role || 'schedule_admin',
+      value: roleOf(u.role) || 'scheduler',
       disabled: me,
       onChange: e => patchUser(u.id, {
         role: e.target.value
       })
-    }, /*#__PURE__*/React.createElement("option", {
-      value: "schedule_admin"
-    }, "Schedule Admin"), /*#__PURE__*/React.createElement("option", {
-      value: "admin"
-    }, "Admin (Procurement)"), /*#__PURE__*/React.createElement("option", {
-      value: "hr_admin"
-    }, "HR Admin"), /*#__PURE__*/React.createElement("option", {
-      value: "sysadmin"
-    }, "Sysadmin"))), /*#__PURE__*/React.createElement("td", null, u.is_active !== false ? /*#__PURE__*/React.createElement("span", {
+    }, ROLE_ORDER.map(r => /*#__PURE__*/React.createElement("option", {
+      key: r,
+      value: r
+    }, ROLE_INFO[r].label))), u.role && roleOf(u.role) !== u.role && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        marginTop: 2
+      }
+    }, "was “", u.role, "”")), /*#__PURE__*/React.createElement("td", {
+      className: "small subtle"
+    }, [canUseScheduler(u.role) && 'Scheduling', canUseAdminSystem(u.role) && 'System', canUseSettings(u.role) && 'Settings', canApproveLeave(u.role) && 'Leave', canUseAdminSystem(u.role) && 'Phone'].filter(Boolean).map(x => /*#__PURE__*/React.createElement("span", {
+      key: x,
+      style: {
+        display: 'inline-block',
+        fontSize: 10,
+        fontWeight: 700,
+        padding: '1px 6px',
+        borderRadius: 999,
+        marginRight: 4,
+        marginBottom: 2,
+        background: '#EFF6FF',
+        color: '#1D4ED8',
+        border: '1px solid #BFDBFE'
+      }
+    }, x))), /*#__PURE__*/React.createElement("td", null, u.is_active !== false ? /*#__PURE__*/React.createElement("span", {
       style: {
         color: 'var(--green-tx)',
         fontWeight: 700,
@@ -28731,7 +28716,7 @@ function UsersAdminView({
       },
       onClick: () => deleteUser(u.id)
     }, "Delete"))), pwFor === u.id && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-      colSpan: 6,
+      colSpan: 7,
       style: {
         background: 'var(--surface-2)'
       }
@@ -30906,16 +30891,73 @@ const ADMIN_SYSTEM_URL = 'https://system.mystarswim.com/';
 //   sysadmin       — full access to BOTH apps.
 //   schedule_admin — scheduler only (this app). Was 'admin' before.
 //   admin          — Admin & Procurement system only.
+// ── Roles ────────────────────────────────────────────────────────────────
+// Four seats, named for what the person does rather than for which screen
+// they happened to need first:
+//
+//   sysadmin       everything, lands on the scheduling side
+//   center_owner   everything, lands on the system side
+//   administrator  as the owner, minus the scheduler's Settings. The HR seat.
+//   scheduler      lessons and invoices only
+//
+// The three older names still arrive from accounts nobody has reassigned yet.
+// They are folded onto their successor rather than locking anybody out while
+// the roles are being set.
+const ROLE_ALIASES = {
+  schedule_admin: 'scheduler',
+  admin: 'administrator',
+  hr_admin: 'administrator'
+};
+function roleOf(role) {
+  return ROLE_ALIASES[role] || role || '';
+}
+const ROLE_INFO = {
+  sysadmin: {
+    label: 'Sysadmin',
+    note: 'Everything, on both sides. Settings, Reports, user logins and the invoice deletion toggle. Signs in on the scheduling side.'
+  },
+  center_owner: {
+    label: 'Centre Owner',
+    note: 'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling.'
+  },
+  administrator: {
+    label: 'Administrator / HR',
+    note: 'Both sides, staff records, leave approvals and procurement. No access to the scheduler’s Settings module.'
+  },
+  scheduler: {
+    label: 'Scheduler',
+    note: 'Lesson sessions and invoices only. No Settings, and no way across to the system side.'
+  }
+};
+const ROLE_ORDER = ['sysadmin', 'center_owner', 'administrator', 'scheduler'];
+function roleLabel(role) {
+  return (ROLE_INFO[roleOf(role)] || {}).label || role || '—';
+}
+function roleNote(role) {
+  return (ROLE_INFO[roleOf(role)] || {}).note || '';
+}
 function canUseScheduler(role) {
-  return role === 'sysadmin' || role === 'schedule_admin';
+  const r = roleOf(role);
+  return r === 'sysadmin' || r === 'center_owner' || r === 'administrator' || r === 'scheduler';
 }
 function canUseAdminSystem(role) {
-  return role === 'sysadmin' || role === 'admin' || role === 'hr_admin';
+  const r = roleOf(role);
+  return r === 'sysadmin' || r === 'center_owner' || r === 'administrator';
 }
-// Approving leave. Deliberately narrower than canUseAdminSystem: procurement
-// reaches the System side without reaching anybody's medical certificate.
+// The scheduler's Settings module — pools, terms, products, user logins. The
+// one thing an administrator does not get.
+function canUseSettings(role) {
+  const r = roleOf(role);
+  return r === 'sysadmin' || r === 'center_owner';
+}
 function canApproveLeave(role) {
-  return role === 'sysadmin' || role === 'hr_admin';
+  return canUseAdminSystem(role);
+}
+// Where a person lands. An owner and an administrator work from the system
+// side; everyone else starts where the lessons are.
+function defaultSideFor(role) {
+  const r = roleOf(role);
+  return r === 'center_owner' || r === 'administrator' ? 'system' : 'schedule';
 }
 // Legacy client-side hash — used ONLY by the login fallback below, for the
 // window between shipping the edge-function wiring and deploying the `login`
