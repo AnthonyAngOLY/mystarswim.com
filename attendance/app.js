@@ -329,9 +329,11 @@
     $('todayDate').textContent = prettyDate(date);
     $('todayList').innerHTML = '<p class="empty">Loading…</p>';
 
+    var scope = mine();
+    if (!scope) { $('todayList').innerHTML = '<p class="empty">No sessions scheduled today.</p>'; return; }
     var q = '/rest/v1/shifts?select=id,shift_date,start_time,end_time,status,late_min,early_min,'
           + 'locations(name),shift_categories(name)'
-          + '&shift_date=eq.' + date + '&order=start_time.asc';
+          + '&shift_date=eq.' + date + scope + '&order=start_time.asc';
 
     Promise.all([
       api(q).then(function (r) { return r.ok ? r.json() : []; }),
@@ -373,16 +375,32 @@
   // Anything of theirs still awaiting a decision. RLS already limits this to
   // the signed-in worker's own rows.
   var myAlerts = [];
+  // Every worker-side read is narrowed to the signed-in crew member by
+  // hand. RLS is a floor, not a view: shifts carries both a worker policy
+  // and an admin-reads-everything policy, and policies are OR'd — so the
+  // moment the person holding the phone is also an administrator, "give me
+  // today's shifts" means everybody's. That is how a manager opened Today
+  // and found another instructor's sessions on it.
+  function mine() {
+    return profile && profile.crew_id
+      ? '&crew_id=eq.' + encodeURIComponent(profile.crew_id)
+      : null;
+  }
+
   function loadMyAlerts() {
-    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason,worker_reason_code,worker_reason_at&status=eq.open')
+    var scope = mine();
+    if (!scope) return Promise.resolve([]);
+    return api('/rest/v1/alerts?select=id,shift_id,type,status,worker_reason,worker_reason_code,worker_reason_at&status=eq.open' + scope)
       .then(function (r) { return r.ok ? r.json() : []; })
       .catch(function () { return []; });
   }
 
   function loadPunches(ids) {
     if (!ids.length) return Promise.resolve([]);
+    var scope = mine();
+    if (!scope) return Promise.resolve([]);
     var q = '/rest/v1/punches?select=shift_id,type,punched_at,accepted,distance_m,inside_fence,lat,lng'
-          + '&accepted=is.true&shift_id=in.(' + ids.join(',') + ')';
+          + '&accepted=is.true' + scope + '&shift_id=in.(' + ids.join(',') + ')';
     return api(q).then(function (r) { return r.ok ? r.json() : []; });
   }
 
@@ -644,7 +662,8 @@
     return Promise.all([
       rpc('get_my_leave_balances').catch(function () { return []; }),
       api('/rest/v1/leave_requests?select=id,leave_type_id,start_date,end_date,days,reason,'
-        + 'status,document_path,applied_at,decision_note&order=applied_at.desc')
+        + 'status,document_path,applied_at,decision_note' + (mine() || '&id=is.null')
+        + '&order=applied_at.desc')
         .then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; })
     ]).then(function (res) {
       leaveBalances = res[0] || [];
@@ -1621,6 +1640,9 @@
   function loadWeek() {
     if (!wkStart) wkStart = mondayOf(todayKL());
     var box = $('weekList');
+    var scope = mine();
+    if (!scope) { box.innerHTML = '<p class="empty">No sessions on your roster.</p>';
+                  $('wkmTotal').textContent = ''; return; }
     var from = wkStart, to = addDaysISO(wkStart, 6);
     $('wkmLabel').textContent = weekLabel(wkStart);
     $('wkmToday').classList.toggle('hidden', wkStart === mondayOf(todayKL()));
@@ -1629,7 +1651,7 @@
 
     api('/rest/v1/shifts?select=id,shift_date,start_time,end_time,status,is_void,'
       + 'locations(name),shift_categories(name)'
-      + '&shift_date=gte.' + from + '&shift_date=lte.' + to
+      + '&shift_date=gte.' + from + '&shift_date=lte.' + to + scope
       + '&order=shift_date.asc,start_time.asc')
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (rows) {
@@ -1696,9 +1718,11 @@
     box.innerHTML = '<p class="empty">Loading…</p>';
     var from = new Date(Date.now() - 30 * 86400000);
     var fromStr = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(from);
+    var scope = mine();
+    if (!scope) { box.innerHTML = '<p class="empty">Nothing in the last 30 days.</p>'; return; }
     var q = '/rest/v1/shifts?select=id,shift_date,start_time,end_time,status,late_min,early_min,remark,'
           + 'locations(name)&shift_date=gte.' + fromStr
-          + '&shift_date=lt.' + todayKL() + '&order=shift_date.desc,start_time.desc';
+          + '&shift_date=lt.' + todayKL() + scope + '&order=shift_date.desc,start_time.desc';
 
     Promise.all([
       api(q).then(function (r) { return r.ok ? r.json() : []; }),

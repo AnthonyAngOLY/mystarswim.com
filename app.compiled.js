@@ -30511,7 +30511,12 @@ function UsersAdminView({
       }
     }, "was “", u.role, "”")), /*#__PURE__*/React.createElement("td", {
       className: "small subtle"
-    }, [canUseScheduler(u.role) && 'Scheduling', canUseAdminSystem(u.role) && 'System', canUseSettings(u.role) && 'Settings', canApproveLeave(u.role) && 'Leave', canUseAdminSystem(u.role) && 'Phone'].filter(Boolean).map(x => /*#__PURE__*/React.createElement("span", {
+    }, [canUseScheduler(u.role) && 'Scheduling', canUseAdminSystem(u.role) && 'System', canUseSettings(u.role) && 'Settings', canApproveLeave(u.role) && 'Leave',
+    // The phone's HR side travels with leave approval: one
+    // bundle, one seat. An Administrator signs in to the
+    // attendance app as crew, which is not a privilege to
+    // advertise here.
+    canApproveLeave(u.role) && 'Phone HR'].filter(Boolean).map(x => /*#__PURE__*/React.createElement("span", {
       key: x,
       style: {
         display: 'inline-block',
@@ -32767,7 +32772,7 @@ const ROLE_INFO = {
   },
   administrator: {
     label: 'Administrator / HR',
-    note: 'Both sides, staff records, leave approvals and procurement. No access to the scheduler’s Settings module.'
+    note: 'Both sides, staff records and procurement. No Settings, and no leave approvals — on the phone they are crew like anyone else, signing in with this same login.'
   },
   scheduler: {
     label: 'Scheduler',
@@ -32795,8 +32800,12 @@ function canUseSettings(role) {
   const r = roleOf(role);
   return r === 'sysadmin' || r === 'center_owner';
 }
+// Leave approval is sysadmin and Centre Owner only. An Administrator who
+// is also crew would otherwise be approving their own leave, which is the
+// shape of the problem rather than an edge case of it.
 function canApproveLeave(role) {
-  return canUseAdminSystem(role);
+  const r = roleOf(role);
+  return r === 'sysadmin' || r === 'center_owner';
 }
 // Where a person lands. An owner and an administrator work from the system
 // side; everyone else starts where the lessons are.

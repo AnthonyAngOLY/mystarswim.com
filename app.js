@@ -15422,7 +15422,11 @@ function UsersAdminView({ users, currentUser, createUser, setPassword, patchUser
                     canUseAdminSystem(u.role) && 'System',
                     canUseSettings(u.role)    && 'Settings',
                     canApproveLeave(u.role)   && 'Leave',
-                    canUseAdminSystem(u.role) && 'Phone'].filter(Boolean).map(x=>
+                    // The phone's HR side travels with leave approval: one
+                    // bundle, one seat. An Administrator signs in to the
+                    // attendance app as crew, which is not a privilege to
+                    // advertise here.
+                    canApproveLeave(u.role)   && 'Phone HR'].filter(Boolean).map(x=>
                     <span key={x} style={{display:'inline-block',fontSize:10,fontWeight:700,
                       padding:'1px 6px',borderRadius:999,marginRight:4,marginBottom:2,
                       background:'#EFF6FF',color:'#1D4ED8',border:'1px solid #BFDBFE'}}>{x}</span>)}
@@ -16040,7 +16044,7 @@ const ROLE_INFO = {
   center_owner:  { label:'Centre Owner',
                    note:'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling.' },
   administrator: { label:'Administrator / HR',
-                   note:'Both sides, staff records, leave approvals and procurement. No access to the scheduler’s Settings module.' },
+                   note:'Both sides, staff records and procurement. No Settings, and no leave approvals — on the phone they are crew like anyone else, signing in with this same login.' },
   scheduler:     { label:'Scheduler',
                    note:'Lesson sessions and invoices only. No Settings, and no way across to the system side.' },
 };
@@ -16062,7 +16066,13 @@ function canUseSettings(role){
   const r = roleOf(role);
   return r==='sysadmin' || r==='center_owner';
 }
-function canApproveLeave(role){ return canUseAdminSystem(role); }
+// Leave approval is sysadmin and Centre Owner only. An Administrator who
+// is also crew would otherwise be approving their own leave, which is the
+// shape of the problem rather than an edge case of it.
+function canApproveLeave(role){
+  const r = roleOf(role);
+  return r==='sysadmin' || r==='center_owner';
+}
 // Where a person lands. An owner and an administrator work from the system
 // side; everyone else starts where the lessons are.
 function defaultSideFor(role){
