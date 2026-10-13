@@ -61,10 +61,14 @@ comment on function attendance_is_hr() is
 -- Both flags answer the same question now, because on the phone they
 -- gate one bundle: roster, alerts, approvals. Keeping two names is for
 -- the app that already reads them, not a distinction anybody acts on.
+-- The column names are the live ones, to the letter. Postgres refuses to
+-- rename an out parameter through create-or-replace, and the phone reads
+-- must_change_password by name — renaming it is a forced password change
+-- that quietly stops happening.
 create or replace function get_my_profile()
 returns table (crew_id uuid, full_name text, staff_id text,
-               is_admin boolean, is_hr boolean,
-               consented_at timestamptz, must_change boolean)
+               is_admin boolean, is_hr boolean, consented_at timestamptz,
+               must_change_password boolean)
 language plpgsql stable security definer set search_path = public
 as $$
 declare v_tbl text; v_namecol text; v_found boolean; v_uid text; v_name text;
