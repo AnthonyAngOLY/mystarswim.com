@@ -2052,14 +2052,17 @@ function App({
   }
   // Entered per person, per type, per year. Upsert on that triple so editing
   // a figure twice does not leave two of them.
-  async function saveEntitlement(crewId, leaveTypeId, days) {
+  // field is 'days_given' or 'days_taken_before'. Only the one being edited
+  // is sent: a merge-duplicates upsert writes what it is given and leaves
+  // the rest, so typing an opening figure cannot wipe the allowance beside it.
+  async function saveEntitlement(crewId, leaveTypeId, days, field) {
     const body = {
       crew_id: crewId,
       leave_type_id: leaveTypeId,
       year: leaveYear,
-      days_given: Number(days) || 0,
       updated_at: new Date().toISOString()
     };
+    body[field || 'days_given'] = Number(days) || 0;
     try {
       await rest('leave_entitlements?on_conflict=crew_id,leave_type_id,year', {
         method: 'POST',
@@ -27716,20 +27719,51 @@ function CrewLeaveModal({
   const [draft, setDraft] = useState({});
   const [busy, setBusy] = useState(null);
   const thisYear = new Date().getFullYear();
-  async function commit(t) {
-    const v = draft[t.code];
+  const key = (code, field) => code + '|' + field;
+  async function commit(t, field) {
+    const k = key(t.code, field);
+    const v = draft[k];
     if (v == null || v === '') return;
-    setBusy(t.code);
+    setBusy(k);
     try {
-      await saveEntitlement(employee.id, t.id, v);
+      await saveEntitlement(employee.id, t.id, v, field);
       setDraft(d => ({
         ...d,
-        [t.code]: undefined
+        [k]: undefined
       }));
     } finally {
       setBusy(null);
     }
   }
+  // A function returning JSX, deliberately not a component. Declared inside
+  // the modal, a component is a new type on every render, so React unmounts
+  // and remounts the input on each keystroke — focus goes, and the blur that
+  // saves never fires against a live node. The field simply would not save.
+  const numBox = (t, field, value) => {
+    const k = key(t.code, field);
+    return /*#__PURE__*/React.createElement("input", {
+      className: "input",
+      type: "number",
+      min: "0",
+      step: "0.5",
+      style: {
+        width: 84,
+        textAlign: 'right',
+        padding: '4px 6px',
+        fontSize: 13
+      },
+      value: draft[k] !== undefined ? draft[k] : value,
+      disabled: busy === k,
+      onChange: e => setDraft(d => ({
+        ...d,
+        [k]: e.target.value
+      })),
+      onBlur: () => commit(t, field),
+      onKeyDown: e => {
+        if (e.key === 'Enter') e.currentTarget.blur();
+      }
+    });
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "modal-backdrop",
     onClick: onClose
@@ -27767,27 +27801,35 @@ function CrewLeaveModal({
     style: {
       marginBottom: 12
     }
-  }, "Enter what they are given for ", year, ". Used is counted from approved applications, so it cannot drift from the list it came from. Allowances are per year — editing", ' ', year, " leaves every other year as it was."), /*#__PURE__*/React.createElement("div", {
+  }, "Enter what they are given for ", year, ". ", /*#__PURE__*/React.createElement("b", null, "Used"), " is counted from approved applications, so it cannot drift from the list it came from — which is why it is not typed over. For somebody joining part way through, put the days they had already taken under ", /*#__PURE__*/React.createElement("b", null, "Taken earlier"), "; it comes off what is left without pretending to be an application. Allowances are per year — editing ", year, " leaves every other year as it was."), /*#__PURE__*/React.createElement("div", {
     className: "table-wrap"
   }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Leave"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 120,
+      width: 104,
       textAlign: 'right'
     }
   }, "Given"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 70,
+      width: 104,
+      textAlign: 'right'
+    },
+    title: "Days already taken this year before this app was tracking them"
+  }, "Taken earlier"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 62,
       textAlign: 'right'
     }
   }, "Used"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 90,
+      width: 78,
       textAlign: 'right'
     }
   }, "Left"))), /*#__PURE__*/React.createElement("tbody", null, (types || []).filter(t => t.is_active !== false).map(t => {
     const b = mine[t.code];
-    const given = draft[t.code] !== undefined ? draft[t.code] : b ? b.days_given : '';
+    const given = b ? b.days_given : '';
+    const before = b && b.days_taken_before != null ? b.days_taken_before : '';
     const used = b ? Number(b.days_used) : 0;
+    const here = b && b.days_used_here != null ? Number(b.days_used_here) : used;
     const left = b ? Number(b.days_available) : null;
     return /*#__PURE__*/React.createElement("tr", {
       key: t.id
@@ -27801,33 +27843,21 @@ function CrewLeaveModal({
       style: {
         textAlign: 'right'
       }
-    }, /*#__PURE__*/React.createElement("input", {
-      className: "input",
-      type: "number",
-      min: "0",
-      step: "0.5",
+    }, numBox(t, 'days_given', given)), /*#__PURE__*/React.createElement("td", {
       style: {
-        width: 92,
-        textAlign: 'right',
-        padding: '4px 6px',
-        fontSize: 13
-      },
-      value: given,
-      disabled: busy === t.code,
-      onChange: e => setDraft(d => ({
-        ...d,
-        [t.code]: e.target.value
-      })),
-      onBlur: () => commit(t),
-      onKeyDown: e => {
-        if (e.key === 'Enter') e.currentTarget.blur();
+        textAlign: 'right'
       }
-    })), /*#__PURE__*/React.createElement("td", {
+    }, numBox(t, 'days_taken_before', before)), /*#__PURE__*/React.createElement("td", {
       style: {
         textAlign: 'right'
       },
       className: "small"
-    }, used.toFixed(1)), /*#__PURE__*/React.createElement("td", {
+    }, used.toFixed(1), used > here && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontSize: 10
+      }
+    }, here.toFixed(1), " here")), /*#__PURE__*/React.createElement("td", {
       style: {
         textAlign: 'right',
         fontWeight: 700,

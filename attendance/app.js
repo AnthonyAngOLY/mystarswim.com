@@ -659,6 +659,11 @@
           : [Number(b.days_given).toFixed(0) + ' given',
              Number(b.days_used).toFixed(0) + ' taken'];
         if (b.is_paid === false && !uncapped) bits.push('unpaid');
+        // Days carried in when they were ported across. Without this a
+        // worker sees days taken with no applications behind them and has
+        // no way to tell whether it is right.
+        var before = Number(b.days_before || 0);
+        if (before > 0) bits.push(before.toFixed(0) + ' before this app');
         return '<div class="lv-bal">'
           + '<div class="name">' + esc(b.label) + '</div>'
           + '<div class="left' + cls + '">'
