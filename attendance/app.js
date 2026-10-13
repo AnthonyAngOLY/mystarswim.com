@@ -345,7 +345,7 @@
       // almost always yesterday, so without this it would be unreachable.
       var todayIds = todayShifts.map(function (x) { return x.id; });
       var elsewhere = myAlerts.filter(function (a) {
-        return !a.worker_reason && todayIds.indexOf(a.shift_id) === -1;
+        return needsReason(a) && todayIds.indexOf(a.shift_id) === -1;
       }).length;
       // punch() writes its green confirmation here and then calls this, so
       // rebuilding the box blindly wiped it within the second: the worker
@@ -500,6 +500,17 @@
     no_checkin:  'No check-in was recorded.',
     no_checkout: 'No check-out was recorded.'
   };
+  // The one place that decides whether a session is still waiting on the
+  // worker. The banner and the box used to answer this separately and
+  // disagreed. Answering with a single tap sets worker_reason_code and
+  // leaves worker_reason null, so History showed the box answered and
+  // locked while the banner went on asking for a reason that could no
+  // longer be given. A kind of alert the worker is never shown — a
+  // refused check-in — counted towards it too, and nothing in the app
+  // could ever clear it.
+  function needsReason(a) {
+    return !!ALERT_ASK[a.type] && !a.worker_reason && !a.worker_reason_code;
+  }
   function alertsFor(shiftId) {
     return myAlerts.filter(function (a) {
       return a.shift_id === shiftId && ALERT_ASK[a.type];
@@ -522,7 +533,7 @@
     return list.map(function (a) {
       var ask = esc(ALERT_ASK[a.type] || 'Needs an explanation.');
 
-      if (!a.worker_reason && !a.worker_reason_code) {
+      if (needsReason(a)) {
         return '<div class="explain" data-alert="' + esc(a.id) + '">'
           + '<div class="ask">' + ask + '</div>'
           + reasonChips(a)
