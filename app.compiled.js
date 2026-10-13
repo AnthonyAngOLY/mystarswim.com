@@ -27361,17 +27361,24 @@ function CrewLoginModal({
     value: ""
   }, "Choose…"), office.map(u => {
     const taken = u.linked_to && u.linked_to !== employee.full_name;
+    // ready_to_link means an Auth account exists to point the
+    // crew record at. It is not a claim about whether the person
+    // has ever been here: somebody who signed in before that
+    // layer existed has a last_login_at and no account, and
+    // calling them "never signed in" was simply wrong about them.
+    const ready = u.ready_to_link;
+    const why = taken ? ` · already ${u.linked_to}` : ready ? '' : u.last_login_at ? ' · must sign in once more' : ' · never signed in';
     return /*#__PURE__*/React.createElement("option", {
       key: u.username,
       value: u.username,
-      disabled: taken || !u.has_signed_in
-    }, u.display_name, " — ", roleLabel(u.role), taken ? ` · already ${u.linked_to}` : '', !u.has_signed_in ? ' · never signed in' : '');
+      disabled: taken || !ready
+    }, u.display_name, " — ", roleLabel(u.role), why);
   })), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginTop: 4
     }
-  }, "A login that has never been used cannot be linked yet — signing in is what creates the account this points at. Ask them to sign in to the scheduler once, then come back."))), mode === 'provision' && /*#__PURE__*/React.createElement("div", {
+  }, "A greyed-out name has no sign-in account yet, and this has to point at one. Signing in is what creates it — so ask them to open the scheduler once and come back. Nothing else is needed, and", /*#__PURE__*/React.createElement("b", null, " must sign in once more"), " means exactly that: they have been here before, but not since the sign-in was upgraded."))), mode === 'provision' && /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Staff ID"), /*#__PURE__*/React.createElement("input", {
     className: "input",
