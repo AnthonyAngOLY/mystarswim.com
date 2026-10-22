@@ -3521,10 +3521,20 @@ function App({ currentUser, onLogout }){
     }catch(err){ handleErr(err); throw err; }
   }
 
+  // Deleting a crew record is the one thing on this screen that destroys
+  // something, so the database decides whether it is allowed and the
+  // screen explains the answer. A row with attendance behind it comes
+  // back refused, with counts; a row typed in wrong this morning goes.
+  // See supabase_crew_delete_guard.sql.
+  // Not through rpcOne: that turns ok:false into a thrown Error with one
+  // line of text, and a refusal here is the useful part — the counts are
+  // what the screen offers Archive on the strength of.
   async function adminDeleteEmployee(id){
-    if(!confirm('Delete this employee?')) return;
-    try{ await deleteRows('admin_employees',{id}); await loadAdminAll(); }
-    catch(err){ handleErr(err); alert(err.message||'Failed to delete employee'); }
+    const out = await rest('rpc/crew_delete_or_explain',
+      { method:'POST', body: JSON.stringify({ p_crew_id:id }) });
+    const r = Array.isArray(out) ? out[0] : out;
+    if(r && r.ok) await loadAdminAll();
+    return r;
   }
 
   // ── Promotions (marketing banners on the public website) ─────────────────
@@ -14604,6 +14614,84 @@ function ArchiveCrewModal({ employee, busy, onArchive, onClose }){
   </div>;
 }
 
+// Delete asks the database first, because the database is the only thing
+// that knows what is attached. A record with attendance, leave or files
+// behind it comes back refused and this turns the counts into a sentence,
+// then points at Archive — which keeps all of it and clears the roster.
+function DeleteCrewModal({ employee, tryDelete, onArchive, canArchive, onClose }){
+  const [busy,setBusy]=useState(false);
+  const [refused,setRefused]=useState(null);
+
+  async function go(){
+    setBusy(true);
+    try{
+      const r = await tryDelete(employee.id);
+      if(r && r.ok){ onClose(); return; }
+      setRefused(r || {reason:'error', error:'The server did not say why.'});
+    }catch(err){
+      setRefused({reason:'error', error:err.message||'Could not delete this record.'});
+    }finally{ setBusy(false); }
+  }
+
+  // Biggest first: 48 sessions is the fact that settles it, and reading it
+  // after "1 file" is reading it second.
+  const found = ((refused && refused.found) || []).slice()
+    .sort((a,b)=>(b.n||0)-(a.n||0));
+  const phrase = found.map(f=>`${f.n} ${f.label}${f.n===1?'':'s'}`).join(' · ');
+
+  return <div className="modal-backdrop" onClick={()=>!busy&&onClose()}>
+    <div className="modal-card" onClick={e=>e.stopPropagation()} style={{maxWidth:470}}>
+      {!refused ? <>
+        <div style={{fontWeight:800,fontSize:17,marginBottom:4}}>Delete {employee.full_name}?</div>
+        <div className="small subtle" style={{marginBottom:12}}>
+          This removes the record itself. It only goes through if nothing is attached to
+          it — no sessions, no clock-ins, no leave, no files, no login. If anything is,
+          you will be told what, and nothing will have been touched.
+        </div>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="btn btn-ghost" disabled={busy} onClick={onClose}>Cancel</button>
+          <button className="btn" disabled={busy} style={{background:'#DC2626',color:'#fff'}}
+            onClick={go}>{busy?'Checking…':'Delete'}</button>
+        </div>
+      </> : <>
+        <div style={{fontWeight:800,fontSize:17,marginBottom:4}}>
+          {refused.reason==='gone' ? 'Already gone' : `${employee.full_name} cannot be deleted`}
+        </div>
+        <div className="small" style={{marginBottom:12,lineHeight:1.5}}>
+          {refused.reason==='history' ? <>
+            There is work behind this record: <b>{phrase}</b>. Deleting it would take all of
+            that with it, and attendance history is the thing this system is for — it is
+            what pay, leave balances and every past report are read from.
+            {employee.archived_at ? <div style={{marginTop:8}}>
+              It is already archived, which is where a record with history belongs: off the
+              roster, and every bit of it still readable.
+            </div> : canArchive ? <div style={{marginTop:8}}>
+              Archive instead. The record stays exactly as it is and their name keeps
+              showing on every past session; they simply come off the roster and can be
+              restored whenever you like.
+            </div> : null}
+          </> : refused.reason==='login' ? <>
+            They can still sign in, as <b>{refused.staff_id||'—'}</b>. Deleting the record now
+            would leave that sign-in account behind with nothing attached to it, which is
+            how a login quietly stops working for somebody else later.
+            <div style={{marginTop:8}}>
+              Remove the login first{canArchive && <> — or archive the record, which offers
+              to remove it in the same breath</>}.
+            </div>
+          </> : refused.reason==='gone' ? <>
+            Somebody has already removed this record. Refresh the list.
+          </> : <>{refused.error||'That did not work.'}</>}
+        </div>
+        <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+          <button className="btn btn-ghost" onClick={onClose}>Close</button>
+          {canArchive && (refused.reason==='history' || refused.reason==='login') &&
+            <button className="btn btn-primary" onClick={onArchive}>🗄 Archive instead</button>}
+        </div>
+      </>}
+    </div>
+  </div>;
+}
+
 function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loadFailed, importEmployees, canManageLogins, provisionLogin, resetLogin, unlinkLogin, leaveTypes, leaveBalances, leaveYear, setLeaveYear, saveEntitlement, applications, onboardReady, getOnboardLink, decideApplication,
   listOfficeLogins, linkOfficeLogin, unlinkOfficeLogin,
   loadCrewDocs, uploadCrewDoc, crewDocUrl, deleteCrewDoc,
@@ -14861,7 +14949,7 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
                       <button className="btn btn-ghost small" title="Put this person back in the crew list as Inactive"
                         onClick={()=>doRestore(e)}>↩ Restore</button>
                       <button className="btn btn-ghost small" style={{color:'#DC2626'}} title="Delete the record outright"
-                        onClick={()=>deleteEmployee(e.id)}>×</button>
+                        onClick={()=>setModal({kind:'delete',data:e})}>×</button>
                     </> : <>
                       <button className="btn btn-ghost small" onClick={()=>setModal({kind:'edit',data:e})}>✎</button>
                       {leaveTypes && leaveTypes.length>0 && <button className="btn btn-ghost small"
@@ -14875,7 +14963,8 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
                         onClick={()=>setModal({kind:'probation',data:e})}>⏳</button>
                       {archiveReady && e.status==='Inactive' && <button className="btn btn-ghost small" title="They have left — keep the record, clear them off the roster"
                         onClick={()=>setModal({kind:'archive',data:e})}>🗄</button>}
-                      <button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>deleteEmployee(e.id)}>×</button>
+                      <button className="btn btn-ghost small" style={{color:'#DC2626'}} title="Delete the record outright"
+                        onClick={()=>setModal({kind:'delete',data:e})}>×</button>
                     </>}
                   </td>
                 </tr>;})}
@@ -14898,6 +14987,11 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
       saveEntitlement={saveEntitlement} onClose={()=>setModal(null)} />}
     {modal?.kind==='archive' && <ArchiveCrewModal employee={modal.data} busy={archiveBusy}
       onArchive={doArchive} onClose={()=>!archiveBusy&&setModal(null)} />}
+    {modal?.kind==='delete' && <DeleteCrewModal employee={modal.data}
+      tryDelete={deleteEmployee}
+      canArchive={archiveReady && !modal.data.archived_at}
+      onArchive={()=>setModal({kind:'archive',data:modal.data})}
+      onClose={()=>setModal(null)} />}
     {modal?.kind==='files' && <CrewFilesModal employee={modal.data}
       loadDocs={loadCrewDocs} uploadDoc={uploadCrewDoc} docUrl={crewDocUrl}
       deleteDoc={deleteCrewDoc} onClose={()=>setModal(null)} />}
