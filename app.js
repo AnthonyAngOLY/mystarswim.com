@@ -1334,19 +1334,11 @@ function App({ currentUser, onLogout }){
     if(r && r.ok === false) throw new Error(r.error || 'That did not work.');
     return r;
   }
-  async function listOfficeLogins(){
-    try { return await rest('rpc/office_logins_for_linking', { method:'POST', body:'{}' }) || []; }
-    catch(_){ return []; }
-  }
-  async function linkOfficeLogin(crewId, username){
-    const r = await rpcOne('link_office_login', { p_crew_id:crewId, p_username:username });
-    await loadAdminAll();
-    return r;
-  }
-  async function unlinkOfficeLogin(crewId){
-    await rpcOne('unlink_office_login', { p_crew_id:crewId });
-    await loadAdminAll();
-  }
+  // The office-login link is gone: a website login and an attendance login
+  // are separate credentials now, except for sysadmin and Centre Owner, who
+  // reach the phone through get_my_profile's office branch and never needed
+  // a crew record pointing at them. See
+  // supabase_hr_phase3_separate_platforms.sql.
 
   // Crew files. The bucket is private, so everything is a signed URL.
   async function loadCrewDocs(crewId){
@@ -4486,8 +4478,6 @@ function App({ currentUser, onLogout }){
         leaveYear={leaveYear} setLeaveYear={setLeaveYear} saveEntitlement={saveEntitlement}
         applications={crewApplications} onboardReady={crewOnboardReady}
         getOnboardLink={getOnboardLink} decideApplication={decideCrewApplication}
-        listOfficeLogins={listOfficeLogins} linkOfficeLogin={linkOfficeLogin}
-        unlinkOfficeLogin={unlinkOfficeLogin}
         loadCrewDocs={loadCrewDocs} uploadCrewDoc={uploadCrewDoc}
         crewDocUrl={crewDocUrl} deleteCrewDoc={deleteCrewDoc}
         setProbation={setProbation} confirmProbation={confirmProbation}
@@ -14044,19 +14034,12 @@ function CrewFilesModal({ employee, loadDocs, uploadDoc, docUrl, deleteDoc, onCl
 }
 
 function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogin,
-                          listOfficeLogins, linkOfficeLogin, unlinkOfficeLogin, onClose }){
+                          onClose }){
   const [staffId,setStaffId]=useState(()=>ssPrefixed(employee.staff_id||employee.emp_no||''));
   const [password,setPassword]=useState('');
   const [busy,setBusy]=useState(false);
   const [err,setErr]=useState('');
   const [done,setDone]=useState('');
-  const [office,setOffice]=useState(null);      // null while loading
-  const [pick,setPick]=useState('');
-
-  useEffect(()=>{ if(mode==='link' && listOfficeLogins)
-    listOfficeLogins().then(rows=>setOffice(rows||[])).catch(()=>setOffice([]));
-    /* eslint-disable-next-line */ }, [mode]);
-
   const needsPassword = mode==='provision' || mode==='reset';
 
   async function submit(){
@@ -14067,16 +14050,7 @@ function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogi
     }
     setBusy(true);
     try{
-      if(mode==='link'){
-        if(!pick){ setErr('Choose which login belongs to them.'); setBusy(false); return; }
-        const r = await linkOfficeLogin(employee.id, pick);
-        setDone(`${employee.full_name} now signs in to the attendance app with their `
-              + `existing "${r.staff_id}" login — same password as the scheduler. `
-              + `Nothing new to hand over.`);
-      } else if(mode==='unlinkOffice'){
-        await unlinkOfficeLogin(employee.id);
-        setDone('Unlinked. Their office login is untouched — they can still sign in to the scheduler.');
-      } else if(mode==='provision'){
+      if(mode==='provision'){
         await provisionLogin(employee.id, staffId.trim(), password);
         setDone(`Login created. Give ${employee.full_name} their staff ID and password.`);
       } else if(mode==='reset'){
@@ -14090,11 +14064,9 @@ function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogi
     finally{ setBusy(false); }
   }
 
-  const title = mode==='provision'    ? 'Create attendance login'
-              : mode==='reset'        ? 'Reset password'
-              : mode==='link'         ? 'Use their office login'
-              : mode==='unlinkOffice' ? 'Unlink office login'
-                                      : 'Remove login';
+  const title = mode==='provision' ? 'Create attendance login'
+              : mode==='reset'     ? 'Reset password'
+                                   : 'Remove login';
 
   return <div className="modal-backdrop"><div className="modal-card">
     <div className="modal-head">
@@ -14113,55 +14085,6 @@ function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogi
           This removes their sign-in only. The employee record and every past
           session, punch and alert stay exactly as they are.
         </div>}
-
-        {mode==='unlinkOffice' && <div className="small" style={{marginBottom:14}}>
-          This only stops the attendance app recognising them. Their office
-          login carries on working for the scheduler — it was never ours to
-          delete, which is why this is a different button from Remove.
-        </div>}
-
-        {mode==='link' && <>
-          <div className="small" style={{marginBottom:12}}>
-            For somebody who is both: an employee with their own roster and
-            leave, <i>and</i> a manager who approves it. Pick the login they
-            already use and they keep one password for both. What they can do
-            on the HR side follows their seat in Users &amp; Logins — there is
-            nothing to tick here.
-          </div>
-          {office===null && <div className="small subtle">Fetching the office logins…</div>}
-          {office && office.length===0 && <div className="small" style={{color:'#B45309',fontWeight:600}}>
-            No office logins to link. Create one in Settings → Users &amp; Logins first.
-          </div>}
-          {office && office.length>0 && <div className="field"><label>Which login</label>
-            <select className="input" value={pick} onChange={ev=>setPick(ev.target.value)}>
-              <option value="">Choose…</option>
-              {office.map(u=>{
-                const taken = u.linked_to && u.linked_to !== employee.full_name;
-                // ready_to_link means an Auth account exists to point the
-                // crew record at. It is not a claim about whether the person
-                // has ever been here: somebody who signed in before that
-                // layer existed has a last_login_at and no account, and
-                // calling them "never signed in" was simply wrong about them.
-                const ready = u.ready_to_link;
-                const why = taken ? ` · already ${u.linked_to}`
-                          : ready ? ''
-                          : u.last_login_at ? ' · must sign in once more'
-                                            : ' · never signed in';
-                return <option key={u.username} value={u.username}
-                        disabled={taken || !ready}>
-                  {u.display_name} — {roleLabel(u.role)}{why}
-                </option>;
-              })}
-            </select>
-            <div className="small subtle" style={{marginTop:4}}>
-              A greyed-out name has no sign-in account yet, and this has to
-              point at one. Signing in is what creates it — so ask them to open
-              the scheduler once and come back. Nothing else is needed, and
-              <b> must sign in once more</b> means exactly that: they have been
-              here before, but not since the sign-in was upgraded.
-            </div>
-          </div>}
-        </>}
 
         {mode==='provision' && <div className="field"><label>Staff ID</label>
           <input className="input" autoFocus value={staffId} placeholder="sstony"
@@ -14183,19 +14106,18 @@ function CrewLoginModal({ employee, mode, provisionLogin, resetLogin, unlinkLogi
           <input className="input" type="text" value={password} placeholder="min 8 characters"
             autoFocus={mode==='reset'} onChange={ev=>setPassword(ev.target.value)} />
           <div className="small subtle" style={{marginTop:4}}>
-            Shown as plain text so you can read it out. They cannot change it
-            themselves — come back here to reset it.
+            Shown as plain text so you can read it out. We start everybody on
+            <b> star1234</b>. They get one change of their own on the phone;
+            after that it is a reset from here.
           </div></div>}
 
         {err && <div className="small" style={{color:'#DC2626',fontWeight:600,marginTop:6}}>{err}</div>}
         <div style={{display:'flex',gap:8,marginTop:16}}>
           <button className="btn btn-primary" disabled={busy} onClick={submit}>
             {busy ? 'Working…'
-              : mode==='provision'    ? 'Create login'
-              : mode==='reset'        ? 'Reset password'
-              : mode==='link'         ? 'Link this login'
-              : mode==='unlinkOffice' ? 'Unlink'
-                                      : 'Remove login'}
+              : mode==='provision' ? 'Create login'
+              : mode==='reset'     ? 'Reset password'
+                                   : 'Remove login'}
           </button>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
         </div>
@@ -14693,7 +14615,6 @@ function DeleteCrewModal({ employee, tryDelete, onArchive, canArchive, onClose }
 }
 
 function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loadFailed, importEmployees, canManageLogins, provisionLogin, resetLogin, unlinkLogin, leaveTypes, leaveBalances, leaveYear, setLeaveYear, saveEntitlement, applications, onboardReady, getOnboardLink, decideApplication,
-  listOfficeLogins, linkOfficeLogin, unlinkOfficeLogin,
   loadCrewDocs, uploadCrewDoc, crewDocUrl, deleteCrewDoc,
   setProbation, confirmProbation }){
   const [q,setQ]=useState('');
@@ -14864,6 +14785,13 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
       {!archiveReady && (employees||[]).length>0 && <div className="small subtle" style={{marginTop:8}}>
         Archiving leavers needs one database migration — run <code>supabase_crew_archive_migration.sql</code> and reload.
       </div>}
+      {canManageLogins && !showingArchive && <div className="small subtle" style={{marginTop:8,background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,padding:'7px 10px'}}>
+        🔑 New attendance logins start on <b>star1234</b> — the password we hand out, and the
+        one to type into <b>+ Create login</b>. It is theirs to change once on the phone;
+        after that it is <b>Reset password</b> from this screen. A website login is a separate
+        thing with a separate password and does not open the attendance app, except for
+        Sysadmin and Centre Owner.
+      </div>}
       {showingArchive && <div className="small subtle" style={{marginTop:8,background:'#F8FAFC',border:'1px solid #E2E8F0',borderRadius:8,padding:'7px 10px'}}>
         Archived crew keep every record — attendance history, dates worked, banking details — but are out of the crew roster and cannot be picked for a session. Restore puts them back as <b>Inactive</b>.
       </div>}
@@ -14919,17 +14847,16 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
                               onClick={()=>setModal({kind:'login',data:e,mode:'unlink'})}>Remove</button></>
                         : <span className="small subtle">—</span>)
                       : e.auth_user_id ? (e.login_is_office ? <>
-                      {/* An office login. Reset password is absent on purpose:
-                          their password lives in Users & Logins, and Remove is
-                          replaced by Unlink, because Remove deletes the sign-in
-                          and this one is their scheduler account. */}
-                      <div className="small" style={{fontWeight:700}}>{e.staff_id||'—'}
-                        <span style={{marginLeft:5,background:'#EEF7FD',color:'#0369A1',
-                          border:'1px solid #BAE6FD',borderRadius:999,fontSize:9.5,
-                          fontWeight:800,padding:'0 5px'}}>OFFICE</span></div>
-                      <div className="small subtle" style={{fontSize:10}}>Signs in with their scheduler password</div>
-                      <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10,color:'#B45309'}}
-                        onClick={()=>setModal({kind:'login',data:e,mode:'unlinkOffice'})}>Unlink</button>
+                      {/* A leftover link, from before the two sides were
+                          separated. No buttons on purpose: this row points at
+                          a website account, so Reset would change their
+                          scheduler password and Remove would delete the
+                          account they sign in to the website with. The
+                          migration unpicks it; until it runs, saying so is
+                          the only safe thing this cell can do. */}
+                      <div className="small" style={{fontWeight:700}}>{e.staff_id||'—'}</div>
+                      <div className="small" style={{color:'#B45309',fontSize:10,fontWeight:700}}>
+                        ⚠ a website login — run the separation migration</div>
                     </> : <>
                       <div className="small" style={{fontWeight:700}}>{e.staff_id||'—'}</div>
                       <button className="btn btn-ghost small" style={{padding:'1px 6px',fontSize:10}}
@@ -14938,10 +14865,8 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
                         onClick={()=>setModal({kind:'login',data:e,mode:'unlink'})}>Remove</button>
                     </>) : <>
                       <button className="btn btn-ghost small" style={{padding:'2px 8px',fontSize:11}}
+                        title="Their own attendance login, separate from any website login they have"
                         onClick={()=>setModal({kind:'login',data:e,mode:'provision'})}>+ Create login</button>
-                      <button className="btn btn-ghost small" style={{padding:'2px 8px',fontSize:11,marginLeft:4}}
-                        title="For somebody who already signs in to the scheduler"
-                        onClick={()=>setModal({kind:'login',data:e,mode:'link'})}>↪ Use office login</button>
                     </>}
                   </td>}
                   <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
@@ -15001,9 +14926,7 @@ function AdminCrewView({ employees, saveEmployee, deleteEmployee, onRefresh, loa
     {modal?.kind==='login' && <CrewLoginModal
       employee={modal.data} mode={modal.mode}
       provisionLogin={provisionLogin} resetLogin={resetLogin} unlinkLogin={unlinkLogin}
-      onClose={()=>setModal(null)}   listOfficeLogins={listOfficeLogins} linkOfficeLogin={linkOfficeLogin}
-      unlinkOfficeLogin={unlinkOfficeLogin}
-    />}
+      onClose={()=>setModal(null)} />}
     {modal?.kind==='importPreview' && (()=>{
       const byEmpNo={}, byName={};
       (employees||[]).forEach(e=>{ if(e.emp_no) byEmpNo[String(e.emp_no).trim().toLowerCase()]=true; if(e.full_name) byName[String(e.full_name).trim().toLowerCase()]=true; });
@@ -16126,6 +16049,13 @@ const ADMIN_SYSTEM_URL='https://system.mystarswim.com/';
 //   administrator  as the owner, minus the scheduler's Settings. The HR seat.
 //   scheduler      lessons and invoices only
 //
+// These are website seats. The attendance app is a separate credential —
+// an ss… staff login, made on the Crew screen — for everybody except
+// sysadmin and Centre Owner, whose website login opens it too, for
+// rostering and alerts. Signing in to the website does nothing for the
+// phone, and signing in to the phone does nothing for the website, even in
+// the same browser. See supabase_hr_phase3_separate_platforms.sql.
+//
 // The three older names still arrive from accounts nobody has reassigned yet.
 // They are folded onto their successor rather than locking anybody out while
 // the roles are being set.
@@ -16134,13 +16064,13 @@ function roleOf(role){ return ROLE_ALIASES[role] || role || ''; }
 
 const ROLE_INFO = {
   sysadmin:      { label:'Sysadmin',
-                   note:'Everything, on both sides. Settings, Reports, user logins and the invoice deletion toggle. Signs in on the scheduling side.' },
+                   note:'Everything, on both sides. Settings, Reports, user logins and the invoice deletion toggle. Signs in on the scheduling side. This same login opens the attendance app, for rostering and alerts.' },
   center_owner:  { label:'Centre Owner',
-                   note:'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling.' },
+                   note:'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling. This same login opens the attendance app, for rostering and alerts.' },
   administrator: { label:'Administrator / HR',
-                   note:'Both sides, staff records and procurement. No Settings, and no leave approvals — on the phone they are crew like anyone else, signing in with this same login.' },
+                   note:'Both sides of the website, staff records and procurement. No Settings, and no leave approvals. The attendance app is a separate ss… login — this one does not open it.' },
   scheduler:     { label:'Scheduler',
-                   note:'Lesson sessions and invoices only. No Settings, and no way across to the system side.' },
+                   note:'Lesson sessions and invoices only. No Settings, and no way across to the system side. The attendance app is a separate ss… login — this one does not open it.' },
 };
 const ROLE_ORDER = ['sysadmin','center_owner','administrator','scheduler'];
 function roleLabel(role){ return (ROLE_INFO[roleOf(role)] || {}).label || role || '—'; }

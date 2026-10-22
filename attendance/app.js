@@ -248,10 +248,37 @@
     loadProfile().catch(function () { signOut(); });
   }
 
+  // Nothing back from get_my_profile means two quite different people: a
+  // website login that was never meant to open this app, and a crew member
+  // whose attendance login has been taken off their record. One sentence
+  // for both told neither of them what to do next.
+  function explainEmptyProfile() {
+    var fallback = 'This login does not open the attendance app. Sign in with your '
+                 + 'staff ID — it starts with ss.';
+    return rpc('my_login_kind').then(function (kind) {
+      if (kind === 'website') {
+        throw new Error('That password is right, but this login is for the website. '
+          + 'The attendance app needs your own staff ID — it starts with ss — and '
+          + 'the password that came with it. Ask the office if you have not been '
+          + 'given one yet.');
+      }
+      if (kind === 'crew') {
+        throw new Error('Your crew record is there, but the app could not read it. '
+          + 'Tell the office — this one is not your doing.');
+      }
+      throw new Error('This login is not linked to a crew record. Ask the office to '
+        + 'set up your attendance login.');
+    }, function () {
+      // Older database, or the function is not reachable. Say the useful
+      // half rather than nothing.
+      throw new Error(fallback);
+    });
+  }
+
   function loadProfile() {
     return rpc('get_my_profile').then(function (rows) {
       if (!rows || !rows.length) {
-        throw new Error('Your login is not linked to a worker record.');
+        return explainEmptyProfile();
       }
       profile = rows[0];
       hide($('loginScreen'));
