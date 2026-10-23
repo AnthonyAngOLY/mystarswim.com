@@ -6817,7 +6817,7 @@ function App({
     deleteContact: adminDeleteContact,
     onRefresh: loadAdminAll
   }), !loading && side === 'system' && view === 'adminVouchers' && canSystem && /*#__PURE__*/React.createElement(AdminVouchersView, {
-    isSysadmin: canSystem,
+    isSysadmin: isSysadmin,
     vouchers: adminVouchers,
     payees: adminPayees,
     savePayee: adminSavePayee,
@@ -23199,7 +23199,13 @@ function AdminVouchersView({
       kind: 'edit',
       data: v
     })
-  }, "✎"), /*#__PURE__*/React.createElement("button", {
+  }, "✎"), v.status === 'Paid' && !isSysadmin && /*#__PURE__*/React.createElement("span", {
+    className: "small subtle",
+    title: "A paid voucher is amended by a sysadmin. Every amendment is logged either way — see the history.",
+    style: {
+      padding: '0 6px'
+    }
+  }, "🔒"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     title: "Amendment history",
     onClick: () => setModal({

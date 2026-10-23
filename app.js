@@ -4456,7 +4456,11 @@ function App({ currentUser, onLogout }){
         deleteContact={adminDeleteContact}
         onRefresh={loadAdminAll}
       />}
-      {!loading && side==='system' && view==='adminVouchers' && canSystem && <AdminVouchersView isSysadmin={canSystem}
+      {/* isSysadmin, not canSystem: the pencil on a Paid voucher has always
+          said "(sysadmin)" in its tooltip and been handed to anyone on the
+          system side, an Administrator included. The label was describing
+          the rule somebody meant; this makes it the rule. */}
+      {!loading && side==='system' && view==='adminVouchers' && canSystem && <AdminVouchersView isSysadmin={isSysadmin}
         vouchers={adminVouchers}
         payees={adminPayees}
         savePayee={adminSavePayee}
@@ -12151,6 +12155,7 @@ function AdminVouchersView({ vouchers, payees, savePayee, deletePayee, saveVouch
                     {v.status==='Draft' && <button className="btn btn-ghost small" onClick={()=>setVoucherStatus(v.id,'Approved')}>Approve</button>}
                     {v.status==='Approved' && <button className="btn btn-ghost small" onClick={()=>setVoucherStatus(v.id,'Paid')}>Mark Paid</button>}
                     {v.status!=='Void' && (v.status!=='Paid' || isSysadmin) && <button className="btn btn-ghost small" title={v.status==='Paid'?'Amend paid voucher (sysadmin)':'Edit voucher'} onClick={()=>setModal({kind:'edit',data:v})}>✎</button>}
+                    {v.status==='Paid' && !isSysadmin && <span className="small subtle" title="A paid voucher is amended by a sysadmin. Every amendment is logged either way — see the history." style={{padding:'0 6px'}}>🔒</span>}
                     <button className="btn btn-ghost small" title="Amendment history" onClick={()=>setModal({kind:'history',data:v})}>🕘</button>
                     {v.status!=='Void' && <button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>{ if(confirm(`Void voucher ${adminPvNo(v)}? The number stays in the sequence but the voucher becomes invalid.`)) setVoucherStatus(v.id,'Void'); }}>Void</button>}
                   </td>
