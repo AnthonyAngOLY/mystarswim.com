@@ -22,7 +22,8 @@
 // that for the gate: it is satisfied by the anon key, which ships to every
 // browser in config.js. A function that permanently deletes records has to
 // know who is asking, so it checks for itself — the service role key, which
-// is what the cron job presents, or a signed-in sysadmin. Nobody else, and a
+// is what the cron job presents, or a signed-in sysadmin or Centre Owner —
+// one tier under two names. Nobody else, and a
 // dry run is no exception: what it reports is a map of what is held.
 //
 // Deploy:  supabase functions deploy leave-docs-purge
@@ -90,11 +91,13 @@ Deno.serve(async (req) => {
       allowed = true;
     } else {
       const { data: userData } = await db.auth.getUser(bearer);
-      const role = (userData?.user?.app_metadata as Record<string, unknown> | null)?.ssb_role;
-      allowed = role === "sysadmin";
+      const role = String(
+        (userData?.user?.app_metadata as Record<string, unknown> | null)?.ssb_role ?? "");
+      allowed = role === "sysadmin" || role === "center_owner";
     }
     if (!allowed) {
-      return json({ error: "Only a sysadmin, or the scheduled job, can run this." }, 403);
+      return json({ error: "Only a sysadmin, the Centre Owner, or the scheduled job, "
+                          + "can run this." }, 403);
     }
 
     const body = await req.json().catch(() => ({})) as { commit?: boolean };

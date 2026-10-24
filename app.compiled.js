@@ -764,7 +764,9 @@ function App({
   const [programmeCategories, setProgrammeCategories] = useState([]);
   const [billingTerms, setBillingTerms] = useState([]);
   const [products, setProducts] = useState([]);
-  const isSysadmin = roleOf(currentUser?.role) === 'sysadmin';
+  // One tier, two names. sysadmin and Centre Owner reach everything the
+  // other does; which side they land on is a preference, not a privilege.
+  const isOwner = canUseSettings(currentUser?.role);
   const canSchedule = canUseScheduler(currentUser?.role);
   const canSystem = canUseAdminSystem(currentUser?.role);
   const canSettings = canUseSettings(currentUser?.role);
@@ -6852,7 +6854,7 @@ function App({
     deleteContact: adminDeleteContact,
     onRefresh: loadAdminAll
   }), !loading && side === 'system' && view === 'adminVouchers' && canSystem && /*#__PURE__*/React.createElement(AdminVouchersView, {
-    isSysadmin: isSysadmin,
+    canAmendPaid: isOwner,
     vouchers: adminVouchers,
     payees: adminPayees,
     savePayee: adminSavePayee,
@@ -7238,10 +7240,10 @@ function App({
     ariaLabel: "Settings section",
     value: adminSection,
     onChange: setAdminSection,
-    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isSysadmin ? [['retention', 'Documents']] : [])]
+    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isOwner ? [['retention', 'Documents']] : [])]
   }), /*#__PURE__*/React.createElement("div", {
     className: "side-content"
-  }, adminSection === 'retention' && isSysadmin && /*#__PURE__*/React.createElement(DocRetentionView, {
+  }, adminSection === 'retention' && isOwner && /*#__PURE__*/React.createElement(DocRetentionView, {
     months: docRetentionMonths,
     setMonths: saveDocRetention,
     runPurge: runLeaveDocPurge
@@ -23011,7 +23013,7 @@ function AdminVouchersView({
   saveVoucher,
   setVoucherStatus,
   onRefresh,
-  isSysadmin
+  canAmendPaid
 }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -23227,16 +23229,16 @@ function AdminVouchersView({
   }, "Approve"), v.status === 'Approved' && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: () => setVoucherStatus(v.id, 'Paid')
-  }, "Mark Paid"), v.status !== 'Void' && (v.status !== 'Paid' || isSysadmin) && /*#__PURE__*/React.createElement("button", {
+  }, "Mark Paid"), v.status !== 'Void' && (v.status !== 'Paid' || canAmendPaid) && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
-    title: v.status === 'Paid' ? 'Amend paid voucher (sysadmin)' : 'Edit voucher',
+    title: v.status === 'Paid' ? 'Amend paid voucher (Centre Owner or sysadmin)' : 'Edit voucher',
     onClick: () => setModal({
       kind: 'edit',
       data: v
     })
-  }, "✎"), v.status === 'Paid' && !isSysadmin && /*#__PURE__*/React.createElement("span", {
+  }, "✎"), v.status === 'Paid' && !canAmendPaid && /*#__PURE__*/React.createElement("span", {
     className: "small subtle",
-    title: "A paid voucher is amended by a sysadmin. Every amendment is logged either way — see the history.",
+    title: "A paid voucher is amended by the Centre Owner or the sysadmin. Every amendment is logged either way — see the history.",
     style: {
       padding: '0 6px'
     }
@@ -32833,13 +32835,16 @@ function roleOf(role) {
   return ROLE_ALIASES[role] || role || '';
 }
 const ROLE_INFO = {
+  // These two are one tier under two names, by decision: anything one can
+  // do, the other can. The only thing that differs is which side they open
+  // on, which is a preference, not a privilege.
   sysadmin: {
     label: 'Sysadmin',
-    note: 'Everything, on both sides. Settings, Reports, user logins and the invoice deletion toggle. Signs in on the scheduling side. This same login opens the attendance app, for rostering and alerts.'
+    note: 'Everything, on both sides: Settings, Reports, user logins, document retention, amending a paid voucher. Opens on the scheduling side. This same login opens the attendance app, for rostering and alerts.'
   },
   center_owner: {
     label: 'Centre Owner',
-    note: 'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling. This same login opens the attendance app, for rostering and alerts.'
+    note: 'Everything a sysadmin reaches, with nothing held back. Opens on the system side, with a button across to scheduling. This same login opens the attendance app, for rostering and alerts.'
   },
   administrator: {
     label: 'Administrator / HR',

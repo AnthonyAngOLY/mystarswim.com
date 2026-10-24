@@ -1,10 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Edge Function: admin-users  (Phase 0 of RLS hardening)
 //
-// Sysadmin-only management of the app_users table, executed with the SERVICE
+// Owner-seat management of the app_users table, executed with the SERVICE
 // ROLE so the browser never touches app_users directly once Phase 0's RLS lock
 // is applied. Every request must carry a valid session token (issued by the
-// `login` function) belonging to a `sysadmin`.
+// `login` function) belonging to a `sysadmin` or a `center_owner`.
 //
 // Actions (POST body { action, ... }):
 //   list                                        → users without password fields
@@ -21,6 +21,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SESSION_SECRET = Deno.env.get("SESSION_JWT_SECRET")!;
+
+// sysadmin and center_owner are one tier: the same reach under two names,
+// because one of them owns the centre and the other keeps the system.
+// Anything one may do here, the other may.
+const OWNER_ROLES = ["sysadmin", "center_owner"];
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -84,12 +89,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-  // ── Authorize: valid session token belonging to a sysadmin ──
+  // ── Authorize: valid session token belonging to an owner seat ──
+  // sysadmin and center_owner are one tier: same reach, two names, because
+  // one of them is the person who owns the centre and the other is the
+  // person who keeps the system. Anything one may do here, the other may.
   const auth = req.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
   const claims = token ? await verifySession(token) : null;
   if (!claims) return json({ error: "Not authenticated." }, 401);
-  if (claims.role !== "sysadmin") return json({ error: "Sysadmin access required." }, 403);
+  if (!OWNER_ROLES.includes(String(claims.role))) {
+    return json({ error: "Sysadmin or Centre Owner access required." }, 403);
+  }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 

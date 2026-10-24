@@ -418,7 +418,9 @@ function App({ currentUser, onLogout }){
   const [programmeCategories,setProgrammeCategories] = useState([]);
   const [billingTerms,setBillingTerms] = useState([]);
   const [products,setProducts] = useState([]);
-  const isSysadmin = (roleOf(currentUser?.role) === 'sysadmin');
+  // One tier, two names. sysadmin and Centre Owner reach everything the
+  // other does; which side they land on is a preference, not a privilege.
+  const isOwner = canUseSettings(currentUser?.role);
   const canSchedule = canUseScheduler(currentUser?.role);
   const canSystem = canUseAdminSystem(currentUser?.role);
   const canSettings = canUseSettings(currentUser?.role);
@@ -4488,11 +4490,12 @@ function App({ currentUser, onLogout }){
         deleteContact={adminDeleteContact}
         onRefresh={loadAdminAll}
       />}
-      {/* isSysadmin, not canSystem: the pencil on a Paid voucher has always
-          said "(sysadmin)" in its tooltip and been handed to anyone on the
-          system side, an Administrator included. The label was describing
-          the rule somebody meant; this makes it the rule. */}
-      {!loading && side==='system' && view==='adminVouchers' && canSystem && <AdminVouchersView isSysadmin={isSysadmin}
+      {/* An owner seat, not merely the system side: the pencil on a Paid
+          voucher has always said so in its tooltip and been handed to
+          anyone on the system side, an Administrator included. The label
+          was describing the rule somebody meant; this makes it the rule.
+          amend_voucher() holds the same line in the database. */}
+      {!loading && side==='system' && view==='adminVouchers' && canSystem && <AdminVouchersView canAmendPaid={isOwner}
         vouchers={adminVouchers}
         payees={adminPayees}
         savePayee={adminSavePayee}
@@ -4775,9 +4778,9 @@ function App({ currentUser, onLogout }){
       {/* ── Settings: left-column nav + content ── */}
       {!loading && view==='settings' && canSettings && <div className="side-shell">
         <SectionNav ariaLabel="Settings section" value={adminSection} onChange={setAdminSection}
-          items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users'],...(isSysadmin?[['retention','Documents']]:[])]} />
+          items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users'],...(isOwner?[['retention','Documents']]:[])]} />
         <div className="side-content">
-          {adminSection==='retention' && isSysadmin && <DocRetentionView
+          {adminSection==='retention' && isOwner && <DocRetentionView
             months={docRetentionMonths} setMonths={saveDocRetention}
             runPurge={runLeaveDocPurge} />}
           {adminSection==='summary' && <SummaryView summary={summary} pools={activePools()} />}
@@ -12092,7 +12095,7 @@ function AdminScanReviewModal({ scanned, onAccept, onClose }){
 }
 
 // ── Payment Vouchers ─────────────────────────────────────────────────────
-function AdminVouchersView({ vouchers, payees, savePayee, deletePayee, saveVoucher, setVoucherStatus, onRefresh, isSysadmin }){
+function AdminVouchersView({ vouchers, payees, savePayee, deletePayee, saveVoucher, setVoucherStatus, onRefresh, canAmendPaid }){
   const [q,setQ]=useState('');
   const [statusFilter,setStatusFilter]=useState('all');
   const [modal,setModal]=useState(null); // {kind:'edit'|'view'|'payees', data?}
@@ -12186,8 +12189,8 @@ function AdminVouchersView({ vouchers, payees, savePayee, deletePayee, saveVouch
                     <button className="btn btn-ghost small" onClick={()=>printPV(v.id)}>🖨</button>
                     {v.status==='Draft' && <button className="btn btn-ghost small" onClick={()=>setVoucherStatus(v.id,'Approved')}>Approve</button>}
                     {v.status==='Approved' && <button className="btn btn-ghost small" onClick={()=>setVoucherStatus(v.id,'Paid')}>Mark Paid</button>}
-                    {v.status!=='Void' && (v.status!=='Paid' || isSysadmin) && <button className="btn btn-ghost small" title={v.status==='Paid'?'Amend paid voucher (sysadmin)':'Edit voucher'} onClick={()=>setModal({kind:'edit',data:v})}>✎</button>}
-                    {v.status==='Paid' && !isSysadmin && <span className="small subtle" title="A paid voucher is amended by a sysadmin. Every amendment is logged either way — see the history." style={{padding:'0 6px'}}>🔒</span>}
+                    {v.status!=='Void' && (v.status!=='Paid' || canAmendPaid) && <button className="btn btn-ghost small" title={v.status==='Paid'?'Amend paid voucher (Centre Owner or sysadmin)':'Edit voucher'} onClick={()=>setModal({kind:'edit',data:v})}>✎</button>}
+                    {v.status==='Paid' && !canAmendPaid && <span className="small subtle" title="A paid voucher is amended by the Centre Owner or the sysadmin. Every amendment is logged either way — see the history." style={{padding:'0 6px'}}>🔒</span>}
                     <button className="btn btn-ghost small" title="Amendment history" onClick={()=>setModal({kind:'history',data:v})}>🕘</button>
                     {v.status!=='Void' && <button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>{ if(confirm(`Void voucher ${adminPvNo(v)}? The number stays in the sequence but the voucher becomes invalid.`)) setVoucherStatus(v.id,'Void'); }}>Void</button>}
                   </td>
@@ -16100,10 +16103,13 @@ const ROLE_ALIASES = { schedule_admin:'scheduler', admin:'administrator', hr_adm
 function roleOf(role){ return ROLE_ALIASES[role] || role || ''; }
 
 const ROLE_INFO = {
+  // These two are one tier under two names, by decision: anything one can
+  // do, the other can. The only thing that differs is which side they open
+  // on, which is a preference, not a privilege.
   sysadmin:      { label:'Sysadmin',
-                   note:'Everything, on both sides. Settings, Reports, user logins and the invoice deletion toggle. Signs in on the scheduling side. This same login opens the attendance app, for rostering and alerts.' },
+                   note:'Everything, on both sides: Settings, Reports, user logins, document retention, amending a paid voucher. Opens on the scheduling side. This same login opens the attendance app, for rostering and alerts.' },
   center_owner:  { label:'Centre Owner',
-                   note:'Everything a sysadmin reaches, including Settings. Signs in on the system side, with a button across to scheduling. This same login opens the attendance app, for rostering and alerts.' },
+                   note:'Everything a sysadmin reaches, with nothing held back. Opens on the system side, with a button across to scheduling. This same login opens the attendance app, for rostering and alerts.' },
   administrator: { label:'Administrator / HR',
                    note:'Both sides of the website, staff records and procurement. No Settings, and no leave approvals. The attendance app is a separate ss… login — this one does not open it.' },
   scheduler:     { label:'Scheduler',

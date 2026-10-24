@@ -26,9 +26,10 @@
 --  longer an order of operations to get wrong.
 --
 --  It also enforces the rule the screen's tooltip has always claimed:
---  amending a PAID voucher is sysadmin only. That was a hidden button, and
---  a hidden button is a rule for people who use the screen. This is a rule
---  for everyone.
+--  amending a PAID voucher belongs to the owner seats — sysadmin and
+--  Centre Owner, which are one tier under two names. That was a hidden
+--  button, and a hidden button is a rule for people who use the screen.
+--  This is a rule for everyone.
 --
 --  A VOID VOUCHER IS NOT AMENDABLE AT ALL
 --  Voiding is how a voucher is cancelled while its number stays in the
@@ -110,10 +111,14 @@ begin
     v_role := null;
   end;
 
-  if v_status = 'Paid' and coalesce(v_role, '') <> 'sysadmin' then
+  -- sysadmin and Centre Owner are one tier: the same reach under two
+  -- names. Everyone else on the system side may raise and edit vouchers,
+  -- but a paid one is settled money.
+  if v_status = 'Paid' and coalesce(v_role, '') not in ('sysadmin', 'center_owner') then
     return jsonb_build_object('ok', false,
       'error', 'This voucher has been paid. Amending a paid voucher is the '
-            || 'sysadmin''s to do. The amendment history is open to you either way.');
+            || 'Centre Owner''s or the sysadmin''s to do. The amendment history '
+            || 'is open to you either way.');
   end if;
 
   -- Who, from the token rather than from the browser. A field the caller

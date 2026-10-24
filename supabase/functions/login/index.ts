@@ -25,7 +25,11 @@ const SESSION_TTL_S = 7 * 24 * 60 * 60; // 7 days — matches AUTH_TTL_MS in app
 // send a real JWT instead of the shared anon key. Usernames map to the same
 // unroutable internal domain the worker app uses; no mail is ever sent there.
 const EMAIL_DOMAIN = "staff.mystarswim.internal";
-const ADMIN_ROLES = ["sysadmin", "schedule_admin", "admin"];
+// The seats as they are named now. Nothing in the app reads the isAdmin
+// field this feeds — it is in the response for callers that might —
+// but a list of roles that no longer exist is a trap for whoever does
+// read it next. sysadmin and center_owner are one tier.
+const ADMIN_ROLES = ["sysadmin", "center_owner", "administrator"];
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

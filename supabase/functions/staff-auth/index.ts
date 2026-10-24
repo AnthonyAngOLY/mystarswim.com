@@ -29,6 +29,10 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const EMAIL_DOMAIN = "staff.mystarswim.internal";
 
+// One tier, two names. Anything a sysadmin may do here, the Centre
+// Owner may.
+const OWNER_ROLES = ["sysadmin", "center_owner"];
+
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type, apikey",
@@ -140,18 +144,22 @@ Deno.serve(async (req) => {
     // usually have no worker row at all, while a supervising instructor has a
     // worker row but no scheduler login.
     //
-    // Only `sysadmin` qualifies. This function sets and resets passwords, and
-    // the existing Users & Logins panel is sysadmin-only for exactly that
-    // reason — a schedule_admin manages timetables, not credentials.
-    const claimRole = (userData.user.app_metadata as Record<string, unknown> | null)?.ssb_role;
-    let isAdmin = claimRole === "sysadmin";
+    // The owner seats qualify: sysadmin and center_owner, which are one
+    // tier under two names. This function sets and resets passwords, and
+    // Users & Logins is held to the same pair for exactly that reason — a
+    // scheduler manages timetables, not credentials.
+    const claimRole = String(
+      (userData.user.app_metadata as Record<string, unknown> | null)?.ssb_role ?? "");
+    let isAdmin = OWNER_ROLES.includes(claimRole);
 
     if (!isAdmin) {
       const { data: caller } = await db
         .from(tbl).select("id, is_admin").eq("auth_user_id", userData.user.id).maybeSingle();
       isAdmin = !!caller?.is_admin;
     }
-    if (!isAdmin) return json({ error: "Only a sysadmin can manage staff logins." }, 403);
+    if (!isAdmin) {
+      return json({ error: "Only a sysadmin or the Centre Owner can manage staff logins." }, 403);
+    }
 
     const body = await req.json().catch(() => null);
     if (!body) return json({ error: "Bad request." }, 400);
