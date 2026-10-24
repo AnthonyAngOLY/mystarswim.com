@@ -5149,26 +5149,41 @@ function App({
       alert(err.message || 'Failed to delete payee');
     }
   }
+  // An amendment and the record of it are one thing now: amend_voucher
+  // writes both in the same transaction, so there is no longer an order of
+  // operations to get wrong. It also holds the rule the pencil's tooltip
+  // has always claimed — a paid voucher is the sysadmin's to amend — which
+  // a hidden button could only ever claim.
+  //
+  // Before this, the voucher was written first and the log afterwards, in
+  // a try/catch that swallowed the failure to a console warning. An
+  // amended voucher with nothing recorded against it was a silent outcome.
+  // See supabase_voucher_amendments_writeonce.sql.
   async function adminSaveVoucher(data, id) {
     try {
       if (id) {
-        const before = (adminVouchers || []).find(v => v.id === id) || null;
-        await patchRows('admin_payment_vouchers', {
-          id
-        }, data);
-        // Amendment trail — write-once snapshot. Non-fatal if the
-        // voucher_amendments migration hasn't been run yet.
+        let out;
         try {
-          await insertRows('voucher_amendments', {
-            voucher_id: String(id),
-            voucher_no: before ? adminPvNo(before) : null,
-            status_at_edit: before?.status || null,
-            edited_by: currentUser?.displayName || currentUser?.username || null,
-            before_data: before || null,
-            after_data: data
+          out = await rest('rpc/amend_voucher', {
+            method: 'POST',
+            body: JSON.stringify({
+              p_id: String(id),
+              p_data: data
+            })
           });
-        } catch (_) {
-          console.warn('voucher_amendments not recorded — run the migration');
+        } catch (err) {
+          // The migration has not been run yet. The old path still works;
+          // what it must not do any more is fail quietly.
+          if (!/PGRST202|Could not find the function/i.test(err.message || '')) throw err;
+          await adminAmendVoucherUnlogged(data, id);
+          await loadAdminAll();
+          alert('Voucher saved — but the change was NOT recorded in the amendment ' + 'history, because supabase_voucher_amendments_writeonce.sql has not ' + 'been run yet.');
+          return;
+        }
+        const r = Array.isArray(out) ? out[0] : out;
+        if (!r || r.ok !== true) {
+          alert(r && r.error || 'That amendment did not go through.');
+          return;
         }
       } else {
         await insertRows('admin_payment_vouchers', {
@@ -5180,6 +5195,26 @@ function App({
     } catch (err) {
       handleErr(err);
       alert(err.message || 'Failed to save voucher');
+    }
+  }
+  // Only reached before the migration has run, and the caller says so out
+  // loud when it is.
+  async function adminAmendVoucherUnlogged(data, id) {
+    const before = (adminVouchers || []).find(v => v.id === id) || null;
+    await patchRows('admin_payment_vouchers', {
+      id
+    }, data);
+    try {
+      await insertRows('voucher_amendments', {
+        voucher_id: String(id),
+        voucher_no: before ? adminPvNo(before) : null,
+        status_at_edit: before?.status || null,
+        edited_by: currentUser?.displayName || currentUser?.username || null,
+        before_data: before || null,
+        after_data: data
+      });
+    } catch (_) {
+      console.warn('voucher_amendments not recorded — run the migration');
     }
   }
   async function adminSetVoucherStatus(id, status) {
