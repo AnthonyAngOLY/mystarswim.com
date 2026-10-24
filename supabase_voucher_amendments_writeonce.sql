@@ -34,7 +34,32 @@
 --  A VOID VOUCHER IS NOT AMENDABLE AT ALL
 --  Voiding is how a voucher is cancelled while its number stays in the
 --  sequence. Editing one afterwards would make the void meaningless.
+--
+--  IF THE TABLE WAS NEVER THERE
+--  This file creates it. The earlier migration that was meant to may
+--  never have been run, and nothing would have said so: the screen wrote
+--  its log entry inside a catch that turned the missing table into a
+--  console warning. Every amendment made until now went unrecorded, and
+--  that silence is the bug this file closes. The history starts here;
+--  there is nothing to recover, because nothing was ever written.
 -- ════════════════════════════════════════════════════════════════════════
+
+-- ── 0. The table, if the first migration never ran ──────────────────────
+-- Identical to supabase_voucher_amendments_migration.sql, so running this
+-- after that one changes nothing, and running it instead works too.
+create table if not exists voucher_amendments (
+  id             bigint generated always as identity primary key,
+  voucher_id     text not null,
+  voucher_no     text,
+  status_at_edit text,
+  edited_by      text,
+  before_data    jsonb,
+  after_data     jsonb,
+  created_at     timestamptz not null default now()
+);
+
+create index if not exists voucher_amendments_voucher_idx
+  on voucher_amendments (voucher_id, created_at desc);
 
 -- ── 1. Write-once, and not to anybody passing ───────────────────────────
 -- No update policy and no delete policy: with RLS on, an action with no
