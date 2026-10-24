@@ -120,13 +120,24 @@ select coalesce(nullif(btrim(s.guardian_name), ''), '— no name —') as guardi
 -- ═══ 3. Fill the numbers in ═════════════════════════════════════════════
 -- Only where the account has none. An account somebody has already
 -- corrected by hand is left exactly as it is.
+-- "Malaysian first" has to be said here as well as in ss_phones().
+-- Ordering only by the student id leaves the two numbers that came out
+-- of one field tied, and a tie is resolved however the planner likes —
+-- which is how Rachel ended up with her Australian number as the one we
+-- would have sent the code to. with ordinality keeps the array's own
+-- order, and the case puts +60 in front of it.
 with found as (
   select s.account_id,
          (array_agg(p order by rn))[1] as p1,
          (array_agg(p order by rn))[2] as p2
     from (
-      select s.account_id, p, row_number() over (partition by s.account_id order by s.id) as rn
-        from students s, unnest(ss_phones(s.guardian_phone)) as p
+      select s.account_id, t.p,
+             row_number() over (
+               partition by s.account_id
+               order by (case when t.p like '+60%' then 0 else 1 end), s.id, t.ord
+             ) as rn
+        from students s,
+             unnest(ss_phones(s.guardian_phone)) with ordinality as t(p, ord)
        where s.account_id is not null
     ) s
    group by s.account_id
@@ -147,7 +158,22 @@ update parent_accounts pa
    );
 
 
+-- ═══ 3b. Put the Malaysian number in front, where one got behind ════════
+-- Repairs anything the tie above already wrote the wrong way round. The
+-- active_phone setting is untouched: primary stays primary, it is just
+-- the right number now.
+update parent_accounts
+   set phone_primary   = phone_secondary,
+       phone_secondary = phone_primary
+ where phone_secondary like '+60%'
+   and phone_primary is not null
+   and phone_primary not like '+60%';
+
+
 -- ═══ 4. Where that leaves things ════════════════════════════════════════
+-- The Supabase editor shows only the LAST result when several queries
+-- run together. Run these three one at a time, or scroll back.
+
 select count(*)                                            as accounts,
        count(*) filter (where phone_primary is not null)   as can_sign_in,
        count(*) filter (where phone_secondary is not null) as have_a_second_number,
