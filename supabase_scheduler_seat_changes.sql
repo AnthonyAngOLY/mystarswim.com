@@ -28,6 +28,13 @@
 --  THEY MUST SIGN OUT AND IN AGAIN
 --  A seat is minted into the token at sign-in. Zoe's new one reaches her
 --  the next time she signs in, not before.
+--
+--  THE NAMES ARE SPELT OUT IN STEP 2 AND CHECKED IN STEP 5
+--  The first version of this file looked for a login called "zoe". Hers
+--  is "zoelim", so the update matched nothing and said nothing — the row
+--  count was zero and zero rows is not an error. STEP 5 now names every
+--  login this file meant to change and says whether it found it, because
+--  a change that quietly does not happen is worse than one that fails.
 -- ════════════════════════════════════════════════════════════════════════
 
 -- ═══ STEP 1 — who holds what now. Changes nothing. ══════════════════════
@@ -41,9 +48,10 @@ select u.username, u.display_name, u.role,
 
 
 -- ═══ STEP 2 — Zoe schedules, under the current name ═════════════════════
+-- The username, not the person's name: hers is zoelim.
 update app_users
    set role = 'scheduler'
- where lower(username) = 'zoe'
+ where lower(username) = 'zoelim'
    and role <> 'scheduler';
 
 
@@ -59,16 +67,41 @@ update app_users
 -- metadata — and that claim is what a token says about him. Stripping it
 -- means that even a token minted from that account says nothing about a
 -- seat. Harmless if the account is already gone.
+-- Matched by email as well as by the row, because if the login has
+-- already been deleted there is no row left to follow to the account —
+-- and that is exactly the case where the claim is still sitting there.
 update auth.users
    set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) - 'ssb_role' - 'app_user_id'
- where id = (select auth_user_id from app_users where lower(username) = 'tony');
+ where email = 'tony@staff.mystarswim.internal'
+    or id = (select auth_user_id from app_users where lower(username) = 'tony');
 
 
 -- ═══ STEP 5 — confirm ═══════════════════════════════════════════════════
+-- Every login this file meant to touch, by name, and what became of it.
+-- A spelling that matches nothing says so here instead of passing in
+-- silence, which is how Zoe stayed a schedule_admin the first time.
+with intended (username, meant_to) as (
+  values ('zoelim', 'scheduler'),
+         ('tony',   'off the website')
+)
+select i.username,
+       i.meant_to,
+       case
+         when i.meant_to = 'off the website' then
+           case when u.username is null              then 'gone entirely — fine'
+                when coalesce(u.is_active, true)     then '>>> STILL ACTIVE'
+                else 'switched off' end
+         when u.username is null                     then '>>> NO SUCH LOGIN — check the spelling in STEP 1'
+         when u.role = i.meant_to                    then 'done'
+         else '>>> still ' || u.role
+       end as state
+  from intended i
+  left join app_users u on lower(u.username) = lower(i.username)
+ order by 1;
+
+-- Everyone, and whether they can get in.
 select u.username, u.display_name, u.role,
-       case when coalesce(u.is_active, true) then 'active' else 'switched off' end as state,
-       case when coalesce(u.is_active, true) and u.role in ('sysadmin','center_owner','administrator','scheduler')
-            then 'can sign in to the website' else 'cannot sign in' end as website
+       case when coalesce(u.is_active, true) then 'active' else 'switched off' end as state
   from app_users u
  order by case when coalesce(u.is_active, true) then 0 else 1 end, u.username;
 
