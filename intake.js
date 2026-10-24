@@ -190,7 +190,14 @@ function IntakeForm(){
       // which children. The function matches them by phone instead.
       const res = await fetch(`${cfg.supabaseUrl}/functions/v1/public-intake`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: cfg.supabaseAnonKey },
+        // Both headers. Supabase's "Verify JWT" gate reads Authorization,
+        // not apikey, so sending only the latter means a 401 the moment
+        // that toggle is on — and it is on by default.
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: cfg.supabaseAnonKey,
+          Authorization: `Bearer ${cfg.supabaseAnonKey}`
+        },
         body: JSON.stringify({
           guardianName: gName.trim(),
           guardianEmail: gEmail.trim(),

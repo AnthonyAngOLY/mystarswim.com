@@ -61,11 +61,9 @@ placeholder as (
     from parent_accounts pa
     left join kids k on k.account_id = pa.id
    where pa.phone_primary is not null
-     and (
-       -- 123456789, 987654321, 111111111, 000000000 and friends
-       regexp_replace(pa.phone_primary, '^\+60', '') ~ '^1?23456789'
-       or regexp_replace(pa.phone_primary, '[^0-9]', '', 'g') ~ '(.)\1{6,}'
-     )
+     -- Defined in supabase_parent_account_repair.sql, so the repair and
+     -- this list cannot disagree about what a made-up number looks like.
+     and ss_phone_looks_fake(pa.phone_primary)
 ),
 
 -- ── 3. Two different guardian names on one number ───────────────────────
