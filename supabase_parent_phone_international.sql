@@ -79,12 +79,20 @@ begin
     return out_my || out_intl;
   end if;
 
-  -- No country code anywhere, so read it as local. Anything that is not
-  -- a Malaysian mobile falls out here rather than being bent into shape:
-  -- a wrong guess sends somebody's sign-in code to a stranger.
+  -- No plus sign anywhere, so read it as digits. Three shapes are the
+  -- same Malaysian mobile: 60129154900, 0129154900 and 129154900. The
+  -- first of those was dropped when this function was rewritten, and
+  -- Hemashanthira's number — typed exactly that way — came back
+  -- unreadable when it had been fine the week before.
+  --
+  -- Anything that is still not a Malaysian mobile falls out rather than
+  -- being bent into shape: a wrong guess sends somebody's sign-in code
+  -- to a stranger.
   d := regexp_replace(p_raw, '[^0-9]', '', 'g');
   if d = '' then return '{}'; end if;
-  if left(d, 1) = '0' then d := substr(d, 2); end if;
+  if    left(d, 2) = '60' then d := substr(d, 3);
+  elsif left(d, 1) = '0'  then d := substr(d, 2);
+  end if;
   if d ~ '^1[0-9]{8,9}$' then return array['+60' || d]; end if;
   return '{}';
 end $$;

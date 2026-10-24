@@ -66,12 +66,30 @@ placeholder as (
      and ss_phone_looks_fake(pa.phone_primary)
 ),
 
--- ── 3. Two different guardian names on one number ───────────────────────
+-- ── 3. The same child entered twice ─────────────────────────────────────
+-- Two rows, one swimmer, differing only in how somebody capitalised the
+-- name. On the Accounts screen that is untidy. In the parent app it is
+-- their child listed twice with two sets of sessions, and they will ring
+-- to ask which one is real.
+dup_child as (
+  select 3 as rank,
+         coalesce(nullif(btrim(pa.display_name), ''), '— no name —') as parent,
+         string_agg(distinct s.name, ' / ') as children,
+         'the same swimmer appears ' || count(*) || ' times' as what_is_wrong,
+         'Keep one record and archive the other. Whichever has the sessions '
+         || 'and the payments against it is the one to keep.' as what_to_do
+    from students s
+    join parent_accounts pa on pa.id = s.account_id
+   group by pa.id, pa.display_name, btrim(lower(s.name))
+  having count(*) > 1
+),
+
+-- ── 4. Two different guardian names on one number ───────────────────────
 -- Usually the same person spelt two ways, which is fine. Sometimes a
 -- child's name in the guardian field, or two families sharing a phone —
 -- and this is now the thing that decides who sees whose children.
 two_names as (
-  select 3 as rank,
+  select 4 as rank,
          coalesce(nullif(btrim(pa.display_name), ''), '— no name —') as parent,
          k.who as children,
          'two names on this number: ' || k.the_names as what_is_wrong,
@@ -82,9 +100,9 @@ two_names as (
    where k.names_on_it > 1
 ),
 
--- ── 4. Foreign numbers. Not a fault — WhatsApp reaches them ─────────────
+-- ── 5. Foreign numbers. Not a fault — WhatsApp reaches them ─────────────
 foreign_num as (
-  select 4 as rank,
+  select 5 as rank,
          coalesce(nullif(btrim(pa.display_name), ''), '— no name —') as parent,
          coalesce(k.who, '— no children attached —') as children,
          'not a Malaysian number: ' || pa.phone_primary as what_is_wrong,
@@ -96,9 +114,9 @@ foreign_num as (
      and pa.phone_primary not like '+60%'
 ),
 
--- ── 5. An account with nobody under it ──────────────────────────────────
+-- ── 6. An account with nobody under it ──────────────────────────────────
 empty_acct as (
-  select 5 as rank,
+  select 6 as rank,
          coalesce(nullif(btrim(pa.display_name), ''), '— no name —') as parent,
          '— none —' as children,
          'this account has no children attached' as what_is_wrong,
@@ -107,9 +125,9 @@ empty_acct as (
    where not exists (select 1 from students s where s.account_id = pa.id)
 ),
 
--- ── 6. A student under no account at all ────────────────────────────────
+-- ── 7. A student under no account at all ────────────────────────────────
 orphan as (
-  select 6 as rank,
+  select 7 as rank,
          coalesce(nullif(btrim(s.guardian_name), ''), '— no guardian name —') as parent,
          s.name as children,
          'this child is under no parent account' as what_is_wrong,
@@ -125,6 +143,7 @@ select rank as priority, parent, children, what_is_wrong, what_to_do
   from (
     select * from no_phone    union all
     select * from placeholder union all
+    select * from dup_child   union all
     select * from two_names   union all
     select * from foreign_num union all
     select * from empty_acct  union all
