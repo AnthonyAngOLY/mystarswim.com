@@ -245,85 +245,48 @@ function IntakeForm() {
       const emergencyName = sameAsGuardian ? gName.trim() : eName.trim();
       const emergencyPhone = sameAsGuardian ? gPhone.trim() : ePhone.trim();
       const emergencyRel = sameAsGuardian ? 'Parent / Guardian' : eRel.trim();
-      const registered = [];
-      // Each child becomes a swimmer. To make siblings cluster as one account
-      // post-migration, generate a single account_id and reuse for every child.
-      const accountId = crypto?.randomUUID?.() || `acc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      for (const c of children) {
-        const dob = c.dob || null;
-        const computedAge = dob ? ageFromDob(dob) : null;
-        const inserted = await insertRows('students', {
-          name: c.name.trim(),
-          date_of_birth: dob,
-          age: computedAge,
-          gender: c.gender,
-          is_active: true,
-          account_id: accountId,
-          branch_id: branchId || null,
-          guardian_name: gName.trim(),
-          guardian_email: gEmail.trim(),
-          guardian_phone: gPhone.trim(),
-          guardian_ic: gIC.trim() || null,
-          guardian_tin: gTIN.trim() || null,
-          emergency_name: emergencyName,
-          emergency_phone: emergencyPhone,
-          emergency_relationship: emergencyRel,
-          emergency_same_as_guardian: !!sameAsGuardian,
-          referral_code: referralCode.trim() || null,
-          lesson_type_ids: []
-        });
-        const studentId = inserted?.[0]?.id;
-        // Lock in T&C acceptance per student — one row per swimmer keyed to a
-        // unique acceptance ID. Mirrors the existing TCView flow.
-        if (studentId) {
-          const acceptanceId = `TC-${Date.now().toString(36).toUpperCase().slice(-7)}`;
-          const acceptedAt = new Date().toISOString();
-          const ua = typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent.slice(0, 300) : null;
-          // Legacy row shape (always accepted) + digital-signature columns
-          // spliced on top. Retries legacy if the migration hasn't been run.
-          const legacyRow = {
-            student_id: studentId,
-            acceptance_id: acceptanceId,
-            accepted_at: acceptedAt,
-            guardian_name: gName.trim(),
-            guardian_email: gEmail.trim(),
-            lesson_type_name: null
-          };
-          const fullRow = {
-            ...legacyRow,
-            signature_name: sigName.trim(),
-            signed_via: 'intake',
-            user_agent: ua
-          };
-          const upsert = row => rest('tc_acceptances?on_conflict=student_id', {
-            method: 'POST',
-            headers: {
-              Prefer: 'return=representation,resolution=merge-duplicates'
-            },
-            body: JSON.stringify([row])
-          });
-          try {
-            try {
-              await upsert(fullRow);
-            } catch (e) {
-              if (isMissingColumnErr(e)) await upsert(legacyRow);else throw e;
-            }
-            await patchRows('students', {
-              id: studentId
-            }, {
-              tc_accepted_at: acceptedAt,
-              tc_acceptance_id: acceptanceId
-            });
-          } catch (e) {
-            console.warn('TC acceptance failed for', c.name, e);
-          }
-          registered.push({
+
+      // One call, behind the service role. This used to be three writes
+      // with the anon key — insert the children, upsert the acceptance,
+      // patch the children back — which is why students could not be
+      // locked down: locking it would have taken enrolment with it.
+      //
+      // The account_id is no longer minted here either. A parent
+      // enrolling a second child months later was becoming a second
+      // family, which was cosmetic when account_id only grouped rows on
+      // a screen and is not cosmetic now that it decides who may see
+      // which children. The function matches them by phone instead.
+      const res = await fetch(`${cfg.supabaseUrl}/functions/v1/public-intake`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: cfg.supabaseAnonKey
+        },
+        body: JSON.stringify({
+          guardianName: gName.trim(),
+          guardianEmail: gEmail.trim(),
+          guardianPhone: gPhone.trim(),
+          guardianIc: gIC.trim() || null,
+          guardianTin: gTIN.trim() || null,
+          branchId: branchId || null,
+          emergencyName,
+          emergencyPhone,
+          emergencyRelationship: emergencyRel,
+          emergencySameAsGuardian: !!sameAsGuardian,
+          referralCode: referralCode.trim() || null,
+          signatureName: sigName.trim(),
+          children: children.map(c => ({
             name: c.name.trim(),
-            age: computedAge,
-            acceptanceId
-          });
-        }
+            dob: c.dob || null,
+            gender: c.gender
+          }))
+        })
+      });
+      const out = await res.json().catch(() => null);
+      if (!res.ok || !out || out.ok !== true) {
+        throw new Error(out && out.error || 'Registration could not be completed. Please call the centre.');
       }
+      const registered = out.registered || [];
       setDone({
         guardianName: gName.trim(),
         email: gEmail.trim(),
