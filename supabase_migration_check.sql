@@ -162,6 +162,39 @@ chk (ord, file, adds, state) as (values
   (34, 'supabase_rls_phase0_lock_app_users.sql', 'password hashes out of the browser''s reach',
       case when exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
                          where n.nspname='public' and c.relname='app_users' and c.relrowsecurity)
+           then 'IN' else 'NOT IN' end),
+
+  -- ── Locking the older half of the system down ───────────────────────
+  (35, 'supabase_rls_stage_a.sql', 'the scheduler''s tables closed to the public key',
+      case when exists (select 1 from fn where n='is_website_login')
+           then 'IN' else 'NOT IN' end),
+  (36, 'supabase_rls_stage_b.sql', 'the intake form''s tables closed too',
+      case when exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
+                         where n.nspname='public' and c.relname='students' and c.relrowsecurity)
+           then 'IN' else 'NOT IN' end),
+  (37, 'supabase_roles_viewer_cs.sql', 'Timetable (view only) and Customer Service',
+      case when exists (select 1 from fn where n='can_edit_sessions')
+           then 'IN' else 'NOT IN' end),
+
+  -- ── Seats and people ────────────────────────────────────────────────
+  (38, 'supabase_scheduler_seat_changes.sql', 'Zoe schedules, Tony does not',
+      case when exists (select 1 from app_users
+                         where lower(username)='zoelim' and role='scheduler')
+           then 'IN' else 'NOT IN' end),
+
+  -- ── The parent app''s groundwork ────────────────────────────────────
+  (39, 'supabase_parent_accounts_migration.sql', 'one account per family, by phone',
+      case when to_regclass('public.parent_accounts') is not null
+           then 'IN' else 'NOT IN' end),
+  (40, 'supabase_parent_phone_international.sql', 'numbers with a country code, and the 60… fix',
+      case when exists (select 1 from fn where n='ss_phones' and src like '%left(d, 2)%')
+           then 'IN' else 'NOT IN' end),
+  (41, 'supabase_parent_account_repair.sql', 'children whose account pointed at nothing',
+      case when exists (select 1 from fn where n='ss_phone_looks_fake')
+           then 'IN' else 'NOT IN' end),
+  (42, 'supabase_instructor_pool_links.sql', 'the timetable joined to the attendance app',
+      case when exists (select 1 from col where t='scheduler_instructors' and c='crew_id')
+             and exists (select 1 from col where t='pools' and c='location_id')
            then 'IN' else 'NOT IN' end)
 )
 select case state when 'NOT IN' then '>>> RUN THIS' else '' end as action,
@@ -170,9 +203,22 @@ select case state when 'NOT IN' then '>>> RUN THIS' else '' end as action,
  order by case state when 'NOT IN' then 0 when 'CHECK BY EYE' then 1
                      when 'IN' then 2 else 3 end, ord;
 
--- ── And the one that is not a migration ─────────────────────────────────
--- supabase_attendance_clear_test_data.sql deletes the test attendance. It
--- leaves nothing behind to find, by design. This is what it would clear.
+-- ── And the ones that are not migrations ────────────────────────────────
+-- Three files leave nothing behind to find, by design, so they cannot be
+-- detected and are not in the list above:
+--
+--   supabase_migration_check.sql          this file
+--   supabase_parent_phone_worklist.sql    read-only, run it as often as
+--                                         you like; the list shrinking is
+--                                         the point
+--   supabase_go_live_purge.sql            clears the trial attendance. The
+--                                         counts below are what it would
+--                                         clear, so a row of zeros means
+--                                         either it has run or there was
+--                                         never anything to clear.
+--
+-- supabase_attendance_clear_test_data.sql is the purge's predecessor and
+-- the same applies.
 select (xpath('/row/c/text()', query_to_xml(
           case when to_regclass('public.shifts') is null then 'select 0 as c'
                else 'select count(*) as c from shifts' end, false, true, '')))[1]::text::bigint as shifts_now,
