@@ -842,6 +842,9 @@ function App({
   // user carries a Supabase JWT (Phase 2). Before that they fail closed and
   // the section shows a plain explanation rather than an empty grid.
   const [attendanceSection, setAttendanceSection] = useState('live');
+  // Loaded at boot as well as by loadAttendance(), because Settings →
+  // Pools needs them to offer the location picker and lives on the
+  // other side of the app entirely.
   const [attLocations, setAttLocations] = useState([]);
   const [attCategories, setAttCategories] = useState([]);
   const [attShifts, setAttShifts] = useState([]);
@@ -1794,7 +1797,8 @@ function App({
 
   // M2: also loads pools and operating_hours.
   async function loadOptions() {
-    const [instructors, durations, lessonTypes, pools, operatingHours, packages, branches] = await Promise.all([selectRows('scheduler_instructors', '*', '&order=sort_order.asc,name.asc'), selectRows('scheduler_durations', '*', '&order=sort_order.asc,slots.asc'), selectRows('scheduler_lesson_types', '*', '&order=sort_order.asc,name.asc'), selectRows('pools', '*', '&order=sort_order.asc,name.asc'), selectRows('operating_hours', '*', '&order=weekday.asc'), selectRows('packages', '*', '&order=sort_order.asc,name.asc').catch(() => []), selectRows('branches', '*', '&order=sort_order.asc,name.asc').catch(() => [])]);
+    const [instructors, durations, lessonTypes, pools, attLocs, operatingHours, packages, branches] = await Promise.all([selectRows('scheduler_instructors', '*', '&order=sort_order.asc,name.asc'), selectRows('scheduler_durations', '*', '&order=sort_order.asc,slots.asc'), selectRows('scheduler_lesson_types', '*', '&order=sort_order.asc,name.asc'), selectRows('pools', '*', '&order=sort_order.asc,name.asc'), selectRows('locations', '*', '&order=name.asc').catch(() => null), selectRows('operating_hours', '*', '&order=weekday.asc'), selectRows('packages', '*', '&order=sort_order.asc,name.asc').catch(() => []), selectRows('branches', '*', '&order=sort_order.asc,name.asc').catch(() => [])]);
+    if (Array.isArray(attLocs)) setAttLocations(attLocs);
     setOptions({
       instructors: instructors || [],
       durations: durations || [],
@@ -7359,6 +7363,8 @@ function App({
     saveLessonType: saveLessonType,
     deleteLessonType: deleteLessonType,
     lessonTypeCounts: lessonTypeCounts,
+    crewForLinking: adminEmployees,
+    attendanceLocations: attLocations,
     codes: codes,
     students: students,
     packages: options.packages,
@@ -9172,7 +9178,9 @@ function SettingsView({
   packages,
   addCode,
   updateCode,
-  deleteCode
+  deleteCode,
+  crewForLinking,
+  attendanceLocations
 }) {
   const dragRef = React.useRef({
     canDrag: false
@@ -9409,7 +9417,24 @@ function SettingsView({
     }, "No branch"), (options.branches || []).filter(b => b.is_active !== false).map(b => /*#__PURE__*/React.createElement("option", {
       key: b.id,
       value: b.id
-    }, b.name, b.code ? ` (${b.code})` : '')))), /*#__PURE__*/React.createElement("div", {
+    }, b.name, b.code ? ` (${b.code})` : ''))), (attendanceLocations || []).length > 0 && /*#__PURE__*/React.createElement("select", {
+      className: "select",
+      style: {
+        width: 170,
+        padding: '4px 8px',
+        fontSize: 12
+      },
+      value: editPoolForm.location_id || '',
+      onChange: e => setEditPoolForm({
+        ...editPoolForm,
+        location_id: e.target.value || null
+      })
+    }, /*#__PURE__*/React.createElement("option", {
+      value: ""
+    }, "— No attendance location —"), (attendanceLocations || []).filter(l => l.is_active !== false).map(l => /*#__PURE__*/React.createElement("option", {
+      key: l.id,
+      value: l.id
+    }, "📍 ", l.name)))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
         gap: 6,
@@ -9427,7 +9452,10 @@ function SettingsView({
         patchOption('pools', r.id, {
           name: v,
           capacity_total: c,
-          branch_id: editPoolForm.branch_id || null
+          branch_id: editPoolForm.branch_id || null,
+          ...((attendanceLocations || []).length ? {
+            location_id: editPoolForm.location_id || null
+          } : {})
         });
         setEditingPoolId(null);
       }
@@ -9476,7 +9504,8 @@ function SettingsView({
         setEditPoolForm({
           name: r.name,
           capacity_total: r.capacity_total,
-          branch_id: r.branch_id || ''
+          branch_id: r.branch_id || '',
+          location_id: r.location_id || ''
         });
         setEditingPoolId(r.id);
       }
@@ -9639,6 +9668,7 @@ function SettingsView({
     }, /*#__PURE__*/React.createElement(InstructorEditor, {
       row: r,
       branches: options.branches,
+      crew: crewForLinking,
       onCancel: () => setEditingInstructorId(null),
       onSave: patch => {
         patchOption('scheduler_instructors', r.id, patch);
@@ -10699,19 +10729,29 @@ function InstructorEditor({
   row,
   onSave,
   onCancel,
-  branches
+  branches,
+  crew
 }) {
   const [name, setName] = useState(row.name || '');
   const [gender, setGender] = useState(row.gender || null);
   const [primaryBranchId, setPrimaryBranchId] = useState(row.primary_branch_id || '');
+  // Which crew member this coach is. Nothing else in the system knows:
+  // the timetable's list of coaches and the crew list the attendance app
+  // runs on are two unrelated tables, so Sally the coach and Sally the
+  // crew member are two different people until somebody says otherwise
+  // here. Without it the attendance app can show them no swimmers.
+  const [crewId, setCrewId] = useState(row.crew_id || '');
+  const crewReady = Array.isArray(crew);
   function apply() {
     const v = (name || '').trim();
     if (!v) return;
-    onSave({
+    const patch = {
       name: v,
       gender: gender || null,
       primary_branch_id: primaryBranchId || null
-    });
+    };
+    if (crewReady) patch.crew_id = crewId || null;
+    onSave(patch);
   }
   return /*#__PURE__*/React.createElement("div", {
     className: "inst-editor"
@@ -10763,7 +10803,34 @@ function InstructorEditor({
   }, "— None —"), (branches || []).filter(b => b.is_active !== false).map(b => /*#__PURE__*/React.createElement("option", {
     key: b.id,
     value: b.id
-  }, b.name, b.code ? ` (${b.code})` : '')))), /*#__PURE__*/React.createElement("div", {
+  }, b.name, b.code ? ` (${b.code})` : '')))), crewReady && /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0,
+      minWidth: 190
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Crew record ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400,
+      color: 'var(--text-3)',
+      fontSize: 10
+    }
+  }, "(for the attendance app)")), /*#__PURE__*/React.createElement("select", {
+    className: "select",
+    value: crewId,
+    onChange: e => setCrewId(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "— Not linked —"), crew.map(c => /*#__PURE__*/React.createElement("option", {
+    key: c.id,
+    value: c.id
+  }, c.full_name, c.auth_user_id ? '' : ' — no attendance login'))), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 3,
+      fontSize: 10.5
+    }
+  }, "Links this coach to the person who signs in to the attendance app. Without it they see no swimmers on their sessions.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6,

@@ -495,6 +495,9 @@ function App({ currentUser, onLogout }){
   // user carries a Supabase JWT (Phase 2). Before that they fail closed and
   // the section shows a plain explanation rather than an empty grid.
   const [attendanceSection,setAttendanceSection] = useState('live');
+  // Loaded at boot as well as by loadAttendance(), because Settings →
+  // Pools needs them to offer the location picker and lives on the
+  // other side of the app entirely.
   const [attLocations,setAttLocations] = useState([]);
   const [attCategories,setAttCategories] = useState([]);
   const [attShifts,setAttShifts] = useState([]);
@@ -1085,15 +1088,17 @@ function App({ currentUser, onLogout }){
 
   // M2: also loads pools and operating_hours.
   async function loadOptions(){
-    const [instructors, durations, lessonTypes, pools, operatingHours, packages, branches] = await Promise.all([
+    const [instructors, durations, lessonTypes, pools, attLocs, operatingHours, packages, branches] = await Promise.all([
       selectRows('scheduler_instructors', '*', '&order=sort_order.asc,name.asc'),
       selectRows('scheduler_durations', '*', '&order=sort_order.asc,slots.asc'),
       selectRows('scheduler_lesson_types', '*', '&order=sort_order.asc,name.asc'),
       selectRows('pools', '*', '&order=sort_order.asc,name.asc'),
+      selectRows('locations', '*', '&order=name.asc').catch(()=>null),
       selectRows('operating_hours', '*', '&order=weekday.asc'),
       selectRows('packages', '*', '&order=sort_order.asc,name.asc').catch(()=>[]),
       selectRows('branches', '*', '&order=sort_order.asc,name.asc').catch(()=>[])
     ]);
+    if(Array.isArray(attLocs)) setAttLocations(attLocs);
     setOptions({
       instructors: instructors || [],
       durations: durations || [],
@@ -4888,6 +4893,8 @@ function App({ currentUser, onLogout }){
             saveLessonType={saveLessonType}
             deleteLessonType={deleteLessonType}
             lessonTypeCounts={lessonTypeCounts}
+            crewForLinking={adminEmployees}
+            attendanceLocations={attLocations}
             codes={codes}
             students={students}
             packages={options.packages}
@@ -5697,7 +5704,7 @@ function PackageEditor({ row, onSave, onCancel }){
   </div>;
 }
 
-function SettingsView({ section, options, currentBranchId, status, addOption, toggleOption, deleteOption, deleteInstructor, patchOption, reorderOption, moveOption, saveLessonType, deleteLessonType, lessonTypeCounts, codes, students, packages, addCode, updateCode, deleteCode }){
+function SettingsView({ section, options, currentBranchId, status, addOption, toggleOption, deleteOption, deleteInstructor, patchOption, reorderOption, moveOption, saveLessonType, deleteLessonType, lessonTypeCounts, codes, students, packages, addCode, updateCode, deleteCode, crewForLinking, attendanceLocations }){
   const dragRef = React.useRef({ canDrag:false });
   const [drag, setDrag] = useState({ key:null, idx:null });
   const [over, setOver] = useState(null);
@@ -5773,13 +5780,22 @@ function SettingsView({ section, options, currentBranchId, status, addOption, to
                     <option value="">No branch</option>
                     {(options.branches||[]).filter(b=>b.is_active!==false).map(b=><option key={b.id} value={b.id}>{b.name}{b.code?` (${b.code})`:''}</option>)}
                   </select>}
+                  {/* Which attendance location this water is in. The two
+                      lists are separate tables — "SSGT" exists once here
+                      and once as a geofenced location — and the coach's
+                      app cannot match a shift to a class without it. */}
+                  {(attendanceLocations||[]).length > 0 && <select className="select" style={{width:170,padding:'4px 8px',fontSize:12}} value={editPoolForm.location_id || ''} onChange={e=>setEditPoolForm({...editPoolForm,location_id:e.target.value||null})}>
+                    <option value="">— No attendance location —</option>
+                    {(attendanceLocations||[]).filter(l=>l.is_active!==false).map(l=><option key={l.id} value={l.id}>📍 {l.name}</option>)}
+                  </select>}
                 </div>
                 <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
                   <button className="btn btn-ghost small" onClick={()=>setEditingPoolId(null)}>Cancel</button>
                   <button className="btn btn-primary small" onClick={()=>{
                     const v=editPoolForm.name.trim(); const c=Number(editPoolForm.capacity_total);
                     if(!v||!c||c<1) return;
-                    patchOption('pools',r.id,{name:v,capacity_total:c,branch_id:editPoolForm.branch_id||null});
+                    patchOption('pools',r.id,{name:v,capacity_total:c,branch_id:editPoolForm.branch_id||null,
+                      ...((attendanceLocations||[]).length ? {location_id:editPoolForm.location_id||null} : {})});
                     setEditingPoolId(null);
                   }}>Save</button>
                 </div>
@@ -5792,7 +5808,7 @@ function SettingsView({ section, options, currentBranchId, status, addOption, to
                   {(()=>{ const b=(options.branches||[]).find(x=>x.id===r.branch_id); return b?<span className="pill" style={{fontSize:10,background:'var(--surface-2)',color:'var(--text-3)'}}>{b.code||b.name}</span>:null; })()}
                 </div>
                 <div style={{display:'flex',gap:6}}>
-                  <button className="btn btn-ghost small" style={{background:'#EAB308',color:'#000',border:'1px solid #CA8A04'}} onClick={()=>{ setEditPoolForm({name:r.name,capacity_total:r.capacity_total,branch_id:r.branch_id||''}); setEditingPoolId(r.id); }}>✎ Edit</button>
+                  <button className="btn btn-ghost small" style={{background:'#EAB308',color:'#000',border:'1px solid #CA8A04'}} onClick={()=>{ setEditPoolForm({name:r.name,capacity_total:r.capacity_total,branch_id:r.branch_id||'',location_id:r.location_id||''}); setEditingPoolId(r.id); }}>✎ Edit</button>
                   <button className="btn btn-ghost small" onClick={()=>toggleOption('pools',r)}>{r.is_active?'Hide':'Show'}</button>
                   <button className="btn btn-danger small" onClick={()=>deleteOption('pools',r,r.name)}>Delete</button>
                 </div>
@@ -5843,7 +5859,7 @@ function SettingsView({ section, options, currentBranchId, status, addOption, to
           const assigned = (lessonTypeCounts && lessonTypeCounts.__bySessionInstructor && lessonTypeCounts.__bySessionInstructor[r.id]) || 0; // not provided; computed below in row instead
           return editingInstructorId === r.id
             ? <div key={r.id} className="row-item" style={{display:'block'}}>
-                <InstructorEditor row={r} branches={options.branches} onCancel={()=>setEditingInstructorId(null)} onSave={(patch)=>{ patchOption('scheduler_instructors', r.id, patch); setEditingInstructorId(null); }} />
+                <InstructorEditor row={r} branches={options.branches} crew={crewForLinking} onCancel={()=>setEditingInstructorId(null)} onSave={(patch)=>{ patchOption('scheduler_instructors', r.id, patch); setEditingInstructorId(null); }} />
               </div>
             : <div key={r.id} className={`row-item ${dragClass('inst', idx)}`} {...dragProps('inst', 'scheduler_instructors', options.instructors, idx)}>
                 <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'nowrap',minWidth:0,overflow:'hidden'}}>
@@ -6277,11 +6293,23 @@ function CodeEditor({ initial, students, packages, onCancel, onSave }){
 // reorder with ↑/↓, hide, delete. Same controls as the old top-level card but
 // scoped to its lesson type — so each type owns its Normal, Trial, Family 3…
 // Inline editor for an instructor: rename + Female/Male toggle.
-function InstructorEditor({ row, onSave, onCancel, branches }){
+function InstructorEditor({ row, onSave, onCancel, branches, crew }){
   const [name, setName] = useState(row.name || '');
   const [gender, setGender] = useState(row.gender || null);
   const [primaryBranchId, setPrimaryBranchId] = useState(row.primary_branch_id || '');
-  function apply(){ const v = (name || '').trim(); if(!v) return; onSave({ name:v, gender: gender || null, primary_branch_id: primaryBranchId || null }); }
+  // Which crew member this coach is. Nothing else in the system knows:
+  // the timetable's list of coaches and the crew list the attendance app
+  // runs on are two unrelated tables, so Sally the coach and Sally the
+  // crew member are two different people until somebody says otherwise
+  // here. Without it the attendance app can show them no swimmers.
+  const [crewId, setCrewId] = useState(row.crew_id || '');
+  const crewReady = Array.isArray(crew);
+  function apply(){
+    const v = (name || '').trim(); if(!v) return;
+    const patch = { name:v, gender: gender || null, primary_branch_id: primaryBranchId || null };
+    if(crewReady) patch.crew_id = crewId || null;
+    onSave(patch);
+  }
   return <div className="inst-editor">
     <div className="field" style={{margin:0,flex:1,minWidth:160}}>
       <label>Name</label>
@@ -6300,6 +6328,19 @@ function InstructorEditor({ row, onSave, onCancel, branches }){
         <option value="">— None —</option>
         {(branches||[]).filter(b=>b.is_active!==false).map(b => <option key={b.id} value={b.id}>{b.name}{b.code?` (${b.code})`:''}</option>)}
       </select>
+    </div>}
+    {crewReady && <div className="field" style={{margin:0,minWidth:190}}>
+      <label>Crew record <span style={{fontWeight:400,color:'var(--text-3)',fontSize:10}}>(for the attendance app)</span></label>
+      <select className="select" value={crewId} onChange={e=>setCrewId(e.target.value)}>
+        <option value="">— Not linked —</option>
+        {crew.map(c => <option key={c.id} value={c.id}>
+          {c.full_name}{c.auth_user_id ? '' : ' — no attendance login'}
+        </option>)}
+      </select>
+      <div className="small subtle" style={{marginTop:3,fontSize:10.5}}>
+        Links this coach to the person who signs in to the attendance app.
+        Without it they see no swimmers on their sessions.
+      </div>
     </div>}
     <div style={{display:'flex',gap:6,alignSelf:'flex-end'}}>
       <button className="btn btn-ghost small" onClick={onCancel}>Cancel</button>
