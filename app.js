@@ -422,6 +422,13 @@ function App({ currentUser, onLogout }){
   // other does; which side they land on is a preference, not a privilege.
   const isOwner = canUseSettings(currentUser?.role);
   const canSchedule = canUseScheduler(currentUser?.role);
+  // Two new seats sit inside canSchedule. canEditSess is the class
+  // itself — create, move, retime, delete, replacements. canWrite is
+  // everything else that changes anything. The database asks the same
+  // two questions in can_edit_sessions() and can_write_office(); these
+  // decide what is on the screen, those decide what is allowed.
+  const canEditSess = canEditSessions(currentUser?.role);
+  const canWrite    = canWriteOffice(currentUser?.role);
   const canSystem = canUseAdminSystem(currentUser?.role);
   const canSettings = canUseSettings(currentUser?.role);
   // Two-side app: 'schedule' or 'system'. Which one a person opens on follows
@@ -453,7 +460,11 @@ function App({ currentUser, onLogout }){
     const systemViews = new Set(['adminDirectory','adminVouchers','adminCrew','adminPromos','attendance','leave']);
     if(side==='schedule' && systemViews.has(view)) setView('schedule');
     if(side==='system' && scheduleViews.has(view)) setView('adminDirectory');
-  }, [side, view]);
+    // Timetable (view only) has one screen. Nothing in the nav offers
+    // them another, but state can arrive from a stale session, and a
+    // view that renders with no way back is worse than a redirect.
+    if(!canWrite && view!=='schedule') setView('schedule');
+  }, [side, view, canWrite]);
   const [contactMessages,setContactMessages] = useState([]);
   const newMsgCount = useMemo(()=> (contactMessages||[]).filter(m=>m.status==='new').length, [contactMessages]);
   const [appUsers,setAppUsers] = useState([]);
@@ -2041,6 +2052,7 @@ function App({ currentUser, onLogout }){
   // weekly_session_students is deleted and a replacement_pending entry is
   // created (so they appear with an "R-pending" flag in same-LT dropdowns).
   async function markForReplacement({ studentId, sessionId, weekStartDate, lessonTypeId, lessonTypeName, day, startMinute }){
+    if(!canEditSess){ alert('Replacements are handled by a Scheduler.'); return false; }
     if(!studentId || !sessionId || !lessonTypeId){ alert('Cannot mark for replacement: missing session information.'); return false; }
     const label = `${DAYS_S[day]} ${minuteToTime(startMinute)}`;
     if(!confirm(`Move this swimmer out of ${lessonTypeName} ${label} for replacement?\n\nThey will become a replacement candidate in any other ${lessonTypeName} class this week. The original slot will be released.`)) return false;
@@ -2143,6 +2155,7 @@ function App({ currentUser, onLogout }){
   //      restores the canonical slot.
   const [pendingMove, setPendingMove] = useState(null);
   async function forwardClassToNextWeek(sessionId, sourceLabel){
+    if(!canEditSess) return;
     if(!sessionId) return;
     const src = sessions.find(s => s.id === sessionId);
     if(!src){ alert('Source session not found.'); return; }
@@ -2287,6 +2300,7 @@ function App({ currentUser, onLogout }){
     } catch(err){ handleErr(err); alert(err.message || 'Failed to restore session'); }
   }
   function startFullClassMove({ sessionId, sourceLabel, lessonTypeName, weekStartDate, originalDay, originalStartMinute, swimmerCount }){
+    if(!canEditSess) return;
     if(!sessionId) return;
     setPendingMove({ sessionId, sourceLabel, lessonTypeName, weekStartDate, originalDay, originalStartMinute, swimmerCount });
     setModal(null);
@@ -2294,6 +2308,7 @@ function App({ currentUser, onLogout }){
   }
   function cancelPendingMove(){ setPendingMove(null); setStatus(''); }
   async function placePendingMove(targetDay, targetStartMinute){
+    if(!canEditSess) return;
     if(!pendingMove) return;
     const src = sessions.find(s => s.id === pendingMove.sessionId);
     if(!src){ alert('Source session not found.'); setPendingMove(null); return; }
@@ -2668,6 +2683,7 @@ function App({ currentUser, onLogout }){
   }
 
   function openAddAtTime(day, startMinute, poolId){
+    if(!canEditSess) return;
     setModal({ mode:'add', id:null, weekStartDate: selectedWeekStart, day, startMinute, form: defaultFormForStart(startMinute, poolId) });
   }
 
@@ -2806,6 +2822,7 @@ function App({ currentUser, onLogout }){
   // wiped-and-rewritten on every save — the dataset is small enough that the
   // simplicity is worth the extra round-trip.
   async function saveSession(){
+    if(!canEditSess){ alert('Your seat cannot change a class. Enrolling a swimmer is on the swimmer list below.'); return; }
     // Always read the latest modal via ref — avoids a stale-closure race where
     // the user clicks Save immediately after picking a student before React
     // has committed the state update.
@@ -2998,6 +3015,7 @@ function App({ currentUser, onLogout }){
   }
 
   async function deleteSession(){
+    if(!canEditSess) return;
     if(!modal?.id) return;
     if(!confirm('Delete this scheduled session for the selected week?')) return;
     try{
@@ -3832,6 +3850,7 @@ function App({ currentUser, onLogout }){
   // If a clone slot already has a matching session in a target week, that
   // week is skipped silently (avoids creating parallel duplicates).
   async function duplicateSessionForward(sessionId, weekCount){
+    if(!canEditSess) return;
     const src = sessions.find(s => s.id === sessionId);
     if(!src){ alert('Source session not found.'); return; }
     if(src.cancelledAt){ alert('Cannot duplicate a cancelled session — restore it first.'); return; }
@@ -3884,6 +3903,7 @@ function App({ currentUser, onLogout }){
   }
 
   async function duplicatePreviousWeek(){
+    if(!canEditSess) return;
     try{
       if(!isFutureSelectedWeek){ alert('Week duplication is only available for a future week.'); return; }
       const prevWeekStart = addDays(selectedWeekStart, -7);
@@ -4222,6 +4242,9 @@ function App({ currentUser, onLogout }){
         <div style={{display:'flex',alignItems:'center',flexWrap:'wrap',gap:1}}>
         {side==='schedule' && <>
           <button className={`nav-btn ${view==='schedule'?'active':''}`} onClick={()=>setView('schedule')} title="Schedule">📅 <span className="nav-label">Schedule</span></button>
+          {/* Everything past Schedule is for a seat that can change
+              something. Timetable (view only) is here to read the week. */}
+          {canWrite && <>
           <button className={`nav-btn ${view==='programme'?'active':''}`} onClick={()=>{ setView('programme'); setProgrammeSection('week'); }} title="Programme">📋 <span className="nav-label">Programme</span></button>
           <button className={`nav-btn ${view==='accounts'?'active':''}`} onClick={()=>{ setView('accounts'); setAccountSection('accounts'); }} title="Accounts">👤 <span className="nav-label">Accounts</span></button>
           <button className={`nav-btn ${view==='shop'?'active':''}`} onClick={()=>setView('shop')} title="Shop">🛒 <span className="nav-label">Shop</span></button>
@@ -4229,6 +4252,7 @@ function App({ currentUser, onLogout }){
           <button className={`nav-btn ${view==='enroll'?'active':''}`} onClick={()=>setView('enroll')} title="Explore">🔍 <span className="nav-label">Explore</span></button>
           <button type="button" className="nav-btn nav-btn-link" onClick={()=>window.open('./intake.html','_blank','noopener,noreferrer')} title="Intake form (new tab)">📝 <span className="nav-label">Intake ↗</span></button>
           {canSettings && <button className={`nav-btn ${view==='settings'?'active':''}`} onClick={()=>{ setView('settings'); setAdminSection('pools'); }} title="Settings">⚙️ <span className="nav-label">Settings</span></button>}
+          </>}
         </>}
         {side==='system' && <>
           <button className={`nav-btn ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')} title="Directory">📇 <span className="nav-label">Directory</span></button>
@@ -4250,9 +4274,11 @@ function App({ currentUser, onLogout }){
     {isMobile && currentUser && <nav className="mobile-tabbar" aria-label="Primary">
       {side==='schedule' ? <>
         <button className={`mtab ${view==='schedule'?'active':''}`} onClick={()=>setView('schedule')}><span className="mtab-ic">📅</span>Schedule</button>
+        {canWrite && <>
         <button className={`mtab ${view==='programme'?'active':''}`} onClick={()=>{ setView('programme'); setProgrammeSection('week'); }}><span className="mtab-ic">📋</span>Programme</button>
         <button className={`mtab ${view==='accounts'?'active':''}`} onClick={()=>{ setView('accounts'); setAccountSection('accounts'); }}><span className="mtab-ic">👤</span>Accounts</button>
         <button className={`mtab ${view==='shop'?'active':''}`} onClick={()=>setView('shop')}><span className="mtab-ic">🛒</span>Shop</button>
+        </>}
       </> : <>
         <button className={`mtab ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')}><span className="mtab-ic">📇</span>Directory</button>
         <button className={`mtab ${view==='adminVouchers'?'active':''}`} onClick={()=>setView('adminVouchers')}><span className="mtab-ic">🧾</span>Vouchers</button>
@@ -4882,6 +4908,7 @@ function App({ currentUser, onLogout }){
 
     {modal ? <SessionModal
       modal={modal} setModal={setModal} saveBusy={saveBusy}
+      canEditSess={canEditSess}
       saveSession={saveSession} deleteSession={deleteSession}
       openAddAtTime={openAddAtTime}
       instructors={activeInstructors()}
@@ -9611,7 +9638,7 @@ ${TC_COMPANY} Administration`);
   </div>;
 }
 
-function SessionModal({ modal, setModal, saveBusy, saveSession, deleteSession, openAddAtTime, instructors, lessonTypes, pools, lessonTypeByName, poolById, packageById, students, studentById, weekEnrollments, familyGroups, membersByGroup, groupById, trialStudentIds, trialByLessonType, creditByKey, purchasesByKey, addCreditPurchase, adjustCredit, initCredit, pendingByKey, replacementPending, markForReplacement, forwardClassToNextWeek, startFullClassMove, duplicateSessionForward }){
+function SessionModal({ modal, setModal, saveBusy, canEditSess, saveSession, deleteSession, openAddAtTime, instructors, lessonTypes, pools, lessonTypeByName, poolById, packageById, students, studentById, weekEnrollments, familyGroups, membersByGroup, groupById, trialStudentIds, trialByLessonType, creditByKey, purchasesByKey, addCreditPurchase, adjustCredit, initCredit, pendingByKey, replacementPending, markForReplacement, forwardClassToNextWeek, startFullClassMove, duplicateSessionForward }){
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [cancelClassOpen, setCancelClassOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
@@ -10204,11 +10231,16 @@ function SessionModal({ modal, setModal, saveBusy, saveSession, deleteSession, o
       </div>}
     </div>
     <div className="modal-foot">
+      {/* Customer Service opens this to work the swimmer list above; the
+          class itself is not theirs to change, so the buttons that would
+          change it are absent rather than present and refusing. */}
       <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-        {modal.id ? <button className="btn btn-danger small" onClick={deleteSession}>Delete</button> : null}
-        <button className="btn btn-ghost small" onClick={() => openAddAtTime(modal.day, modal.startMinute, modal.form.poolId)}>+ Same Time</button>
+        {canEditSess && modal.id ? <button className="btn btn-danger small" onClick={deleteSession}>Delete</button> : null}
+        {canEditSess && <button className="btn btn-ghost small" onClick={() => openAddAtTime(modal.day, modal.startMinute, modal.form.poolId)}>+ Same Time</button>}
       </div>
-      <button className="btn btn-primary" onClick={saveSession}>{saveBusy ? 'Saving…' : 'Save Session'}</button>
+      {canEditSess
+        ? <button className="btn btn-primary" onClick={saveSession}>{saveBusy ? 'Saving…' : 'Save Session'}</button>
+        : <button className="btn btn-ghost" onClick={()=>setModal(null)}>Close</button>}
     </div>
   </div></div>;
 }
@@ -16114,14 +16146,34 @@ const ROLE_INFO = {
                    note:'Both sides of the website, staff records and procurement. No Settings, and no leave approvals. The attendance app is a separate ss… login — this one does not open it.' },
   scheduler:     { label:'Scheduler',
                    note:'Lesson sessions and invoices only. No Settings, and no way across to the system side. The attendance app is a separate ss… login — this one does not open it.' },
+  customer_service: { label:'Customer Service',
+                   note:'The scheduling side as a Scheduler has it, except the classes themselves: cannot create, move, retime or delete a session, or handle replacements. Enrols swimmers, bills, takes payments. The attendance app is a separate ss… login.' },
+  timetable_viewer:{ label:'Timetable (view only)',
+                   note:'The weekly Schedule, read only. Nothing else on the website and nothing can be changed — not a class, not a swimmer, not an invoice. For a coach who needs to see the week. The attendance app is a separate ss… login.' },
 };
-const ROLE_ORDER = ['sysadmin','center_owner','administrator','scheduler'];
+const ROLE_ORDER = ['sysadmin','center_owner','administrator','scheduler','customer_service','timetable_viewer'];
 function roleLabel(role){ return (ROLE_INFO[roleOf(role)] || {}).label || role || '—'; }
 function roleNote(role){ return (ROLE_INFO[roleOf(role)] || {}).note || ''; }
 
 function canUseScheduler(role){
   const r = roleOf(role);
+  return r==='sysadmin' || r==='center_owner' || r==='administrator' || r==='scheduler'
+      || r==='customer_service' || r==='timetable_viewer';
+}
+// May create, move, retime or delete a class, and handle replacements.
+// Customer Service may not: they enrol swimmers into classes that already
+// exist, which is a different table and a different question.
+function canEditSessions(role){
+  const r = roleOf(role);
   return r==='sysadmin' || r==='center_owner' || r==='administrator' || r==='scheduler';
+}
+// May change anything at all. Written as "not the viewer" so a seat added
+// later can work by default and has to be taken away on purpose; the
+// opposite would quietly cripple a new seat. can_write_office() in the
+// database says the same thing the same way.
+function canWriteOffice(role){
+  const r = roleOf(role);
+  return canUseScheduler(role) && r!=='timetable_viewer';
 }
 function canUseAdminSystem(role){
   const r = roleOf(role);
