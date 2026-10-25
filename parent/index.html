@@ -138,6 +138,20 @@
     <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
   </header>
   <main>
+    <div class="card" style="background:#FFFBEB;border-color:#FCD34D;margin-bottom:14px">
+      <div class="row" style="align-items:flex-start">
+        <div style="font-size:18px;lineHeight:1">📣</div>
+        <div class="grow">
+          <div style="font-weight:800;color:#92400E;fontSize:15px">Pool closed Thursday 30 Oct</div>
+          <div class="lead" style="color:#92400E;margin-top:3px">
+            SSGT is closed all day for annual maintenance. Thursday classes move to
+            Friday at the same times. No credits will be taken for Thursday.
+          </div>
+          <div class="sub" style="color:#B45309;margin-top:6px">Star Swim · 2 days ago</div>
+        </div>
+      </div>
+    </div>
+
     <div class="h">Next up</div>
     <div class="card" style="border-color:#BAE6FD; background:linear-gradient(180deg,#F7FCFF,#fff)">
       <div class="row">
@@ -156,8 +170,9 @@
       <div class="row">
         <div class="kid k1">LY</div>
         <div class="grow">
-          <div class="big">Liew Li Yu</div>
+          <div class="big">Liew Li Yu <span style="color:var(--muted);font-weight:400">›</span></div>
           <div class="sub">Learn to Swim 3 · Saturdays 10:00</div>
+          <div class="sub" style="color:var(--primary-on-soft);fontWeight:700">2 new progress notes</div>
         </div>
         <span class="pill p-green">8 credits</span>
       </div>
@@ -200,6 +215,75 @@
       <div class="lead" style="color:var(--amber-tx)">
         <b>Liew Yi Xin has 2 credits left.</b><br>
         That is two more Sundays. Speak to the centre when you are ready to top up.
+      </div>
+    </div>
+  </main>
+  <nav>
+    <button class="on"><b>🏠</b>Home</button>
+    <button><b>📅</b>Schedule</button>
+    <button><b>🎟</b>Credits</button>
+    <button><b>🧾</b>Billing</button>
+  </nav>
+</section>
+
+<!-- ─── One swimmer, with progress remarks ──────────────────────────── -->
+<section id="s-child" class="hidden">
+  <header>
+    <img src="../logo.png" alt="Star Swim">
+    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <div class="kid k1">LY</div>
+        <div class="grow">
+          <div class="big">Liew Li Yu</div>
+          <div class="sub">Learn to Swim 3 · Saturdays 10:00 · SSGT</div>
+        </div>
+        <span class="pill p-green">8 credits</span>
+      </div>
+    </div>
+
+    <div class="h">Progress notes</div>
+
+    <div class="card">
+      <div class="lead">
+        Li Yu held a full 15 metres front crawl today without stopping, which is
+        the first time. Breathing to the side is still every four strokes rather
+        than every three — we will work on that next.
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow sub"><b style="color:var(--text)">Coach Sally</b> · Sat 18 Oct</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lead">
+        Much more confident going under. Happy to retrieve a ring from the bottom
+        of the shallow end now, where two weeks ago she would not put her face in.
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow sub"><b style="color:var(--text)">Coach Yong</b> · Sat 4 Oct</div>
+      </div>
+    </div>
+
+    <div class="h">Recent classes</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <div class="grow"><b>Sat 18 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
+        <span class="pill p-green">Attended</span>
+      </div>
+      <div class="line"></div>
+      <div class="row" style="margin-bottom:10px">
+        <div class="grow"><b>Sat 11 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
+        <span class="pill p-green">Attended</span>
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow"><b>Sat 4 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
+        <span class="pill p-amber">Missed</span>
       </div>
     </div>
   </main>
@@ -383,7 +467,7 @@
   // A sketch, not the app. Every number on these screens is made up, and
   // nothing here talks to the database. ?s=home|sched|credits|billing|otp
   var want = new URLSearchParams(location.search).get('s') || 'login';
-  var ids = ['login','otp','home','sched','credits','billing'];
+  var ids = ['login','otp','home','child','sched','credits','billing'];
   ids.forEach(function(i){
     document.getElementById('s-'+i).classList.toggle('hidden', i !== want);
   });
