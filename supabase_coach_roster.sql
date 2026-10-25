@@ -46,6 +46,44 @@
 -- ════════════════════════════════════════════════════════════════════════
 
 
+-- ═══ 0. A coach who is office, not crew ════════════════════════════════
+-- Clara teaches and so does Anthony, and neither is a crew record: they
+-- reach the attendance app through the office route, which has no crew
+-- row and therefore no shifts. Keyed to shifts, the roster would show
+-- them nothing at all.
+--
+-- So a coach on the timetable can point at an office login instead. It
+-- is not a second way of being crew — there are no shifts, no clock-in
+-- and no geofence — it is only "which classes are this person's". For
+-- them the shift window does not apply, because there is no shift; they
+-- get the classes they are assigned to, on the days they ask for.
+alter table scheduler_instructors
+  add column if not exists app_user_id uuid;
+
+create index if not exists scheduler_instructors_app_user_idx
+  on scheduler_instructors (app_user_id) where app_user_id is not null;
+
+comment on column scheduler_instructors.app_user_id is
+  'For a coach who is office rather than crew — a Centre Owner or '
+  'sysadmin who also teaches. Gives them their class roster without a '
+  'crew record. crew_id is the usual link; this is the exception.';
+
+-- Link the ones whose timetable name is exactly an office login's name,
+-- and only where one login answers to it.
+update scheduler_instructors si
+   set app_user_id = u.id
+  from app_users u
+ where si.app_user_id is null
+   and si.crew_id is null
+   and coalesce(u.is_active, true)
+   and btrim(lower(coalesce(nullif(btrim(u.display_name), ''), u.username)))
+       = btrim(lower(si.name))
+   and (select count(*) from app_users x
+         where coalesce(x.is_active, true)
+           and btrim(lower(coalesce(nullif(btrim(x.display_name), ''), x.username)))
+               = btrim(lower(si.name))) = 1;
+
+
 -- ═══ 1. What this coach is teaching, and who is in it ═══════════════════
 -- One row per swimmer. A class with nobody in it still returns one row,
 -- with the student columns null, so an empty class is visibly empty
@@ -75,16 +113,28 @@ returns table (
 )
 language plpgsql stable security definer set search_path = public
 as $$
-declare v_me uuid;
+declare v_me uuid; v_uid text; v_inst uuid;
 begin
   v_me := attendance_my_crew_id();
-  -- This answers "what am I teaching", so it is keyed to the caller's own
-  -- shifts and returns nothing to somebody who has none. An office seat
-  -- calling it gets an empty list, which is correct: they already have
-  -- the Session modal, which shows every class and everybody in it.
-  -- Their fallback is mark_attendance, not this.
+
+  -- An office seat that teaches: resolved through app_user_id instead,
+  -- and with no shift window, because they have no shifts.
   if v_me is null then
-    return;
+    begin
+      v_uid := auth.jwt() -> 'app_metadata' ->> 'app_user_id';
+    exception when others then
+      v_uid := null;
+    end;
+    if v_uid is not null then
+      select si.id into v_inst
+        from scheduler_instructors si
+       where si.app_user_id = v_uid::uuid
+         and si.is_active is not false
+       limit 1;
+    end if;
+    if v_inst is null then
+      return;   -- not a coach at all; the Session modal is their screen
+    end if;
   end if;
   if p_from is null or p_to is null or p_to < p_from then
     return;
@@ -103,8 +153,10 @@ begin
        and s.is_void = false
        and s.shift_date between p_from and p_to
   ),
-  -- Every class in the water this coach is standing beside, during the
-  -- hours they are rostered for.
+  -- Crew: every class in the water they are standing beside, during the
+  -- hours they are rostered for. Office coach: no shift to stand in, so
+  -- the classes they are assigned to in the range, and nothing else —
+  -- there is no "others at this pool" for somebody who is not at a pool.
   overlapping as (
     select distinct
            ws.id                                            as session_id,
@@ -120,8 +172,28 @@ begin
       join weekly_sessions ws           on ws.pool_id = p.id
                                        and (ws.week_start_date + ws.weekday)::date = sh.shift_date
       left join scheduler_lesson_types lt on lt.id = ws.lesson_type_id
-     where (ws.start_minute * interval '1 minute')::time >= sh.start_time
+     where v_me is not null
+       and (ws.start_minute * interval '1 minute')::time >= sh.start_time
        and (ws.start_minute * interval '1 minute')::time <  sh.end_time
+
+    union
+
+    select distinct
+           ws.id,
+           (ws.week_start_date + ws.weekday)::date,
+           (ws.start_minute * interval '1 minute')::time,
+           ((ws.start_minute + coalesce(ws.duration_minutes, 60))
+              * interval '1 minute')::time,
+           p.name::text,
+           coalesce(lt.name, '—')::text,
+           ws.cancelled_at is not null
+      from weekly_sessions ws
+      join session_instructors si        on si.session_id = ws.id
+      join pools p                       on p.id = ws.pool_id
+      left join scheduler_lesson_types lt on lt.id = ws.lesson_type_id
+     where v_inst is not null
+       and si.instructor_id = v_inst
+       and (ws.week_start_date + ws.weekday)::date between p_from and p_to
   ),
   -- Aliased to sid on purpose: session_id is also one of this
   -- function's out parameters, and an unqualified reference to it
@@ -131,7 +203,8 @@ begin
       from overlapping o
       join session_instructors si      on si.session_id = o.session_id
       join scheduler_instructors sc    on sc.id = si.instructor_id
-     where sc.crew_id = v_me
+     where (v_me is not null and sc.crew_id = v_me)
+        or (v_inst is not null and sc.id = v_inst)
   )
   select o.session_id, o.session_date, o.start_time, o.end_time,
          o.pool_name, o.lesson_type,

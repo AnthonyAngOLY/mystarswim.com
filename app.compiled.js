@@ -7365,6 +7365,7 @@ function App({
     lessonTypeCounts: lessonTypeCounts,
     crewForLinking: adminEmployees,
     attendanceLocations: attLocations,
+    officeLoginsForLinking: appUsers,
     codes: codes,
     students: students,
     packages: options.packages,
@@ -9180,7 +9181,8 @@ function SettingsView({
   updateCode,
   deleteCode,
   crewForLinking,
-  attendanceLocations
+  attendanceLocations,
+  officeLoginsForLinking
 }) {
   const dragRef = React.useRef({
     canDrag: false
@@ -9669,6 +9671,7 @@ function SettingsView({
       row: r,
       branches: options.branches,
       crew: crewForLinking,
+      officeLogins: officeLoginsForLinking,
       onCancel: () => setEditingInstructorId(null),
       onSave: patch => {
         patchOption('scheduler_instructors', r.id, patch);
@@ -10730,7 +10733,8 @@ function InstructorEditor({
   onSave,
   onCancel,
   branches,
-  crew
+  crew,
+  officeLogins
 }) {
   const [name, setName] = useState(row.name || '');
   const [gender, setGender] = useState(row.gender || null);
@@ -10740,7 +10744,10 @@ function InstructorEditor({
   // runs on are two unrelated tables, so Sally the coach and Sally the
   // crew member are two different people until somebody says otherwise
   // here. Without it the attendance app can show them no swimmers.
-  const [crewId, setCrewId] = useState(row.crew_id || '');
+  // One value, two kinds of answer: a crew record or an office login.
+  // Prefixed so they cannot collide, and so picking one clears the
+  // other — a coach is one person, not two links.
+  const [who, setWho] = useState(row.crew_id ? 'crew:' + row.crew_id : row.app_user_id ? 'office:' + row.app_user_id : '');
   const crewReady = Array.isArray(crew);
   function apply() {
     const v = (name || '').trim();
@@ -10750,7 +10757,10 @@ function InstructorEditor({
       gender: gender || null,
       primary_branch_id: primaryBranchId || null
     };
-    if (crewReady) patch.crew_id = crewId || null;
+    if (crewReady) {
+      patch.crew_id = who.startsWith('crew:') ? who.slice(5) : null;
+      patch.app_user_id = who.startsWith('office:') ? who.slice(7) : null;
+    }
     onSave(patch);
   }
   return /*#__PURE__*/React.createElement("div", {
@@ -10807,9 +10817,9 @@ function InstructorEditor({
     className: "field",
     style: {
       margin: 0,
-      minWidth: 190
+      minWidth: 210
     }
-  }, /*#__PURE__*/React.createElement("label", null, "Crew record ", /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("label", null, "Who this is ", /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 400,
       color: 'var(--text-3)',
@@ -10817,20 +10827,27 @@ function InstructorEditor({
     }
   }, "(for the attendance app)")), /*#__PURE__*/React.createElement("select", {
     className: "select",
-    value: crewId,
-    onChange: e => setCrewId(e.target.value)
+    value: who,
+    onChange: e => setWho(e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "— Not linked —"), crew.map(c => /*#__PURE__*/React.createElement("option", {
+  }, "— Not linked —"), /*#__PURE__*/React.createElement("optgroup", {
+    label: "Crew"
+  }, crew.map(c => /*#__PURE__*/React.createElement("option", {
     key: c.id,
-    value: c.id
-  }, c.full_name, c.auth_user_id ? '' : ' — no attendance login'))), /*#__PURE__*/React.createElement("div", {
+    value: 'crew:' + c.id
+  }, c.full_name, c.auth_user_id ? '' : ' — no attendance login'))), (officeLogins || []).length > 0 && /*#__PURE__*/React.createElement("optgroup", {
+    label: "Office login (teaches, but is not crew)"
+  }, officeLogins.map(u => /*#__PURE__*/React.createElement("option", {
+    key: u.id,
+    value: 'office:' + u.id
+  }, u.display_name || u.username)))), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginTop: 3,
       fontSize: 10.5
     }
-  }, "Links this coach to the person who signs in to the attendance app. Without it they see no swimmers on their sessions.")), /*#__PURE__*/React.createElement("div", {
+  }, "Which person this coach is, so the attendance app can show them the swimmers in their classes. Without it they see none.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6,
