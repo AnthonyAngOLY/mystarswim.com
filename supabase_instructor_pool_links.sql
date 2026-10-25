@@ -29,13 +29,13 @@
 --  at a location rather than the other way round.
 --
 --  ⚠ THE POOL MATCHING IN THIS FILE IS SUPERSEDED
---  Run supabase_pool_location_by_branch.sql instead, and run it after
---  this one if you ever re-run this one. Once every pool carried a
---  branch, the branch became the authority and the name stopped being
---  evidence: "SBIS Main Pool - Collab" is at SJKC BSB, and the prefix
---  rule below links it to SBIS without complaining. The coach link in
---  STEP 3 of this file is still correct and still the only thing that
---  makes it.
+--  Run supabase_pool_location_links.sql instead, and run it after this
+--  one if you ever re-run this one. The prefix rule below is right where
+--  it is right by luck: it links "Kinderlabz Pool" and "RPGM Main Pool
+--  25m" to nothing, and it gets "SBIS Main Pool - Collab" right only
+--  because that pool happens to be named after the water rather than
+--  the branch renting it. The coach link in STEP 3 of this file is
+--  still correct and still the only thing that makes it.
 --
 --  POOLS ARE MATCHED BY PREFIX AS WELL AS BY NAME
 --  The convention is a location called SSGT holding pools called SSGT
