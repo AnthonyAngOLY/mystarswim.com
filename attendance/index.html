@@ -143,6 +143,46 @@
   /* My week: the whole week down the page, one block per day. A day off
      is shown as a day off rather than left out, so seven blocks always
      means seven days and you can count your rest at a glance. */
+  /* ── Classes: the swimmers in front of the coach ───────────────── */
+  /* A day strip rather than a separate week screen: looking ahead is one
+     tap, and a fourth tab nobody presses is not a feature. */
+  .daystrip{display:flex; gap:5px; overflow-x:auto; padding:2px 0 8px; -webkit-overflow-scrolling:touch}
+  .daystrip button{
+    flex:1 0 auto; min-width:44px; padding:7px 4px; border-radius:10px; cursor:pointer;
+    border:1px solid var(--border); background:var(--surface); font:inherit;
+    font-size:11px; font-weight:700; color:var(--muted); line-height:1.35;
+  }
+  .daystrip button b{display:block; font-size:15px; font-weight:800; color:var(--text)}
+  .daystrip button.on{background:var(--primary-soft); border-color:#BAE6FD}
+  .daystrip button.on b, .daystrip button.on{color:var(--primary-on-soft)}
+  .daystrip button .dot{display:block; width:5px; height:5px; border-radius:50%;
+    background:var(--primary); margin:3px auto 0}
+  .daystrip button.none{opacity:.5}
+
+  .cls{border:1px solid var(--border); border-radius:12px; background:var(--surface);
+       padding:12px; margin-bottom:11px}
+  .cls.notmine{border-style:dashed; background:#FBFDFF}
+  .cls.off{background:#FAFCFE}
+  .cls-head{display:flex; align-items:flex-start; gap:10px}
+  .cls-time{font-weight:800; font-size:16px; font-variant-numeric:tabular-nums}
+  .cls-what{flex:1; min-width:0; font-weight:800}
+  .cls-sub{font-size:12.5px; color:var(--muted); font-weight:400; line-height:1.45; margin-top:1px}
+  .cls-line{border-top:1px solid var(--border); margin:10px -12px}
+  .stu{display:flex; align-items:center; gap:9px; padding:7px 0}
+  .stu-nm{flex:1; min-width:0; font-weight:700; font-size:14.5px}
+  .stu-nm small{display:block; font-weight:400; font-size:11.5px; color:var(--muted)}
+  .mk{display:flex; gap:5px; flex:none}
+  .mk button{border:1px solid var(--border); background:var(--surface); border-radius:9px;
+    padding:8px 11px; font:inherit; font-size:12.5px; font-weight:800; color:var(--muted); cursor:pointer}
+  .mk button.on-here{background:var(--green-bg); border-color:var(--green-bd); color:var(--green-tx)}
+  .mk button.on-away{background:var(--red-bg); border-color:var(--red-bd); color:var(--red-tx)}
+  .mk button:disabled{opacity:.45}
+  .cls-foot{margin-top:4px}
+  .linkish{background:none; border:0; font:inherit; font-size:12.5px; font-weight:700;
+           color:var(--primary-on-soft); cursor:pointer; padding:5px 0}
+  .owed{background:var(--amber-bg); border:1px solid var(--amber-bd); color:var(--amber-tx);
+        border-radius:10px; padding:8px 10px; font-size:12.5px; line-height:1.45; margin-top:8px}
+
   .wkday{border:1px solid var(--border); border-radius:12px; background:var(--surface);
     padding:10px 12px; margin-bottom:8px}
   .wkday.is-today{border-color:var(--primary); box-shadow:0 0 0 2px rgba(14,165,233,.12)}
@@ -432,6 +472,18 @@
       <div id="todayList"></div>
     </div>
 
+    <div id="viewClasses" class="hidden">
+      <h2>Classes</h2>
+      <p class="sub" id="clsLead">The swimmers in the classes you are teaching.</p>
+      <div class="wk-head">
+        <button class="wk-arrow" id="clsPrev" aria-label="Previous week">‹</button>
+        <div class="wk-label" id="clsWkLabel"></div>
+        <button class="wk-arrow" id="clsNext" aria-label="Next week">›</button>
+      </div>
+      <div class="daystrip" id="clsDays"></div>
+      <div id="clsBody"></div>
+    </div>
+
     <div id="viewWeek" class="hidden">
       <div class="wk-head">
         <button class="wk-arrow" id="wkmPrev" aria-label="Previous week">‹</button>
@@ -505,6 +557,7 @@
 
   <nav id="mainNav">
     <button data-view="Today"   class="active"><span class="ic">📅</span>Today</button>
+    <button data-view="Classes" class="hidden" id="clsTab"><span class="ic">🏊</span>Classes</button>
     <button data-view="Week"><span class="ic">🗓</span>Week</button>
     <button data-view="History"><span class="ic">🕘</span>History</button>
     <button data-view="Leave"><span class="ic">🏖</span>Leave</button>
@@ -512,6 +565,7 @@
   </nav>
 
   <nav id="hrNav" class="hidden">
+    <button data-view="Classes" class="hidden" id="clsTabHr"><span class="ic">🏊</span>Classes</button>
     <button data-view="Roster"><span class="ic">🗓</span>Roster</button>
     <button data-view="Alerts"><span class="ic">🔔</span>Alerts<span class="nav-badge hidden" id="alertBadge"></span></button>
     <button data-view="Approvals" id="apprTab"><span class="ic">🏖</span>Leave<span class="nav-badge hidden" id="apprBadge"></span></button>

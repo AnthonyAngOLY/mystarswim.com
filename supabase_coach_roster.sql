@@ -88,6 +88,10 @@ update scheduler_instructors si
 -- One row per swimmer. A class with nobody in it still returns one row,
 -- with the student columns null, so an empty class is visibly empty
 -- rather than missing.
+-- The return type gains a column, and create-or-replace cannot do that,
+-- so it is dropped first. Safe: nothing depends on it but the app.
+drop function if exists get_my_session_roster(date, date, boolean);
+
 create or replace function get_my_session_roster(
   p_from date,
   p_to   date,
@@ -109,7 +113,10 @@ returns table (
   is_replacement  boolean,
   replacement_from text,
   attendance_status text,
-  remark          text
+  remark          text,
+  -- What is left for this class's lesson type. Negative means a class
+  -- already owed. The coach marks them either way; they just see it.
+  credits_left    numeric
 )
 language plpgsql stable security definer set search_path = public
 as $$
@@ -218,9 +225,13 @@ begin
          coalesce(wss.is_replacement, false),
          wss.replacement_from::text,
          coalesce(wss.attendance_status, 'pending')::text,
-         wss.remark::text
+         wss.remark::text,
+         bal.remaining_balance
     from overlapping o
     left join weekly_session_students wss on wss.session_id = o.session_id
+    left join weekly_sessions ws2         on ws2.id = o.session_id
+    left join student_credit_balances bal on bal.student_id = wss.student_id
+                                         and bal.lesson_type_id = ws2.lesson_type_id
    where p_include_others
       or o.session_id in (select sid from mine)
    order by o.session_date, o.start_time, o.pool_name,

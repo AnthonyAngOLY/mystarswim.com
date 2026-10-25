@@ -28,6 +28,15 @@
 --  of. A location may hold more than one body of water, so pools point
 --  at a location rather than the other way round.
 --
+--  ⚠ THE POOL MATCHING IN THIS FILE IS SUPERSEDED
+--  Run supabase_pool_location_by_branch.sql instead, and run it after
+--  this one if you ever re-run this one. Once every pool carried a
+--  branch, the branch became the authority and the name stopped being
+--  evidence: "SBIS Main Pool - Collab" is at SJKC BSB, and the prefix
+--  rule below links it to SBIS without complaining. The coach link in
+--  STEP 3 of this file is still correct and still the only thing that
+--  makes it.
+--
 --  POOLS ARE MATCHED BY PREFIX AS WELL AS BY NAME
 --  The convention is a location called SSGT holding pools called SSGT
 --  Pool A and SSGT Pool B — related names, deliberately not identical.

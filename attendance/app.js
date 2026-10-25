@@ -330,6 +330,10 @@
     // The tab goes, not just its contents: a button that refuses to open is
     // worse than one that was never there.
     $('apprTab').classList.toggle('hidden', !canApprove());
+    // One Classes tab, on whichever side the person actually lives. A crew
+    // coach with HR rights would otherwise find the same screen twice.
+    $('clsTab').classList.toggle('hidden', isOffice());
+    $('clsTabHr').classList.toggle('hidden', !isOffice());
 
     if (isOffice()) {
       // One side only, so a switch between sides would switch to nothing.
@@ -981,7 +985,7 @@
     showView(hrMode ? 'Roster' : 'Today');
   }
 
-  var ALL_VIEWS = ['Today','Week','History','Leave','Summary','Roster','Alerts','Approvals'];
+  var ALL_VIEWS = ['Today','Classes','Week','History','Leave','Summary','Roster','Alerts','Approvals'];
   function showView(v) {
     ALL_VIEWS.forEach(function (name) {
       var el = $('view' + name);
@@ -991,6 +995,7 @@
     Array.prototype.forEach.call(nav.querySelectorAll('button'), function (b) {
       b.classList.toggle('active', b.getAttribute('data-view') === v);
     });
+    if (v === 'Classes')   loadClasses();
     if (v === 'Week')      loadWeek();
     if (v === 'History')   loadHistory();
     if (v === 'Leave')     { closeLeaveForm(); loadLeave(); }
@@ -1013,6 +1018,245 @@
       hrCrew = res[0] || [];
       hrLocations = (res[1] || []).filter(function (l) { return l.is_active !== false; });
       hrCats = res[2] || [];
+    });
+  }
+
+  // ── Classes ────────────────────────────────────────────────────────────
+  // Who is in the water, and marking them off. A day strip rather than a
+  // second screen: a coach looks ahead a day or two, not at a calendar.
+  var clsWeek = null, clsDay = null, clsRows = [], clsOthers = false, clsBusy = null;
+
+  function loadClasses() {
+    if (!clsWeek) { clsWeek = mondayOf(todayKL()); clsDay = todayKL(); }
+    if (clsDay < clsWeek || clsDay > addDaysISO(clsWeek, 6)) clsDay = clsWeek;
+    $('clsBody').innerHTML = '<p class="empty">Loading…</p>';
+    return rpc('get_my_session_roster', {
+      p_from: clsWeek, p_to: addDaysISO(clsWeek, 6), p_include_others: clsOthers
+    }).then(function (rows) {
+      clsRows = rows || [];
+      renderClasses();
+    }).catch(function (e) {
+      $('clsDays').innerHTML = '';
+      $('clsBody').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  // Rows arrive one per swimmer. The screen is one card per class.
+  function clsSessions(day) {
+    var out = [], byId = {};
+    clsRows.forEach(function (r) {
+      if (r.session_date !== day) return;
+      var c = byId[r.session_id];
+      if (!c) {
+        c = byId[r.session_id] = {
+          id: r.session_id, date: r.session_date,
+          start: r.start_time, end: r.end_time,
+          pool: r.pool_name, lesson: r.lesson_type, coaches: r.coach_names,
+          mine: !!r.is_mine, off: !!r.is_cancelled, students: []
+        };
+        out.push(c);
+      }
+      // A class with nobody in it comes back as one row with null student
+      // columns, which is an empty class and not a swimmer.
+      if (r.row_id) c.students.push(r);
+    });
+    return out;
+  }
+
+  function creditLine(n) {
+    if (n == null) return '';
+    n = Number(n);
+    if (n < 0)  return Math.abs(n) + (Math.abs(n) === 1 ? ' class owed' : ' classes owed');
+    if (n === 0) return 'No credits left';
+    return n + (n === 1 ? ' credit left' : ' credits left');
+  }
+
+  function renderClasses() {
+    var today = todayKL();
+
+    // The strip counts the coach's own classes. Other people's, shown for
+    // cover, must not make a quiet day look busy.
+    var mineByDay = {};
+    clsRows.forEach(function (r) {
+      if (!r.is_mine) return;
+      (mineByDay[r.session_date] = mineByDay[r.session_date] || {})[r.session_id] = 1;
+    });
+    var strip = '';
+    for (var i = 0; i < 7; i++) {
+      var d = addDaysISO(clsWeek, i);
+      var n = Object.keys(mineByDay[d] || {}).length;
+      strip += '<button data-cday="' + d + '" class="' + (d === clsDay ? 'on' : '')
+        + (n ? '' : ' none') + '">' + esc(dowShort(d))
+        + '<b>' + esc(dayNum(d)) + '</b>'
+        + (n ? '<span class="dot"></span>' : '') + '</button>';
+    }
+    var endISO = addDaysISO(clsWeek, 6);
+    $('clsWkLabel').textContent =
+      (clsWeek === mondayOf(today) ? 'This week · ' : '')
+      + new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short' })
+          .format(new Date(clsWeek + 'T00:00:00+08:00'))
+      + ' – ' +
+      new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short' })
+        .format(new Date(endISO + 'T00:00:00+08:00'));
+
+    $('clsDays').innerHTML = strip;
+    Array.prototype.forEach.call($('clsDays').querySelectorAll('[data-cday]'), function (b) {
+      b.addEventListener('click', function () {
+        clsDay = b.getAttribute('data-cday'); renderClasses();
+      });
+    });
+    var sel = $('clsDays').querySelector('button.on');
+    if (sel && sel.scrollIntoView) {
+      try { sel.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {}
+    }
+
+    // An empty tab reads as a broken one, so it says which of the two it is.
+    var anyMine = clsRows.some(function (r) { return r.is_mine; });
+    if (!anyMine && !clsOthers) {
+      $('clsBody').innerHTML = '<p class="empty">No classes assigned to you this week.<br>'
+        + 'If you are covering for somebody, the office assigns the class to you first.</p>'
+        + clsOthersBtn();
+      wireClsOthers();
+      return;
+    }
+
+    var list = clsSessions(clsDay);
+    // Theirs first: the cover cards are a reference, not the job.
+    list.sort(function (a, b) {
+      if (a.start !== b.start) return String(a.start).localeCompare(String(b.start));
+      return (a.mine === b.mine) ? 0 : (a.mine ? -1 : 1);
+    });
+
+    var html = list.length ? list.map(function (c) { return clsCard(c, today); }).join('')
+      : '<p class="empty">Nothing on ' + esc(prettyDate(clsDay)) + '.</p>';
+
+    $('clsBody').innerHTML = html + clsOthersBtn();
+    wireClsOthers();
+    wireClsCards(today);
+  }
+
+  function clsOthersBtn() {
+    return '<button class="btn ghost" id="clsOthersBtn" style="width:100%;margin-top:6px">'
+      + (clsOthers ? 'Hide other classes at this pool' : 'Show other classes at this pool')
+      + '</button>';
+  }
+  function wireClsOthers() {
+    var b = $('clsOthersBtn');
+    if (b) b.addEventListener('click', function () { clsOthers = !clsOthers; loadClasses(); });
+  }
+
+  function clsCard(c, today) {
+    var marking = c.mine && !c.off;
+    var closed  = !isOffice() && c.date !== today;
+
+    var head = '<div class="cls-head">'
+      + '<div class="cls-what">' + esc(prettyTime(c.start)) + ' – ' + esc(prettyTime(c.end))
+      +   '<div class="cls-sub">' + esc(c.lesson) + ' · ' + esc(c.pool)
+      +     (c.mine ? '' : '<br>' + esc(c.coaches)) + '</div></div>'
+      + '<span class="pill">' + (c.off ? 'Did not happen' : (c.mine ? 'Yours' : 'Cover')) + '</span>'
+      + '</div>';
+
+    var owed = [];
+    var body = c.students.length ? c.students.map(function (r) {
+      var n = r.credits_left;
+      if (marking && n != null && Number(n) <= 0) owed.push(r.student_name);
+      var sub = [];
+      if (r.is_replacement) {
+        sub.push('Replacement' + (r.replacement_from ? ' from ' + r.replacement_from : ''));
+      }
+      if (n != null) sub.push(creditLine(n));
+      var st = r.attendance_status;
+      return '<div class="stu">'
+        + '<div class="stu-nm">' + esc(r.student_name || '—')
+        +   (sub.length ? '<small>' + esc(sub.join(' · ')) + '</small>' : '') + '</div>'
+        + (marking
+            ? '<div class="mk">'
+              + '<button data-mk="attended" data-row="' + esc(r.row_id) + '"'
+              +   (closed ? ' disabled' : '')
+              +   ' class="' + (st === 'attended' ? 'on-here' : '') + '">Here</button>'
+              + '<button data-mk="absent" data-row="' + esc(r.row_id) + '"'
+              +   (closed ? ' disabled' : '')
+              +   ' class="' + (st === 'absent' ? 'on-away' : '') + '">Away</button>'
+              + '</div>'
+            : (st === 'pending' ? '' : '<span class="tag">' + esc(st) + '</span>'))
+        + '</div>';
+    }).join('<div class="cls-line"></div>') : '<p class="empty">Nobody in this class.</p>';
+
+    var foot = '';
+    if (owed.length) {
+      foot += '<div class="owed">' + esc(owed.join(', '))
+        + (owed.length === 1 ? ' has ' : ' have ')
+        + 'no credits left. Mark them as usual — the office will see what is owed.</div>';
+    }
+    if (marking && closed) {
+      foot += '<div class="cls-sub" style="margin-top:8px">'
+        + (c.date > today ? 'Marking opens on the day.'
+                          : 'That day has closed. Ask the office to change it.') + '</div>';
+    }
+    if (c.mine && !closed) {
+      foot += '<div class="cls-foot"><button class="linkish" data-off="' + esc(c.id) + '">'
+        + (c.off ? 'It did happen after all' : 'This class did not happen') + '</button></div>';
+    }
+    if (!c.mine) {
+      foot += '<div class="cls-sub" style="margin-top:8px">'
+        + 'Not your class. If you are covering it, the office assigns it to you '
+        + 'and the swimmers become markable.</div>';
+    }
+
+    return '<div class="cls' + (c.mine ? '' : ' notmine') + (c.off ? ' off' : '') + '">'
+      + head + '<div class="cls-line"></div>' + body + foot + '</div>';
+  }
+
+  function wireClsCards(today) {
+    Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-mk]'), function (b) {
+      b.addEventListener('click', function () {
+        var row = b.getAttribute('data-row'), want = b.getAttribute('data-mk');
+        var cur = clsRows.filter(function (r) { return r.row_id === row; })[0];
+        if (!cur || clsBusy) return;
+        // Tapping the state it is already in means undo. That is the whole
+        // correction story on the day: tap again, the credit comes back.
+        var next = (cur.attendance_status === want) ? 'pending' : want;
+        clsBusy = row;
+        b.disabled = true;
+        rpc('mark_attendance', { p_row_id: row, p_state: next }).then(function (res) {
+          clsBusy = null;
+          if (!res || res.ok !== true) {
+            renderClasses();
+            alert((res && res.error) || 'Could not mark that.');
+            return;
+          }
+          clsRows.forEach(function (r) {
+            if (r.row_id !== row) return;
+            r.attendance_status = res.state;
+            if (res.balance != null) r.credits_left = res.balance;
+            else if (res.credit_moved) r.credits_left =
+              (r.credits_left == null ? null : Number(r.credits_left) + Number(res.credit_moved));
+          });
+          renderClasses();
+        }).catch(function (e) {
+          clsBusy = null; renderClasses(); alert(e.message);
+        });
+      });
+    });
+
+    Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-off]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-off');
+        var c = clsSessions(clsDay).filter(function (x) { return x.id === id; })[0];
+        if (!c) return;
+        var msg = c.off
+          ? 'Put this class back? Marking opens again and credits are taken as normal.'
+          : 'Say this class did not happen? Nobody is marked, and any credit already '
+            + 'taken today is given back.';
+        if (!window.confirm(msg)) return;
+        b.disabled = true;
+        rpc('set_session_cancelled', { p_session_id: id, p_cancelled: !c.off })
+          .then(function (res) {
+            if (!res || res.ok !== true) { alert((res && res.error) || 'Could not change that.'); }
+            return loadClasses();
+          })
+          .catch(function (e) { alert(e.message); return loadClasses(); });
+      });
     });
   }
 
@@ -1918,6 +2162,16 @@
 
   // ── HR wiring ──
   $('hrToggle').addEventListener('click', function () { setMode(!hrMode); });
+  // A coach on a Sunday is looking at tomorrow, and tomorrow is the next
+  // week. Without these the strip is a wall on both sides.
+  function clsShiftWeek(n) {
+    clsWeek = addDaysISO(clsWeek, n);
+    clsDay = (clsWeek === mondayOf(todayKL())) ? todayKL() : clsWeek;
+    loadClasses();
+  }
+  $('clsPrev').addEventListener('click', function () { clsShiftWeek(-7); });
+  $('clsNext').addEventListener('click', function () { clsShiftWeek(7); });
+
   $('wkPrev').addEventListener('click', function () {
     rsWeekStart = addDaysISO(rsWeekStart, -7); rsDay = rsWeekStart; rosterNote(''); loadRoster();
   });
