@@ -88,6 +88,14 @@ update scheduler_instructors si
 -- One row per swimmer. A class with nobody in it still returns one row,
 -- with the student columns null, so an empty class is visibly empty
 -- rather than missing.
+--
+-- WHEN A CLASS HAPPENS
+-- week_start_date is the Monday, and weekday counts from 1 for Monday,
+-- not from 0. The app writes it as day + 1 and reads it back as
+-- weekday - 1; this has to subtract the same 1 or every class lands a
+-- day late and no shift ever covers one. That is not hypothetical: it
+-- is what the first roster of real shifts found, nine windows and not
+-- one class in any of them.
 -- The return type gains a column, and create-or-replace cannot do that,
 -- so it is dropped first. Safe: nothing depends on it but the app.
 drop function if exists get_my_session_roster(date, date, boolean);
@@ -167,7 +175,7 @@ begin
   overlapping as (
     select distinct
            ws.id                                            as session_id,
-           (ws.week_start_date + ws.weekday)::date          as session_date,
+           (ws.week_start_date + (ws.weekday - 1))::date          as session_date,
            (ws.start_minute * interval '1 minute')::time    as start_time,
            ((ws.start_minute + coalesce(ws.duration_minutes, 60))
               * interval '1 minute')::time                  as end_time,
@@ -177,7 +185,7 @@ begin
       from my_shifts sh
       join pools p                      on p.location_id = sh.location_id
       join weekly_sessions ws           on ws.pool_id = p.id
-                                       and (ws.week_start_date + ws.weekday)::date = sh.shift_date
+                                       and (ws.week_start_date + (ws.weekday - 1))::date = sh.shift_date
       left join scheduler_lesson_types lt on lt.id = ws.lesson_type_id
      where v_me is not null
        and (ws.start_minute * interval '1 minute')::time >= sh.start_time
@@ -187,7 +195,7 @@ begin
 
     select distinct
            ws.id,
-           (ws.week_start_date + ws.weekday)::date,
+           (ws.week_start_date + (ws.weekday - 1))::date,
            (ws.start_minute * interval '1 minute')::time,
            ((ws.start_minute + coalesce(ws.duration_minutes, 60))
               * interval '1 minute')::time,
@@ -200,7 +208,7 @@ begin
       left join scheduler_lesson_types lt on lt.id = ws.lesson_type_id
      where v_inst is not null
        and si.instructor_id = v_inst
-       and (ws.week_start_date + ws.weekday)::date between p_from and p_to
+       and (ws.week_start_date + (ws.weekday - 1))::date between p_from and p_to
   ),
   -- Aliased to sid on purpose: session_id is also one of this
   -- function's out parameters, and an unqualified reference to it
@@ -277,7 +285,7 @@ begin
   end if;
 
   select wss.attendance_status, wss.student_id, wss.session_id,
-         ws.lesson_type_id, (ws.week_start_date + ws.weekday)::date,
+         ws.lesson_type_id, (ws.week_start_date + (ws.weekday - 1))::date,
          ws.cancelled_at is not null
     into v_old, v_sid, v_session, v_lt, v_date, v_cancelled
     from weekly_session_students wss
@@ -379,7 +387,7 @@ begin
     return jsonb_build_object('ok', false, 'error', 'Not signed in.');
   end if;
 
-  select (ws.week_start_date + ws.weekday)::date, ws.cancelled_reason
+  select (ws.week_start_date + (ws.weekday - 1))::date, ws.cancelled_reason
     into v_date, v_reason
     from weekly_sessions ws where ws.id = p_session_id;
   if v_date is null then
