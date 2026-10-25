@@ -25,8 +25,19 @@
 --      shift window.
 --
 --  This file adds the two columns and fills in the matches it is sure
---  of. A pool may hold more than one body of water, so pools point at a
---  location rather than the other way round.
+--  of. A location may hold more than one body of water, so pools point
+--  at a location rather than the other way round.
+--
+--  POOLS ARE MATCHED BY PREFIX AS WELL AS BY NAME
+--  The convention is a location called SSGT holding pools called SSGT
+--  Pool A and SSGT Pool B — related names, deliberately not identical.
+--  An exact match would link none of them. So a pool also matches a
+--  location whose whole name begins it, at a word boundary: "SSGT Pool
+--  A" belongs to "SSGT". Where two locations could both claim it the
+--  longer wins, and where two tie, neither does.
+--
+--  Coaches are NOT matched this way. "Ali" is not evidence about "Ali
+--  Bin Ali", and a wrong coach link shows somebody else's swimmers.
 --
 --  WHAT "SURE OF" MEANS
 --  An exact name match, after trimming and lowercasing, where exactly
@@ -94,21 +105,40 @@ select nm as coach_on_the_timetable,
   from counts
  order by 3, 1;
 
--- B. Pools.
+-- B. Pools. Exact name, or the location's whole name at the start of
+--    the pool's, which is the convention: SSGT → SSGT Pool A.
 with p as (
-  select id, btrim(name) as nm, btrim(lower(name)) as key
+  select id, btrim(name) as nm,
+         btrim(lower(regexp_replace(name, '\s+', ' ', 'g'))) as key
     from pools where is_active is not false and location_id is null
 ),
 l as (
-  select id, btrim(name) as nm, btrim(lower(name)) as key from locations
+  select id, btrim(name) as nm,
+         btrim(lower(regexp_replace(name, '\s+', ' ', 'g'))) as key
+    from locations
+),
+cand as (
+  select p.id as pool_id, p.nm as pool, l.nm as loc, length(l.key) as len
+    from p join l
+      on p.key = l.key
+      or p.key like l.key || ' %'
+      or p.key like l.key || '-%'
+),
+best as (
+  select pool_id, max(len) as len from cand group by pool_id
 )
 select p.nm as pool,
-       coalesce((select max(l.nm) from l where l.key = p.key), '—') as location,
+       coalesce((select string_agg(c.loc, ' | ') from cand c join best b
+                  on b.pool_id = c.pool_id and c.len = b.len
+                 where c.pool_id = p.id), '—') as location,
        case
-         when (select count(*) from l where l.key = p.key) = 1 then 'will link'
-         when (select count(*) from l where l.key = p.key) = 0
-              then '>>> no location with that name — link by hand'
-         else '>>> more than one location with that name' end as what_happens
+         when (select count(*) from cand c join best b
+                on b.pool_id = c.pool_id and c.len = b.len
+               where c.pool_id = p.id) = 1 then 'will link'
+         when (select count(*) from cand c where c.pool_id = p.id) = 0
+              then '>>> no location matches — link by hand'
+         else '>>> two locations claim it equally — a person must choose'
+       end as what_happens
   from p
  order by 3, 1;
 
@@ -131,14 +161,39 @@ update scheduler_instructors si
          where y.is_active is not false
            and btrim(lower(y.name)) = btrim(lower(si.name))) = 1;
 
+-- The longest location name that begins this pool's name, and only
+-- where exactly one location is that long. "SSGT Annexe Pool A" goes to
+-- "SSGT Annexe" rather than to "SSGT"; a genuine tie goes nowhere.
+with p as (
+  select id, btrim(lower(regexp_replace(name, '\s+', ' ', 'g'))) as key
+    from pools where is_active is not false and location_id is null
+),
+l as (
+  select id, btrim(lower(regexp_replace(name, '\s+', ' ', 'g'))) as key
+    from locations
+),
+cand as (
+  select p.id as pool_id, l.id as loc_id, length(l.key) as len
+    from p join l
+      on p.key = l.key
+      or p.key like l.key || ' %'
+      or p.key like l.key || '-%'
+),
+winner as (
+  -- array_agg rather than min(): there is no min(uuid) in Postgres, and
+  -- the having below guarantees exactly one row to take.
+  select c.pool_id, (array_agg(c.loc_id))[1] as loc_id
+    from cand c
+    join (select pool_id, max(len) as len from cand group by pool_id) b
+      on b.pool_id = c.pool_id and c.len = b.len
+   group by c.pool_id
+  having count(*) = 1
+)
 update pools p
-   set location_id = l.id
-  from locations l
- where p.location_id is null
-   and p.is_active is not false
-   and btrim(lower(l.name)) = btrim(lower(p.name))
-   and (select count(*) from locations x
-         where btrim(lower(x.name)) = btrim(lower(p.name))) = 1;
+   set location_id = w.loc_id
+  from winner w
+ where p.id = w.pool_id
+   and p.location_id is null;
 
 
 -- ═══ STEP 4 — what is linked, and what still needs a person ═════════════
@@ -158,6 +213,15 @@ select si.name as coach,
        'no crew record matched by name — pick one on Settings → Instructors' as what_to_do
   from scheduler_instructors si
  where si.crew_id is null and si.is_active is not false
+ order by 1;
+
+-- Which pools ended up in which location, to eyeball. A pool in the
+-- wrong location shows a coach the classes from the wrong water.
+select l.name as location,
+       string_agg(p.name, ', ' order by p.name) as pools_in_it
+  from locations l
+  join pools p on p.location_id = l.id
+ group by l.id, l.name
  order by 1;
 
 -- Every pool still to link. Settings → Pools & Hours.
