@@ -160,22 +160,31 @@
   // ── Signing in ───────────────────────────────────────────────────────
   var pendingPhone = '';
 
+  // The code is not asked for from Supabase directly. parent-signin
+  // checks the number against the centre's own records first, behind the
+  // service role, and only then sends. Supabase knows whether a number
+  // has signed in before; it does not know whether it belongs to a Star
+  // Swim family, and that is the question worth asking.
+  //
+  // It also means a stranger cannot make us send a single message. With
+  // WhatsApp that is not only a security line, it is the bill.
   function sendCode(phone) {
-    return fetch(cfg.supabaseUrl + '/auth/v1/otp', {
+    return fetch(cfg.supabaseUrl + '/functions/v1/parent-signin', {
       method: 'POST',
-      headers: { apikey: cfg.supabaseAnonKey, 'Content-Type': 'application/json' },
-      // create_user false: a number the centre does not hold is not a
-      // customer, and signing them in to an empty app would be worse
-      // than telling them to ring.
-      body: JSON.stringify({ phone: phone, create_user: false })
+      headers: {
+        apikey: cfg.supabaseAnonKey,
+        // The Verify JWT gate reads Authorization, not apikey. Both are
+        // sent, because leaving the toggle on is the safe default and a
+        // form that 401s on every submission is a bad way to find out.
+        Authorization: 'Bearer ' + cfg.supabaseAnonKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ phone: phone })
     }).catch(asOffline).then(function (r) {
-      if (r.ok) return true;
-      return r.text().then(function (t) {
-        var m = readable(t, '');
-        if (/not found|signups? not allowed|user not found/i.test(m) || r.status === 422) {
-          throw new Error('We do not have that number on file. Call the centre and we will add it.');
-        }
-        throw new Error(m || 'We could not send a code just now. Please try again shortly.');
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.ok && d && d.known === true && !d.error) return true;
+        throw new Error((d && d.error)
+          || 'We could not send a code just now. Please try again shortly.');
       });
     });
   }
@@ -191,6 +200,22 @@
     }).then(function (d) {
       session = { access_token: d.access_token, refresh_token: d.refresh_token };
       save();
+      // First sign-in: link this person to the family whose number they
+      // just proved they hold. Every sign-in after, it is a no-op that
+      // only stamps the date.
+      return rpc('claim_parent_account').then(function (c) {
+        if (!c || c.ok !== true) {
+          throw new Error((c && c.error)
+            || 'We could not match that number to a family. Call the centre.');
+        }
+        return rpc('touch_parent_login').catch(function () {});
+      }).catch(function (e) {
+        // A session with no family behind it is worse than none: it
+        // looks like being let in. Throw it away before showing a screen.
+        session = null;
+        try { localStorage.removeItem(KEY); } catch (ignore) {}
+        throw e;
+      });
     });
   }
 
