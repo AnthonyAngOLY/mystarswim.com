@@ -245,11 +245,13 @@
 
   function setView(v) {
     view = v;
-    ['home', 'sched', 'credits', 'billing', 'msgs'].forEach(function (k) {
+    ['home', 'child', 'sched', 'credits', 'billing', 'msgs'].forEach(function (k) {
       $('v-' + k).classList.toggle('hidden', k !== v);
     });
     Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (b) {
-      b.classList.toggle('on', b.getAttribute('data-v') === v);
+      // The child screen hangs off Home rather than having a tab of its
+      // own, so Home stays lit while you are inside it.
+      b.classList.toggle('on', b.getAttribute('data-v') === (v === 'child' ? 'home' : v));
     });
     window.scrollTo(0, 0);
     if (v === 'sched')   loadSchedule();
@@ -287,16 +289,53 @@
         var kids = family.children || [];
         $('homeKids').innerHTML = kids.length ? kids.map(function (k, i) {
           var nx = byKid[k.id];
-          return '<div class="card"><div class="row">'
+          return '<div class="card tapcard" data-kid="' + esc(k.id) + '"><div class="row">'
             + '<div class="kid k' + ((i % 3) + 1) + '">' + esc(initials(k.name)) + '</div>'
-            + '<div class="grow"><div class="big">' + esc(k.name) + '</div>'
+            + '<div class="grow"><div class="big">' + esc(k.name)
+            +   ' <span style="color:var(--muted);font-weight:400">\u203a</span></div>'
             + '<div class="sub">' + (nx
                 ? esc(whenWord(nx.class_date) + ' · ' + hhmm(nx.start_time) + ' · ' + nx.lesson)
                 : 'No class booked') + '</div>'
             + '</div></div></div>';
         }).join('') : '<div class="card"><div class="sub">No swimmers on this account yet.</div></div>';
+
+        Array.prototype.forEach.call($('homeKids').querySelectorAll('[data-kid]'), function (c) {
+          c.addEventListener('click', function () {
+            var id = c.getAttribute('data-kid');
+            var k = kids.filter(function (x) { return x.id === id; })[0];
+            openChild(id, k && k.name, byKid[id], kids.indexOf(k));
+          });
+        });
       })
       .catch(function (e) { note($('appNote'), e.message, true); });
+  }
+
+  // ── One child ────────────────────────────────────────────────────────
+  // What the coaches have written about them. The reason a parent opens
+  // this app twice a term rather than twice a year.
+  function openChild(id, name, next, idx) {
+    $('childName').textContent = name || '';
+    var av = $('childInitials');
+    av.textContent = initials(name);
+    av.className = 'kid k' + ((Math.max(0, idx) % 3) + 1);
+    $('childNext').textContent = next
+      ? whenWord(next.class_date) + ' · ' + hhmm(next.start_time) + ' · ' + next.lesson
+      : 'No class booked';
+    $('childNotes').innerHTML = '<div class="empty">Loading…</div>';
+    setView('child');
+    rpc('my_child_notes', { p_student: id }).then(function (rows) {
+      rows = rows || [];
+      $('childNotes').innerHTML = rows.length ? rows.map(function (n) {
+        return '<div class="card pnote">'
+          + '<div class="lead" style="white-space:pre-wrap">' + esc(n.body) + '</div>'
+          + '<div class="by">' + esc(n.author) + ' · ' + esc(ago(n.created_at)) + '</div>'
+          + '</div>';
+      }).join('')
+        : '<div class="empty">Nothing yet.<br>Coaches write here after a lesson '
+          + 'when there is something to say.</div>';
+    }).catch(function (e) {
+      $('childNotes').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
   }
 
   function whenWord(iso) {
@@ -540,6 +579,8 @@
   Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (b) {
     b.addEventListener('click', function () { setView(b.getAttribute('data-v')); });
   });
+
+  $('childBack').addEventListener('click', function () { setView('home'); });
 
   $('wkPrev').addEventListener('click', function () {
     wkStart = addDays(wkStart, -7);

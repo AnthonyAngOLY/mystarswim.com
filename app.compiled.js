@@ -12133,6 +12133,155 @@ function StudentEditor({
 }
 
 // ============================================================================
+// ── Progress notes, from the desk ─────────────────────────────────────────
+// What the coaches have told this swimmer's parent, and the office's own
+// way in. The parent already has every one of these, so the office is
+// reading the same thing the parent is reading, not a draft of it.
+//
+// Withdrawing hides a note from the parent and keeps the row. There is no
+// delete, here or anywhere: what was said to a parent is a record.
+function ProgressNotesPanel({
+  swimmer
+}) {
+  const [rows, setRows] = useState(null);
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function load() {
+    try {
+      const out = await rest('rpc/notes_for_student', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_student: swimmer.id
+        })
+      });
+      setRows(Array.isArray(out) ? out : []);
+      setErr('');
+    } catch (e) {
+      setErr(e.message);
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [swimmer.id]);
+  async function send() {
+    const t = body.trim();
+    if (!t) {
+      setErr('Nothing to send yet.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    try {
+      await rpcCall('add_progress_note', {
+        p_student: swimmer.id,
+        p_body: t
+      });
+      setBody('');
+      await load();
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  }
+  async function withdraw(n) {
+    if (!confirm(`Withdraw this note?\n\n"${n.body.slice(0, 120)}${n.body.length > 120 ? '…' : ''}"\n\n` + 'The parent will no longer see it. The record is kept.')) return;
+    try {
+      await rpcCall('void_progress_note', {
+        p_id: n.id
+      });
+      await load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+  function when(ts) {
+    if (!ts) return '';
+    try {
+      return new Date(ts).toLocaleString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (_) {
+      return ts;
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      margin: '8px 0',
+      padding: 12,
+      background: '#F7FCFF'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 2
+    }
+  }, "📝 Progress notes — ", swimmer.name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 10
+    }
+  }, "Their parent sees each of these the moment it is written, with the coach's name on it."), err && /*#__PURE__*/React.createElement("div", {
+    className: "note err",
+    style: {
+      marginBottom: 8
+    }
+  }, err), /*#__PURE__*/React.createElement("textarea", {
+    className: "input",
+    rows: 3,
+    value: body,
+    maxLength: 2000,
+    onChange: e => setBody(e.target.value),
+    placeholder: `What would ${swimmer.name}'s parent want to know?`
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    disabled: busy,
+    onClick: send
+  }, "Send to the parent")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, rows === null && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…"), rows !== null && !rows.length && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Nothing written about them yet."), (rows || []).map(n => /*#__PURE__*/React.createElement("div", {
+    key: n.id,
+    style: {
+      borderTop: '1px solid var(--border)',
+      padding: '9px 0'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13.5,
+      whiteSpace: 'pre-wrap'
+    }
+  }, n.body), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, n.author, " · ", when(n.created_at), n.edited_at ? ' · edited' : '', ' · ', /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      padding: '0 6px',
+      fontSize: 11
+    },
+    onClick: () => withdraw(n)
+  }, "Withdraw"))))));
+}
+
 // CreditHistoryPanel — per-swimmer credit ledger. Shows running balance per
 // lesson-type, the chronological purchase history beneath, and an inline
 // "Add purchase" form. Each purchase row is the authoritative record of
@@ -12630,6 +12779,7 @@ function ParentsView({
   const [contactEditKey, setContactEditKey] = useState(null);
   const [addingSwimmerFor, setAddingSwimmerFor] = useState(null);
   const [editingSwimmerId, setEditingSwimmerId] = useState(null);
+  const [notesForSwimmer, setNotesForSwimmer] = useState(null);
   const [groupPanelKey, setGroupPanelKey] = useState(null);
   const [billingKey, setBillingKey] = useState(null);
   const [selectedAccountKeys, setSelectedAccountKeys] = useState(new Set());
@@ -13194,6 +13344,7 @@ function ParentsView({
       const grp = sw.familyGroupId && groupById ? groupById[sw.familyGroupId] : null;
       const isBound = !!(grp && grp.groupType === 'bound');
       const isEditingSwimmer = editingSwimmerId === sw.id;
+      const notesOpen = notesForSwimmer === sw.id;
       const acc = swimmerAccent(swi);
       return /*#__PURE__*/React.createElement("div", {
         key: sw.id,
@@ -13233,6 +13384,13 @@ function ParentsView({
           border: '1px solid #CA8A04'
         } : {}
       }, isEditingSwimmer ? '✕ Close' : '✎ Edit'), /*#__PURE__*/React.createElement("button", {
+        className: "btn btn-ghost small",
+        onClick: () => setNotesForSwimmer(notesOpen ? null : sw.id),
+        style: notesOpen ? {
+          background: '#E0F2FE',
+          border: '1px solid #BAE6FD'
+        } : {}
+      }, notesOpen ? '✕ Notes' : '📝 Notes'), /*#__PURE__*/React.createElement("button", {
         className: "btn btn-danger small",
         onClick: () => deleteStudent(sw)
       }, "Del"))), isEditingSwimmer && /*#__PURE__*/React.createElement("div", {
@@ -13248,7 +13406,9 @@ function ParentsView({
           await updateStudent(sw.id, patch);
           setEditingSwimmerId(null);
         }
-      })), (sw.lessonTypeIds || []).length === 0 ? /*#__PURE__*/React.createElement("div", {
+      })), notesOpen && /*#__PURE__*/React.createElement(ProgressNotesPanel, {
+        swimmer: sw
+      }), (sw.lessonTypeIds || []).length === 0 ? /*#__PURE__*/React.createElement("div", {
         className: "parent-swimmer-empty subtle small"
       }, "No lesson type enrolments yet — click ✎ Edit to add one.") : /*#__PURE__*/React.createElement("table", {
         className: "lt-mini-table"

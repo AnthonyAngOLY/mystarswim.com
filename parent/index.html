@@ -104,6 +104,10 @@
   .off{opacity:.55}
   .strike{text-decoration:line-through}
   .otp{letter-spacing:.42em; text-align:center; font-size:22px; font-weight:800}
+  .pnote{border-left:3px solid var(--primary-soft)}
+  .pnote .by{color:var(--muted); font-size:12px; margin-top:7px}
+  .tapcard{cursor:pointer}
+  .tapcard:active{background:#F7FCFF}
   a.plain{color:var(--primary-on-soft); font-weight:700; text-decoration:none}
 </style>
 </head>
@@ -169,6 +173,18 @@
       <div id="homeNext"></div>
       <div class="h">Your swimmers</div>
       <div id="homeKids"></div>
+    </div>
+
+    <!-- One child: their notes from the coaches -->
+    <div id="v-child" class="hidden">
+      <button class="btn btn-ghost" id="childBack" style="margin-bottom:12px">‹ Back</button>
+      <div class="row" style="margin-bottom:4px">
+        <div class="kid k1" id="childInitials">–</div>
+        <div class="grow"><div class="big" id="childName">–</div>
+          <div class="sub" id="childNext"></div></div>
+      </div>
+      <div class="h">From the coaches</div>
+      <div id="childNotes"></div>
     </div>
 
     <!-- Schedule -->

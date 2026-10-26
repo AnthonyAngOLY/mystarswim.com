@@ -1169,6 +1169,14 @@
       return '<div class="stu">'
         + '<div class="stu-nm">' + esc(r.student_name || '—')
         +   (sub.length ? '<small>' + esc(sub.join(' · ')) + '</small>' : '') + '</div>'
+        // No "has notes already" badge: that would mean the roster
+        // function returning a count, and two files defining it. The
+        // history is one tap away inside the pad.
+        + (c.mine
+            ? '<button class="notebtn" data-note="' + esc(r.student_id) + '"'
+              + ' data-nm="' + esc(r.student_name || '') + '"'
+              + ' title="Write a note for the parent">\u270e</button>'
+            : '')
         + (marking
             ? '<div class="mk">'
               + '<button data-mk="attended" data-row="' + esc(r.row_id) + '"'
@@ -1207,7 +1215,100 @@
       + head + '<div class="cls-line"></div>' + body + foot + '</div>';
   }
 
+  // ── Progress notes ───────────────────────────────────────────────────
+  // Opened under the swimmer's row rather than in a sheet: the coach is
+  // holding a phone at the poolside and wants to see who they are
+  // writing about while they write.
+  var noteOpenFor = null;
+
+  function openNotePad(studentId, name, anchorCard) {
+    var old = $('notePad');
+    if (old) old.remove();
+    if (noteOpenFor === studentId) { noteOpenFor = null; return; }
+    noteOpenFor = studentId;
+
+    var pad = document.createElement('div');
+    pad.className = 'notepad';
+    pad.id = 'notePad';
+    pad.innerHTML = '<div class="cls-sub" style="margin-bottom:6px">'
+      + 'A note for ' + esc(name) + '\u2019s parent. They see it straight away, '
+      + 'with your name on it.</div>'
+      + '<div id="noteHist"><p class="cls-sub">Loading\u2026</p></div>'
+      + '<textarea id="noteBody" maxlength="2000" '
+      // A placeholder that reads like a finished note is a trap: once the
+      // box is cleared it looks like the note is still sitting there
+      // unsent. A question cannot be mistaken for an answer.
+      +   'placeholder="What would their parent want to know?"></textarea>'
+      + '<div id="noteMsg"></div>'
+      + '<div style="display:flex;gap:6px;margin-top:7px">'
+      + '<button class="btn" id="noteSave" style="flex:1">Send to the parent</button>'
+      + '<button class="btn ghost" id="noteClose" style="flex:none;width:92px">Close</button>'
+      + '</div>';
+    anchorCard.appendChild(pad);
+    $('noteBody').focus();
+
+    $('noteClose').addEventListener('click', function () {
+      noteOpenFor = null; pad.remove();
+    });
+    $('noteSave').addEventListener('click', function () {
+      var body = String($('noteBody').value || '').trim();
+      if (!body) { $('noteMsg').innerHTML = '<div class="note err">Nothing to send yet.</div>'; return; }
+      var b = this; b.disabled = true; b.textContent = 'Sending\u2026';
+      rpc('add_progress_note', { p_student: studentId, p_body: body })
+        .then(function (res) {
+          if (!res || res.ok !== true) throw new Error((res && res.error) || 'Could not send that.');
+          $('noteBody').value = '';
+          $('noteMsg').innerHTML = '<div class="note ok">Sent. The parent can see it now.</div>';
+          return loadNoteHistory(studentId);
+        })
+        .catch(function (e) {
+          $('noteMsg').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+        })
+        .then(function () { b.disabled = false; b.textContent = 'Send to the parent'; });
+    });
+
+    loadNoteHistory(studentId);
+  }
+
+  function loadNoteHistory(studentId) {
+    return rpc('notes_for_student', { p_student: studentId }).then(function (rows) {
+      var el = $('noteHist');
+      if (!el) return;
+      rows = rows || [];
+      el.innerHTML = rows.length ? rows.map(function (n) {
+        return '<div class="noteold">' + esc(n.body)
+          + '<div class="by">' + esc(n.author) + ' \u00b7 ' + esc(prettyDate(n.created_at.slice(0, 10)))
+          +   (n.edited_at ? ' \u00b7 edited' : '')
+          +   (n.mine && n.same_day
+                ? ' \u00b7 <button class="linkish" style="font-size:11.5px;padding:0" '
+                  + 'data-void="' + esc(n.id) + '">withdraw</button>'
+                : '')
+          + '</div></div>';
+      }).join('') : '<p class="cls-sub">Nothing written about them yet.</p>';
+
+      Array.prototype.forEach.call(el.querySelectorAll('[data-void]'), function (b) {
+        b.addEventListener('click', function () {
+          if (!window.confirm('Withdraw this note? The parent will no longer see it. '
+                              + 'The record is kept.')) return;
+          rpc('void_progress_note', { p_id: b.getAttribute('data-void') })
+            .then(function () { return loadNoteHistory(studentId); })
+            .catch(function (e) { alert(e.message); });
+        });
+      });
+    }).catch(function (e) {
+      var el = $('noteHist');
+      if (el) el.innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
   function wireClsCards(today) {
+    Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-note]'), function (b) {
+      b.addEventListener('click', function () {
+        openNotePad(b.getAttribute('data-note'), b.getAttribute('data-nm'),
+                    b.closest('.cls'));
+      });
+    });
+
     Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-mk]'), function (b) {
       b.addEventListener('click', function () {
         var row = b.getAttribute('data-row'), want = b.getAttribute('data-mk');
