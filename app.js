@@ -209,6 +209,14 @@ async function patchRows(table, match, payload, select='*'){
   const q = Object.entries(match).map(([k,v]) => `&${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`).join('');
   return rest(`${table}?select=${select}${q}`, { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify(payload) });
 }
+// At module scope because the views outside App need it: App's own
+// rpcOne is closed over its state and invisible from out here.
+async function rpcCall(name, body){
+  const out = await rest('rpc/'+name, { method:'POST', body: JSON.stringify(body||{}) });
+  const r = Array.isArray(out) ? out[0] : out;
+  if(r && r.ok === false) throw new Error(r.error || 'That did not work.');
+  return r;
+}
 async function deleteRows(table, match, select='*'){
   const q = Object.entries(match).map(([k,v]) => `&${encodeURIComponent(k)}=eq.${encodeURIComponent(v)}`).join('');
   return rest(`${table}?select=${select}${q}`, { method:'DELETE', headers:{ Prefer:'return=representation' } });
@@ -4500,6 +4508,7 @@ function App({ currentUser, onLogout }){
 
       {/* ── Messages (website enquiries) ── */}
       {!loading && view==='messages' && <MessagesView
+        canSend={canBroadcast(currentUser?.role)}
         messages={contactMessages}
         onMarkRead={markMessageRead}
         onMarkAllRead={markAllMessagesRead}
@@ -15464,7 +15473,10 @@ function AdminEmployeeModal({ existing, onSave, onClose, canGrantAccess }){
     </div>
   </div></div>;
 }
-function MessagesView({ messages, onMarkRead, onMarkAllRead, onDelete, onRefresh }){
+function MessagesView({ messages, onMarkRead, onMarkAllRead, onDelete, onRefresh, canSend }){
+  // Three things that are all "messages", kept behind one nav button
+  // rather than three. Enquiries come in; the other two go out.
+  const [tab,setTab]=useState('in'); // in | announce | remind
   const [filter,setFilter]=useState('all'); // all | new
   const [openId,setOpenId]=useState(null);
   const list=(messages||[]).filter(m=>filter==='new'?m.status==='new':true);
@@ -15474,7 +15486,18 @@ function MessagesView({ messages, onMarkRead, onMarkAllRead, onDelete, onRefresh
     setOpenId(openId===m.id?null:m.id);
     if(m.status==='new') onMarkRead(m.id);
   }
+  const tabs=[['in','📥 Enquiries'],['announce','📣 Announcements'],['remind','⏰ Reminders']];
   return <div style={{maxWidth:860,margin:'18px auto 0'}}>
+    <div style={{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
+      {tabs.map(([k,label])=>(k==='in'||canSend)&&
+        <button key={k} className={`btn small ${tab===k?'btn-primary':'btn-ghost'}`}
+                onClick={()=>setTab(k)}>{label}</button>)}
+    </div>
+
+    {tab==='announce' && <ParentAnnouncements/>}
+    {tab==='remind'   && <ParentReminders/>}
+
+    {tab==='in' && <>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:14}}>
       <div>
         <div style={{fontSize:20,fontWeight:800}}>✉️ Messages</div>
@@ -15511,6 +15534,330 @@ function MessagesView({ messages, onMarkRead, onMarkAllRead, onDelete, onRefresh
             </div>}
           </div>)}
         </div>}
+    </>}
+  </div>;
+}
+
+// ── Messages › Announcements: one thing said to every parent at once ───────
+// Composed, previewed, then sent. Sending is the only irreversible button
+// on this screen, so it asks, it says how many inboxes, and once a notice
+// has gone out it can never be sent again — the Send button is replaced by
+// when it went and to how many.
+function ParentAnnouncements(){
+  const [rows,setRows]=useState([]);
+  const [accounts,setAccounts]=useState([]);
+  const [title,setTitle]=useState('');
+  const [body,setBody]=useState('');
+  const [audience,setAudience]=useState('all');
+  const [picked,setPicked]=useState([]);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+  const [search,setSearch]=useState('');
+
+  async function load(){
+    try{
+      const [b,a]=await Promise.all([
+        selectRows('parent_broadcasts','*','&order=created_at.desc&limit=50'),
+        selectRows('parent_accounts','id,display_name,phone_primary','&order=display_name.asc')
+      ]);
+      setRows(b||[]); setAccounts(a||[]);
+    }catch(e){ setErr(e.message); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  const chosen = audience==='all' ? accounts.length : picked.length;
+
+  async function saveDraft(){
+    if(!title.trim() || !body.trim()){ setErr('A notice needs a heading and something to say.'); return; }
+    if(audience==='selected' && !picked.length){ setErr('Nobody is selected.'); return; }
+    setBusy(true); setErr('');
+    try{
+      const ins=await insertRows('parent_broadcasts',{ title:title.trim(), body:body.trim(), audience });
+      const id=ins?.[0]?.id;
+      if(id && audience==='selected'){
+        await insertRows('parent_broadcast_targets', picked.map(a=>({broadcast_id:id, account_id:a})));
+      }
+      setTitle(''); setBody(''); setPicked([]); setAudience('all');
+      await load();
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function send(row){
+    const n = row.audience==='all' ? accounts.length : null;
+    const who = n==null ? 'the selected parents' : `all ${n} parent accounts`;
+    if(!confirm(`Send "${row.title}" to ${who}?\n\nIt lands in their app straight away and there is no way to unsend it.`)) return;
+    setBusy(true); setErr('');
+    try{
+      const r=await rpcCall('send_broadcast',{ p_id: row.id });
+      alert(`Sent to ${r.recipients} inbox${r.recipients===1?'':'es'}.`);
+      await load();
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function remove(row){
+    if(row.sent_at){ alert('That one has been sent. It stays as the record of what went out.'); return; }
+    if(!confirm('Delete this draft?')) return;
+    try{ await deleteRows('parent_broadcasts',{id:row.id}); await load(); }catch(e){ setErr(e.message); }
+  }
+
+  function fmt(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}); }catch(_){ return ts; } }
+  const shown = accounts.filter(a=>!search.trim() ||
+    String(a.display_name||'').toLowerCase().includes(search.trim().toLowerCase()) ||
+    String(a.phone_primary||'').includes(search.trim()));
+
+  return <div>
+    <div style={{fontSize:20,fontWeight:800}}>📣 Announcements</div>
+    <div className="small subtle" style={{marginBottom:14}}>
+      Appears at the top of the parent app. Write it, then send it — nothing goes out while it is a draft.
+    </div>
+    {err && <div className="note err" style={{marginBottom:10}}>{err}</div>}
+
+    <div className="card" style={{padding:14,marginBottom:18}}>
+      <div className="field"><label>Heading</label>
+        <input className="input" value={title} maxLength={120}
+               onChange={e=>setTitle(e.target.value)} placeholder="Pool closed 1 November"/></div>
+      <div className="field"><label>What it says</label>
+        <textarea className="input" rows={4} value={body} maxLength={2000}
+                  onChange={e=>setBody(e.target.value)}
+                  placeholder="Deepavali. There are no classes on Sunday 1 November. Normal timetable resumes Monday."/></div>
+      <div className="field"><label>Who sees it</label>
+        <select className="input" value={audience} onChange={e=>setAudience(e.target.value)}>
+          <option value="all">Every parent ({accounts.length})</option>
+          <option value="selected">Only the parents I pick</option>
+        </select></div>
+      {audience==='selected' && <div className="field">
+        <input className="input" value={search} onChange={e=>setSearch(e.target.value)}
+               placeholder="Search a name or number"/>
+        <div style={{maxHeight:200,overflowY:'auto',border:'1px solid var(--border)',borderRadius:8,marginTop:6}}>
+          {shown.map(a=><label key={a.id} style={{display:'flex',gap:8,alignItems:'center',padding:'6px 10px',borderBottom:'1px solid var(--border)',cursor:'pointer'}}>
+            <input type="checkbox" checked={picked.includes(a.id)}
+                   onChange={e=>setPicked(p=>e.target.checked?[...p,a.id]:p.filter(x=>x!==a.id))}/>
+            <span style={{fontWeight:600}}>{a.display_name||'(no name)'}</span>
+            <span className="small subtle">{a.phone_primary||'no number'}</span>
+          </label>)}
+          {!shown.length && <div className="small subtle" style={{padding:10}}>Nobody matches that.</div>}
+        </div>
+        <div className="small subtle" style={{marginTop:4}}>{picked.length} selected.</div>
+      </div>}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:8}}>
+        <span className="small subtle">Saves as a draft. Sending is a separate step.</span>
+        <button className="btn btn-primary" disabled={busy} onClick={saveDraft}>Save draft</button>
+      </div>
+    </div>
+
+    <div style={{fontWeight:800,marginBottom:8}}>Drafts and what has gone out</div>
+    {!rows.length && <div className="empty" style={{padding:24}}>Nothing yet.</div>}
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      {rows.map(r=><div key={r.id} className="card" style={{padding:'10px 14px',
+          borderLeft:r.sent_at?'4px solid #16A34A':'4px solid #F59E0B'}}>
+        <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+          <span style={{fontWeight:700,flex:1,minWidth:140}}>{r.title}</span>
+          {r.sent_at
+            ? <span className="small" style={{color:'#16A34A',fontWeight:700}}>
+                Sent {fmt(r.sent_at)} · {r.recipients} inbox{r.recipients===1?'':'es'}</span>
+            : <>
+                <span className="small" style={{color:'#B45309',fontWeight:700}}>Draft</span>
+                <button className="btn btn-primary small" disabled={busy} onClick={()=>send(r)}>Send</button>
+                <button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>remove(r)}>Delete</button>
+              </>}
+        </div>
+        <div className="small subtle" style={{marginTop:6,whiteSpace:'pre-wrap'}}>{r.body}</div>
+        <div className="small subtle" style={{marginTop:4}}>
+          {r.audience==='all' ? 'Every parent' : 'Selected parents only'}
+        </div>
+      </div>)}
+    </div>
+  </div>;
+}
+
+// ── Messages › Reminders: when a parent hears, and what they hear ─────────
+// The preview sits on the same screen as the settings and not behind a
+// button, because the question the office is really asking is "what will
+// this actually say", and a setting answers that only in the abstract.
+function ParentReminders(){
+  const [st,setSt]=useState(null);
+  const [dirty,setDirty]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+  const [msg,setMsg]=useState('');
+  const [when,setWhen]=useState(()=>{ const d=new Date(); d.setDate(d.getDate()+1);
+    return d.toISOString().slice(0,10); });
+  const [prev,setPrev]=useState(null);
+  const [prevBusy,setPrevBusy]=useState(false);
+
+  async function load(){
+    try{
+      const r=await selectRows('parent_message_settings','*','&limit=1');
+      setSt(r?.[0]||null); setDirty(false);
+    }catch(e){ setErr(e.message); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function preview(d){
+    setPrevBusy(true);
+    try{
+      const out=await rest('rpc/parent_reminder_preview',
+        { method:'POST', body: JSON.stringify({ p_for_date: d }) });
+      setPrev(Array.isArray(out)?out:[]);
+    }catch(e){ setErr(e.message); setPrev([]); }
+    setPrevBusy(false);
+  }
+  useEffect(()=>{ if(st) preview(when); },[st, when]);
+
+  function up(k,v){ setSt(x=>({...x,[k]:v})); setDirty(true); setMsg(''); }
+
+  async function save(){
+    setBusy(true); setErr(''); setMsg('');
+    try{
+      const keep=['reminders_enabled','lead_mode','send_at_time','hours_before',
+                  'quiet_start','quiet_end','one_message_per_family','skip_cancelled',
+                  'channel','reminder_title','reminder_template',
+                  'reminder_line_template','centre_name'];
+      const patch={}; keep.forEach(k=>{ patch[k]=st[k]; });
+      patch.updated_at=new Date().toISOString();
+      await patchRows('parent_message_settings',{id:true},patch);
+      setMsg('Saved.'); setDirty(false);
+      await preview(when);
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  }
+
+  async function sendNow(){
+    if(!confirm('Run the reminder job now?\n\nIt sends only what is due, and a family already reminded about a day is not reminded again.')) return;
+    setBusy(true); setErr('');
+    try{
+      const r=await rpcCall('send_class_reminders',{});
+      setMsg(r.sent ? `Sent ${r.sent} reminder${r.sent===1?'':'s'} for ${r.for_date}.`
+                    : (r.why ? `Nothing sent — ${r.why}.`
+                             : `Nothing sent; ${r.already_had_one} famil${r.already_had_one===1?'y':'ies'} already had one.`));
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  }
+
+  if(!st) return <div className="empty" style={{padding:30}}>Loading…</div>;
+
+  return <div>
+    <div style={{fontSize:20,fontWeight:800}}>⏰ Class reminders</div>
+    <div className="small subtle" style={{marginBottom:14}}>
+      Built from the timetable and delivered into the parent app. A swimmer who has asked
+      for a replacement is not reminded about the class they are missing.
+    </div>
+    {err && <div className="note err" style={{marginBottom:10}}>{err}</div>}
+    {msg && <div className="note ok" style={{marginBottom:10}}>{msg}</div>}
+
+    <div className="card" style={{padding:14,marginBottom:14}}>
+      <label style={{display:'flex',gap:8,alignItems:'center',fontWeight:700}}>
+        <input type="checkbox" checked={!!st.reminders_enabled}
+               onChange={e=>up('reminders_enabled',e.target.checked)}/>
+        Send class reminders
+      </label>
+
+      <div className="field" style={{marginTop:12}}><label>When</label>
+        <select className="input" value={st.lead_mode} onChange={e=>up('lead_mode',e.target.value)}>
+          <option value="day_before">The day before, at a set time</option>
+          <option value="hours_before">A fixed number of hours before each class</option>
+        </select></div>
+
+      {st.lead_mode==='day_before'
+        ? <div className="field"><label>Time of day</label>
+            <input className="input" type="time" value={String(st.send_at_time||'').slice(0,5)}
+                   onChange={e=>up('send_at_time',e.target.value)}/>
+            <div className="small subtle">Everyone hears at the same hour, which is what a parent expects.</div>
+          </div>
+        : <div className="field"><label>Hours before the class</label>
+            <input className="input" type="number" min={1} max={168} value={st.hours_before}
+                   onChange={e=>up('hours_before',Number(e.target.value))}/>
+            <div className="small subtle">Better for early classes, where "yesterday at noon" is a long way out.</div>
+          </div>}
+
+      <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+        <div className="field" style={{flex:1,minWidth:140}}><label>Not before</label>
+          <input className="input" type="time" value={String(st.quiet_start||'').slice(0,5)}
+                 onChange={e=>up('quiet_start',e.target.value)}/></div>
+        <div className="field" style={{flex:1,minWidth:140}}><label>Not after</label>
+          <input className="input" type="time" value={String(st.quiet_end||'').slice(0,5)}
+                 onChange={e=>up('quiet_end',e.target.value)}/></div>
+      </div>
+      <div className="small subtle" style={{marginTop:-6,marginBottom:10}}>
+        Quiet hours hold a reminder back rather than losing it — it goes at the next run inside the window.
+      </div>
+
+      <label style={{display:'flex',gap:8,alignItems:'center'}}>
+        <input type="checkbox" checked={!!st.one_message_per_family}
+               onChange={e=>up('one_message_per_family',e.target.checked)}/>
+        One message listing every child, rather than one per child
+      </label>
+      <label style={{display:'flex',gap:8,alignItems:'center',marginTop:6}}>
+        <input type="checkbox" checked={!!st.skip_cancelled}
+               onChange={e=>up('skip_cancelled',e.target.checked)}/>
+        Leave out a class the office has cancelled
+      </label>
+
+      <div className="field" style={{marginTop:12}}><label>How it is delivered</label>
+        <select className="input" value={st.channel} onChange={e=>up('channel',e.target.value)}>
+          <option value="in_app">In the parent app</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="both">Both</option>
+        </select>
+        <div className="small subtle">
+          WhatsApp needs the Twilio sender to be live. Until then everything is read in the app
+          whatever this says.
+        </div></div>
+    </div>
+
+    <div className="card" style={{padding:14,marginBottom:14}}>
+      <div style={{fontWeight:800,marginBottom:8}}>Wording</div>
+      <div className="field"><label>Heading</label>
+        <input className="input" value={st.reminder_title||''}
+               onChange={e=>up('reminder_title',e.target.value)}/></div>
+      <div className="field"><label>Message</label>
+        <textarea className="input" rows={6} value={st.reminder_template||''}
+                  onChange={e=>up('reminder_template',e.target.value)}/>
+        <div className="small subtle">
+          {'{parent_name} {date} {class_list} {child_names} {centre_name}'}
+        </div></div>
+      <div className="field"><label>One line per class, inside {'{class_list}'}</label>
+        <input className="input" value={st.reminder_line_template||''}
+               onChange={e=>up('reminder_line_template',e.target.value)}/>
+        <div className="small subtle">{'{child} {time} {lesson} {pool} {coach}'}</div></div>
+      <div className="field"><label>Signed</label>
+        <input className="input" value={st.centre_name||''}
+               onChange={e=>up('centre_name',e.target.value)}/></div>
+    </div>
+
+    <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginBottom:18}}>
+      <button className="btn btn-primary" disabled={busy||!dirty} onClick={save}>
+        {dirty?'Save changes':'Saved'}
+      </button>
+      <button className="btn btn-ghost" disabled={busy} onClick={sendNow}>Run the job now</button>
+      <span className="small subtle">Safe to press — it sends only what is due, and never twice.</span>
+    </div>
+
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+      <div style={{fontWeight:800}}>What would go out</div>
+      <input className="input" type="date" style={{width:170}} value={when}
+             onChange={e=>setWhen(e.target.value)}/>
+    </div>
+    <div className="small subtle" style={{marginBottom:8}}>
+      The real messages, to the real families, for classes on that date.
+      {dirty && ' Save first — this shows the wording as it is stored.'}
+    </div>
+    {prevBusy && <div className="empty" style={{padding:20}}>Working it out…</div>}
+    {!prevBusy && !(prev||[]).length &&
+      <div className="empty" style={{padding:24}}>No classes that day, so nobody would hear anything.</div>}
+    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+      {(prev||[]).map(p=><div key={p.account_id} className="card" style={{padding:'10px 14px'}}>
+        <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+          <span style={{fontWeight:700,flex:1,minWidth:120}}>{p.parent_name}</span>
+          <span className="small subtle">{p.classes} class{p.classes===1?'':'es'}</span>
+        </div>
+        <div style={{marginTop:6,fontSize:13,whiteSpace:'pre-wrap',
+                     background:'var(--surface-2)',border:'1px solid var(--border)',
+                     borderRadius:8,padding:'8px 10px'}}>{p.body}</div>
+      </div>)}
+    </div>
   </div>;
 }
 
@@ -16239,6 +16586,14 @@ function canWriteOffice(role){
 function canUseAdminSystem(role){
   const r = roleOf(role);
   return r==='sysadmin' || r==='center_owner' || r==='administrator';
+}
+// Saying something to every parent at once. Named rather than derived,
+// because this is the one thing on the scheduling side that reaches
+// people outside the building and cannot be taken back. An
+// administrator runs the office and is deliberately not on the list.
+function canBroadcast(role){
+  const r = roleOf(role);
+  return r==='sysadmin' || r==='center_owner' || r==='scheduler' || r==='customer_service';
 }
 // The scheduler's Settings module — pools, terms, products, user logins. The
 // one thing an administrator does not get.
