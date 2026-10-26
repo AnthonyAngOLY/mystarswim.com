@@ -84,393 +84,139 @@
   .money{font-variant-numeric:tabular-nums; font-weight:800}
   .lead{font-size:13.5px; line-height:1.5}
 </style>
+<style>
+  /* Added for the working app: states the mock did not have to show. */
+  .note{border-radius:10px; padding:10px 12px; font-size:13.5px; line-height:1.45; margin-bottom:10px}
+  .note.err{background:var(--red-bg); border:1px solid var(--red-bd); color:var(--red-tx)}
+  .note.ok {background:var(--green-bg); border:1px solid var(--green-bd); color:var(--green-tx)}
+  .empty{text-align:center; color:var(--muted); padding:34px 14px; font-size:14.5px; line-height:1.5}
+  .msg{border-left:4px solid var(--border)}
+  .msg.unread{border-left-color:var(--primary); background:#F7FCFF}
+  .dot{display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--primary);
+       margin-left:5px; vertical-align:middle}
+  .wk{display:flex; gap:5px; overflow-x:auto; padding:2px 0 10px}
+  .wk button{flex:0 0 auto; min-width:44px; padding:7px 4px; border-radius:10px; cursor:pointer;
+    border:1px solid var(--border); background:var(--surface); font:inherit;
+    font-size:11px; font-weight:700; color:var(--muted); line-height:1.35}
+  .wk button b{display:block; font-size:15px; font-weight:800; color:var(--text)}
+  .wk button.on{background:var(--primary-soft); border-color:#BAE6FD; color:var(--primary-on-soft)}
+  .wk button.on b{color:var(--primary-on-soft)}
+  .off{opacity:.55}
+  .strike{text-decoration:line-through}
+  .otp{letter-spacing:.42em; text-align:center; font-size:22px; font-weight:800}
+  a.plain{color:var(--primary-on-soft); font-weight:700; text-decoration:none}
+</style>
 </head>
 <body>
 
 <!-- ─── Sign in ─────────────────────────────────────────────────────── -->
 <section id="s-login">
-  <main style="padding-top:56px">
-    <div style="text-align:center; margin-bottom:26px">
+  <main style="padding-top:48px">
+    <div style="text-align:center;margin-bottom:26px">
       <img src="../logo.png" alt="Star Swim" style="height:54px">
-      <div class="sub" style="margin-top:10px">Classes, credits and receipts<br>for your swimmers</div>
+      <div class="big" style="margin-top:10px;font-size:20px">Star Swim</div>
+      <div class="sub">For parents and guardians</div>
     </div>
     <div class="card">
-      <label for="ph">Your mobile number</label>
-      <input class="input" id="ph" value="012-588 8358" inputmode="tel">
-      <div class="sub" style="margin:8px 2px 16px">
-        We send a 6-digit code to this number on WhatsApp. Use the number
-        the centre has on file for you.
+      <div id="loginNote"></div>
+      <label for="phone">Your mobile number</label>
+      <input id="phone" class="input" type="tel" inputmode="tel" autocomplete="tel"
+             placeholder="012-345 6789">
+      <div class="sub" style="margin:8px 2px 14px">
+        The number the centre has for you. We send a code to it — there is no password.
       </div>
-      <button class="btn">Send me a code</button>
+      <button class="btn" id="sendCode">Send me a code</button>
     </div>
-    <div class="sub" style="text-align:center; margin-top:16px">
-      Number not recognised? Call the centre on 05-321 1234.
+    <div class="sub" style="text-align:center;margin-top:16px">
+      Number changed, or not sure which one we have?<br>
+      Call the centre and we will update it.
     </div>
   </main>
 </section>
 
-<!-- ─── Code ────────────────────────────────────────────────────────── -->
+<!-- ─── The code ────────────────────────────────────────────────────── -->
 <section id="s-otp" class="hidden">
-  <main style="padding-top:56px">
-    <div style="text-align:center; margin-bottom:26px">
-      <img src="../logo.png" alt="Star Swim" style="height:54px">
+  <main style="padding-top:48px">
+    <div style="text-align:center;margin-bottom:22px">
+      <div class="big" style="font-size:19px">Enter your code</div>
+      <div class="sub" id="otpSentTo" style="margin-top:4px"></div>
     </div>
     <div class="card">
-      <label for="code">Enter the code</label>
-      <input class="input" id="code" value="418 320" inputmode="numeric"
-             style="font-size:26px; letter-spacing:.3em; text-align:center; font-weight:800">
-      <div class="sub" style="margin:8px 2px 16px">
-        Sent on WhatsApp to <b>+6012-588 8358</b>. It expires in 5 minutes.
-      </div>
-      <button class="btn">Sign in</button>
-      <div class="sub" style="text-align:center; margin-top:14px">
-        Didn't get it? <b style="color:var(--primary-on-soft)">Send again</b>
-        &nbsp;·&nbsp; <b style="color:var(--primary-on-soft)">Use my other number</b>
-      </div>
+      <div id="otpNote"></div>
+      <input id="code" class="input otp" type="text" inputmode="numeric"
+             autocomplete="one-time-code" maxlength="8" placeholder="······">
+      <button class="btn" id="verifyCode" style="margin-top:12px">Sign in</button>
+      <button class="btn btn-ghost" id="resendCode" style="margin-top:8px">Send it again</button>
     </div>
+    <button class="btn btn-ghost" id="backToPhone" style="margin-top:10px">Use a different number</button>
   </main>
 </section>
 
-<!-- ─── Home ────────────────────────────────────────────────────────── -->
-<section id="s-home" class="hidden">
+<!-- ─── The app ─────────────────────────────────────────────────────── -->
+<section id="s-app" class="hidden">
   <header>
     <img src="../logo.png" alt="Star Swim">
-    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+    <div class="who"><b id="whoName">—</b><span id="whoKids"></span></div>
   </header>
+
   <main>
-    <div class="card" style="background:#FFFBEB;border-color:#FCD34D;margin-bottom:14px">
-      <div class="row" style="align-items:flex-start">
-        <div style="font-size:18px;lineHeight:1">📣</div>
-        <div class="grow">
-          <div style="font-weight:800;color:#92400E;fontSize:15px">Pool closed Thursday 30 Oct</div>
-          <div class="lead" style="color:#92400E;margin-top:3px">
-            SSGT is closed all day for annual maintenance. Thursday classes move to
-            Friday at the same times. No credits will be taken for Thursday.
-          </div>
-          <div class="sub" style="color:#B45309;margin-top:6px">Star Swim · 2 days ago</div>
-        </div>
-      </div>
+    <div id="appNote"></div>
+
+    <!-- Home -->
+    <div id="v-home">
+      <div id="homeBanner"></div>
+      <div class="h">Next up</div>
+      <div id="homeNext"></div>
+      <div class="h">Your swimmers</div>
+      <div id="homeKids"></div>
     </div>
 
-    <div class="h">Next up</div>
-    <div class="card" style="border-color:#BAE6FD; background:linear-gradient(180deg,#F7FCFF,#fff)">
-      <div class="row">
-        <div class="kid k1">LY</div>
-        <div class="grow">
-          <div class="big">Liew Li Yu</div>
-          <div class="sub">Tomorrow, Sat 25 Oct · 10:00–10:45</div>
-          <div class="sub">SSGT · Learn to Swim 3 · Coach Sally</div>
-        </div>
+    <!-- Schedule -->
+    <div id="v-sched" class="hidden">
+      <div class="h" style="margin-top:2px">Classes</div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn btn-ghost" id="wkPrev" style="width:44px;padding:9px">‹</button>
+        <div class="grow" style="text-align:center;font-weight:800;font-size:14.5px" id="wkLabel"></div>
+        <button class="btn btn-ghost" id="wkNext" style="width:44px;padding:9px">›</button>
       </div>
+      <div class="wk" id="wkDays"></div>
+      <div id="schedBody"></div>
     </div>
 
-    <div class="h">Your swimmers</div>
-
-    <div class="card">
-      <div class="row">
-        <div class="kid k1">LY</div>
-        <div class="grow">
-          <div class="big">Liew Li Yu <span style="color:var(--muted);font-weight:400">›</span></div>
-          <div class="sub">Learn to Swim 3 · Saturdays 10:00</div>
-          <div class="sub" style="color:var(--primary-on-soft);fontWeight:700">2 new progress notes</div>
-        </div>
-        <span class="pill p-green">8 credits</span>
+    <!-- Credits -->
+    <div id="v-credits" class="hidden">
+      <div class="h" style="margin-top:2px">Credits</div>
+      <div class="sub" style="margin:0 2px 12px">
+        One class uses one credit, whether the swimmer attends or is away.
       </div>
+      <div id="creditsBody"></div>
     </div>
 
-    <div class="card">
-      <div class="row">
-        <div class="kid k2">LY</div>
-        <div class="grow">
-          <div class="big">Liew Yi Jin</div>
-          <div class="sub">Learn to Swim 2 · Saturdays 11:00</div>
-        </div>
-        <span class="pill p-green">8 credits</span>
-      </div>
+    <!-- Billing -->
+    <div id="v-billing" class="hidden">
+      <div class="h" style="margin-top:2px">Invoices</div>
+      <div id="invBody"></div>
+      <div class="h">Receipts</div>
+      <div id="rcptBody"></div>
     </div>
 
-    <div class="card">
-      <div class="row">
-        <div class="kid k3">LY</div>
-        <div class="grow">
-          <div class="big">Liew Yi Xin</div>
-          <div class="sub">Preschool · Sundays 09:00</div>
-        </div>
-        <span class="pill p-amber">2 credits</span>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="row">
-        <div class="kid k1">LY</div>
-        <div class="grow">
-          <div class="big">Lee Yee Mei</div>
-          <div class="sub">Adult · Wednesdays 20:00</div>
-        </div>
-        <span class="pill p-slate">No credits</span>
-      </div>
-    </div>
-
-    <div class="card" style="background:var(--amber-bg); border-color:var(--amber-bd)">
-      <div class="lead" style="color:var(--amber-tx)">
-        <b>Liew Yi Xin has 2 credits left.</b><br>
-        That is two more Sundays. Speak to the centre when you are ready to top up.
-      </div>
+    <!-- Messages -->
+    <div id="v-msgs" class="hidden">
+      <div class="h" style="margin-top:2px">From Star Swim</div>
+      <div id="msgBody"></div>
     </div>
   </main>
-  <nav>
-    <button class="on"><b>🏠</b>Home</button>
-    <button><b>📅</b>Schedule</button>
-    <button><b>🎟</b>Credits</button>
-    <button><b>🧾</b>Billing</button>
+
+  <nav id="tabs">
+    <button data-v="home"    class="on"><b>🏠</b>Home</button>
+    <button data-v="sched"><b>📅</b>Classes</button>
+    <button data-v="credits"><b>🎟</b>Credits</button>
+    <button data-v="billing"><b>🧾</b>Billing</button>
+    <button data-v="msgs"><b>✉️</b>Inbox<span id="msgDot"></span></button>
   </nav>
 </section>
 
-<!-- ─── One swimmer, with progress remarks ──────────────────────────── -->
-<section id="s-child" class="hidden">
-  <header>
-    <img src="../logo.png" alt="Star Swim">
-    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
-  </header>
-  <main>
-    <div class="card">
-      <div class="row">
-        <div class="kid k1">LY</div>
-        <div class="grow">
-          <div class="big">Liew Li Yu</div>
-          <div class="sub">Learn to Swim 3 · Saturdays 10:00 · SSGT</div>
-        </div>
-        <span class="pill p-green">8 credits</span>
-      </div>
-    </div>
-
-    <div class="h">Progress notes</div>
-
-    <div class="card">
-      <div class="lead">
-        Li Yu held a full 15 metres front crawl today without stopping, which is
-        the first time. Breathing to the side is still every four strokes rather
-        than every three — we will work on that next.
-      </div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="grow sub"><b style="color:var(--text)">Coach Sally</b> · Sat 18 Oct</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="lead">
-        Much more confident going under. Happy to retrieve a ring from the bottom
-        of the shallow end now, where two weeks ago she would not put her face in.
-      </div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="grow sub"><b style="color:var(--text)">Coach Yong</b> · Sat 4 Oct</div>
-      </div>
-    </div>
-
-    <div class="h">Recent classes</div>
-    <div class="card">
-      <div class="row" style="margin-bottom:10px">
-        <div class="grow"><b>Sat 18 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
-        <span class="pill p-green">Attended</span>
-      </div>
-      <div class="line"></div>
-      <div class="row" style="margin-bottom:10px">
-        <div class="grow"><b>Sat 11 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
-        <span class="pill p-green">Attended</span>
-      </div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="grow"><b>Sat 4 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
-        <span class="pill p-amber">Missed</span>
-      </div>
-    </div>
-  </main>
-  <nav>
-    <button class="on"><b>🏠</b>Home</button>
-    <button><b>📅</b>Schedule</button>
-    <button><b>🎟</b>Credits</button>
-    <button><b>🧾</b>Billing</button>
-  </nav>
-</section>
-
-<!-- ─── Schedule ────────────────────────────────────────────────────── -->
-<section id="s-sched" class="hidden">
-  <header>
-    <img src="../logo.png" alt="Star Swim">
-    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
-  </header>
-  <main>
-    <div class="h">This week</div>
-    <div class="card">
-      <div class="row"><div class="grow"><b>Wednesday 22 Oct</b></div></div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="kid k1" style="width:32px;height:32px;font-size:12px">LY</div>
-        <div class="grow"><b>Lee Yee Mei</b><div class="sub">20:00–20:45 · SSGT · Adult</div></div>
-        <span class="pill p-slate">Attended</span>
-      </div>
-    </div>
-    <div class="card">
-      <div class="row"><div class="grow"><b>Saturday 25 Oct</b></div></div>
-      <div class="line"></div>
-      <div class="row" style="margin-bottom:12px">
-        <div class="kid k1" style="width:32px;height:32px;font-size:12px">LY</div>
-        <div class="grow"><b>Liew Li Yu</b><div class="sub">10:00–10:45 · SSGT · Learn to Swim 3</div></div>
-        <span class="pill p-blue">Tomorrow</span>
-      </div>
-      <div class="row">
-        <div class="kid k2" style="width:32px;height:32px;font-size:12px">LY</div>
-        <div class="grow"><b>Liew Yi Jin</b><div class="sub">11:00–11:45 · SSGT · Learn to Swim 2</div></div>
-        <span class="pill p-blue">Tomorrow</span>
-      </div>
-    </div>
-    <div class="card">
-      <div class="row"><div class="grow"><b>Sunday 26 Oct</b></div></div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="kid k3" style="width:32px;height:32px;font-size:12px">LY</div>
-        <div class="grow"><b>Liew Yi Xin</b><div class="sub">09:00–09:40 · CENTRO · Preschool</div></div>
-        <span class="pill p-blue">Sunday</span>
-      </div>
-    </div>
-
-    <div class="h">Last week</div>
-    <div class="card">
-      <div class="row" style="margin-bottom:12px">
-        <div class="kid k1" style="width:32px;height:32px;font-size:12px">LY</div>
-        <div class="grow"><b>Liew Li Yu</b><div class="sub">Sat 18 Oct · 10:00 · SSGT</div></div>
-        <span class="pill p-green">Attended</span>
-      </div>
-      <div class="row">
-        <div class="kid k3" style="width:32px;height:32px;font-size:12px">LY</div>
-        <div class="grow"><b>Liew Yi Xin</b><div class="sub">Sun 19 Oct · 09:00 · CENTRO</div></div>
-        <span class="pill p-amber">Missed</span>
-      </div>
-    </div>
-  </main>
-  <nav>
-    <button><b>🏠</b>Home</button>
-    <button class="on"><b>📅</b>Schedule</button>
-    <button><b>🎟</b>Credits</button>
-    <button><b>🧾</b>Billing</button>
-  </nav>
-</section>
-
-<!-- ─── Credits ─────────────────────────────────────────────────────── -->
-<section id="s-credits" class="hidden">
-  <header>
-    <img src="../logo.png" alt="Star Swim">
-    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
-  </header>
-  <main>
-    <div class="h">Credits</div>
-    <div class="card">
-      <div class="row" style="margin-bottom:14px">
-        <div class="kid k1">LY</div>
-        <div class="grow"><b>Liew Li Yu</b><div class="sub">Last topped up 2 Oct · 10 classes</div></div>
-        <div style="text-align:right"><div class="money" style="font-size:22px">8</div><div class="sub">left</div></div>
-      </div>
-      <div class="line"></div>
-      <div class="row" style="margin-bottom:14px">
-        <div class="kid k2">LY</div>
-        <div class="grow"><b>Liew Yi Jin</b><div class="sub">Last topped up 2 Oct · 10 classes</div></div>
-        <div style="text-align:right"><div class="money" style="font-size:22px">8</div><div class="sub">left</div></div>
-      </div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="kid k3">LY</div>
-        <div class="grow"><b>Liew Yi Xin</b><div class="sub">Last topped up 6 Sep · 10 classes</div></div>
-        <div style="text-align:right"><div class="money" style="font-size:22px; color:var(--amber-tx)">2</div><div class="sub">left</div></div>
-      </div>
-    </div>
-
-    <div class="h">Recent activity</div>
-    <div class="card">
-      <div class="row" style="margin-bottom:12px">
-        <div class="grow"><b>Liew Yi Xin</b><div class="sub">Sun 19 Oct · class attended</div></div>
-        <div class="money" style="color:var(--red-tx)">−1</div>
-      </div>
-      <div class="row" style="margin-bottom:12px">
-        <div class="grow"><b>Liew Li Yu</b><div class="sub">Sat 18 Oct · class attended</div></div>
-        <div class="money" style="color:var(--red-tx)">−1</div>
-      </div>
-      <div class="row">
-        <div class="grow"><b>Liew Li Yu</b><div class="sub">Thu 2 Oct · 10-class package</div></div>
-        <div class="money" style="color:var(--green-tx)">+10</div>
-      </div>
-    </div>
-  </main>
-  <nav>
-    <button><b>🏠</b>Home</button>
-    <button><b>📅</b>Schedule</button>
-    <button class="on"><b>🎟</b>Credits</button>
-    <button><b>🧾</b>Billing</button>
-  </nav>
-</section>
-
-<!-- ─── Billing ─────────────────────────────────────────────────────── -->
-<section id="s-billing" class="hidden">
-  <header>
-    <img src="../logo.png" alt="Star Swim">
-    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
-  </header>
-  <main>
-    <div class="h">Outstanding</div>
-    <div class="card" style="border-color:var(--amber-bd); background:var(--amber-bg)">
-      <div class="row">
-        <div class="grow">
-          <b>INV-2026-0412</b>
-          <div class="sub" style="color:var(--amber-tx)">Due 31 Oct · Liew Yi Xin · 10-class package</div>
-        </div>
-        <div class="money" style="font-size:19px">RM 450.00</div>
-      </div>
-    </div>
-
-    <div class="h">Paid</div>
-    <div class="card">
-      <div class="row" style="margin-bottom:14px">
-        <div class="grow"><b>INV-2026-0388</b>
-          <div class="sub">2 Oct · Liew Li Yu, Liew Yi Jin · 2 × 10-class</div>
-          <div class="sub">Receipt RC-2026-0351 · Bank transfer</div></div>
-        <div style="text-align:right">
-          <div class="money">RM 900.00</div>
-          <span class="pill p-green" style="margin-top:4px">Paid</span>
-        </div>
-      </div>
-      <div class="line"></div>
-      <div class="row">
-        <div class="grow"><b>INV-2026-0290</b>
-          <div class="sub">6 Sep · Liew Yi Xin · 10-class package</div>
-          <div class="sub">Receipt RC-2026-0266 · DuitNow</div></div>
-        <div style="text-align:right">
-          <div class="money">RM 420.00</div>
-          <span class="pill p-green" style="margin-top:4px">Paid</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="sub" style="text-align:center; margin-top:18px">
-      Tap any invoice or receipt to open a printable copy.
-    </div>
-  </main>
-  <nav>
-    <button><b>🏠</b>Home</button>
-    <button><b>📅</b>Schedule</button>
-    <button><b>🎟</b>Credits</button>
-    <button class="on"><b>🧾</b>Billing</button>
-  </nav>
-</section>
-
-<script>
-  // A sketch, not the app. Every number on these screens is made up, and
-  // nothing here talks to the database. ?s=home|sched|credits|billing|otp
-  var want = new URLSearchParams(location.search).get('s') || 'login';
-  var ids = ['login','otp','home','child','sched','credits','billing'];
-  ids.forEach(function(i){
-    document.getElementById('s-'+i).classList.toggle('hidden', i !== want);
-  });
-</script>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
 </body>
 </html>

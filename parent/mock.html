@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Star Swim — Parents</title>
+<link rel="icon" href="../logo.png">
+<style>
+  /* Same tokens as the crew app, so the two feel like one family of
+     things rather than two products that happen to share a logo. */
+  :root{
+    --bg:#EEF7FD; --surface:#fff; --border:#DAEDF8; --text:#0C1E2E; --muted:#5B7488;
+    --primary:#0EA5E9; --primary-press:#0284C7; --primary-soft:#E0F2FE; --primary-on-soft:#0369A1;
+    --green-bg:#ECFDF5; --green-tx:#059669; --green-bd:#A7F3D0;
+    --amber-bg:#FFFBEB; --amber-tx:#B45309; --amber-bd:#FCD34D;
+    --red-bg:#FFF1F1;   --red-tx:#DC2626;   --red-bd:#FCA5A5;
+    --slate-bg:#F1F5F9; --slate-tx:#475569; --slate-bd:#CBD5E1;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-size:16px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .hidden{display:none !important}
+
+  header{
+    position:sticky; top:0; z-index:20; background:var(--surface);
+    border-bottom:1px solid var(--border); padding:10px 16px;
+    display:flex; align-items:center; gap:10px;
+  }
+  header img{height:26px; width:auto}
+  header .who{margin-left:auto; text-align:right; font-size:12.5px; color:var(--muted); line-height:1.3}
+  header .who b{display:block; color:var(--text); font-size:13.5px}
+
+  main{padding:14px 16px 90px; max-width:520px; margin:0 auto}
+  .card{
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; padding:14px; margin-bottom:12px;
+  }
+  .h{font-size:12px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+     color:var(--muted); margin:18px 2px 8px}
+  .h:first-child{margin-top:2px}
+  .row{display:flex; align-items:center; gap:12px}
+  .grow{flex:1; min-width:0}
+  .sub{font-size:13px; color:var(--muted); line-height:1.45}
+  .big{font-size:17px; font-weight:800}
+  .pill{display:inline-block; font-size:11px; font-weight:800; padding:2px 9px; border-radius:999px}
+  .p-blue {background:var(--primary-soft); color:var(--primary-on-soft); border:1px solid #BAE6FD}
+  .p-green{background:var(--green-bg);   color:var(--green-tx);  border:1px solid var(--green-bd)}
+  .p-amber{background:var(--amber-bg);   color:var(--amber-tx);  border:1px solid var(--amber-bd)}
+  .p-slate{background:var(--slate-bg);   color:var(--slate-tx);  border:1px solid var(--slate-bd)}
+
+  .kid{width:40px; height:40px; border-radius:50%; display:flex; align-items:center;
+       justify-content:center; font-weight:800; font-size:15px; color:#fff; flex:none}
+  .k1{background:#0EA5E9} .k2{background:#8B5CF6} .k3{background:#F59E0B}
+
+  .btn{
+    display:block; width:100%; border:0; border-radius:12px; padding:14px;
+    font:inherit; font-size:16px; font-weight:800; cursor:pointer;
+    background:var(--primary); color:#fff;
+  }
+  .btn:active{background:var(--primary-press)}
+  .btn-ghost{background:var(--surface); color:var(--text); border:1px solid var(--border); font-weight:700}
+  .input{
+    width:100%; padding:14px; font:inherit; font-size:17px; border-radius:12px;
+    border:1px solid var(--border); background:var(--surface); color:var(--text);
+  }
+  label{display:block; font-size:13px; font-weight:700; margin:0 2px 6px}
+
+  nav{
+    position:fixed; left:0; right:0; bottom:0; background:var(--surface);
+    border-top:1px solid var(--border); display:flex;
+    padding:6px 4px calc(6px + env(safe-area-inset-bottom));
+  }
+  nav button{
+    flex:1; background:none; border:0; font:inherit; font-size:10.5px; font-weight:700;
+    color:var(--muted); padding:6px 2px; cursor:pointer; line-height:1.5;
+  }
+  nav button b{display:block; font-size:19px; font-weight:400}
+  nav button.on{color:var(--primary-on-soft)}
+
+  .line{border-top:1px solid var(--border); margin:11px -14px 11px; }
+  .money{font-variant-numeric:tabular-nums; font-weight:800}
+  .lead{font-size:13.5px; line-height:1.5}
+</style>
+</head>
+<body>
+
+<!-- ─── Sign in ─────────────────────────────────────────────────────── -->
+<section id="s-login">
+  <main style="padding-top:56px">
+    <div style="text-align:center; margin-bottom:26px">
+      <img src="../logo.png" alt="Star Swim" style="height:54px">
+      <div class="sub" style="margin-top:10px">Classes, credits and receipts<br>for your swimmers</div>
+    </div>
+    <div class="card">
+      <label for="ph">Your mobile number</label>
+      <input class="input" id="ph" value="012-588 8358" inputmode="tel">
+      <div class="sub" style="margin:8px 2px 16px">
+        We send a 6-digit code to this number on WhatsApp. Use the number
+        the centre has on file for you.
+      </div>
+      <button class="btn">Send me a code</button>
+    </div>
+    <div class="sub" style="text-align:center; margin-top:16px">
+      Number not recognised? Call the centre on 05-321 1234.
+    </div>
+  </main>
+</section>
+
+<!-- ─── Code ────────────────────────────────────────────────────────── -->
+<section id="s-otp" class="hidden">
+  <main style="padding-top:56px">
+    <div style="text-align:center; margin-bottom:26px">
+      <img src="../logo.png" alt="Star Swim" style="height:54px">
+    </div>
+    <div class="card">
+      <label for="code">Enter the code</label>
+      <input class="input" id="code" value="418 320" inputmode="numeric"
+             style="font-size:26px; letter-spacing:.3em; text-align:center; font-weight:800">
+      <div class="sub" style="margin:8px 2px 16px">
+        Sent on WhatsApp to <b>+6012-588 8358</b>. It expires in 5 minutes.
+      </div>
+      <button class="btn">Sign in</button>
+      <div class="sub" style="text-align:center; margin-top:14px">
+        Didn't get it? <b style="color:var(--primary-on-soft)">Send again</b>
+        &nbsp;·&nbsp; <b style="color:var(--primary-on-soft)">Use my other number</b>
+      </div>
+    </div>
+  </main>
+</section>
+
+<!-- ─── Home ────────────────────────────────────────────────────────── -->
+<section id="s-home" class="hidden">
+  <header>
+    <img src="../logo.png" alt="Star Swim">
+    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+  </header>
+  <main>
+    <div class="card" style="background:#FFFBEB;border-color:#FCD34D;margin-bottom:14px">
+      <div class="row" style="align-items:flex-start">
+        <div style="font-size:18px;lineHeight:1">📣</div>
+        <div class="grow">
+          <div style="font-weight:800;color:#92400E;fontSize:15px">Pool closed Thursday 30 Oct</div>
+          <div class="lead" style="color:#92400E;margin-top:3px">
+            SSGT is closed all day for annual maintenance. Thursday classes move to
+            Friday at the same times. No credits will be taken for Thursday.
+          </div>
+          <div class="sub" style="color:#B45309;margin-top:6px">Star Swim · 2 days ago</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="h">Next up</div>
+    <div class="card" style="border-color:#BAE6FD; background:linear-gradient(180deg,#F7FCFF,#fff)">
+      <div class="row">
+        <div class="kid k1">LY</div>
+        <div class="grow">
+          <div class="big">Liew Li Yu</div>
+          <div class="sub">Tomorrow, Sat 25 Oct · 10:00–10:45</div>
+          <div class="sub">SSGT · Learn to Swim 3 · Coach Sally</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="h">Your swimmers</div>
+
+    <div class="card">
+      <div class="row">
+        <div class="kid k1">LY</div>
+        <div class="grow">
+          <div class="big">Liew Li Yu <span style="color:var(--muted);font-weight:400">›</span></div>
+          <div class="sub">Learn to Swim 3 · Saturdays 10:00</div>
+          <div class="sub" style="color:var(--primary-on-soft);fontWeight:700">2 new progress notes</div>
+        </div>
+        <span class="pill p-green">8 credits</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="kid k2">LY</div>
+        <div class="grow">
+          <div class="big">Liew Yi Jin</div>
+          <div class="sub">Learn to Swim 2 · Saturdays 11:00</div>
+        </div>
+        <span class="pill p-green">8 credits</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="kid k3">LY</div>
+        <div class="grow">
+          <div class="big">Liew Yi Xin</div>
+          <div class="sub">Preschool · Sundays 09:00</div>
+        </div>
+        <span class="pill p-amber">2 credits</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="kid k1">LY</div>
+        <div class="grow">
+          <div class="big">Lee Yee Mei</div>
+          <div class="sub">Adult · Wednesdays 20:00</div>
+        </div>
+        <span class="pill p-slate">No credits</span>
+      </div>
+    </div>
+
+    <div class="card" style="background:var(--amber-bg); border-color:var(--amber-bd)">
+      <div class="lead" style="color:var(--amber-tx)">
+        <b>Liew Yi Xin has 2 credits left.</b><br>
+        That is two more Sundays. Speak to the centre when you are ready to top up.
+      </div>
+    </div>
+  </main>
+  <nav>
+    <button class="on"><b>🏠</b>Home</button>
+    <button><b>📅</b>Schedule</button>
+    <button><b>🎟</b>Credits</button>
+    <button><b>🧾</b>Billing</button>
+  </nav>
+</section>
+
+<!-- ─── One swimmer, with progress remarks ──────────────────────────── -->
+<section id="s-child" class="hidden">
+  <header>
+    <img src="../logo.png" alt="Star Swim">
+    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <div class="kid k1">LY</div>
+        <div class="grow">
+          <div class="big">Liew Li Yu</div>
+          <div class="sub">Learn to Swim 3 · Saturdays 10:00 · SSGT</div>
+        </div>
+        <span class="pill p-green">8 credits</span>
+      </div>
+    </div>
+
+    <div class="h">Progress notes</div>
+
+    <div class="card">
+      <div class="lead">
+        Li Yu held a full 15 metres front crawl today without stopping, which is
+        the first time. Breathing to the side is still every four strokes rather
+        than every three — we will work on that next.
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow sub"><b style="color:var(--text)">Coach Sally</b> · Sat 18 Oct</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lead">
+        Much more confident going under. Happy to retrieve a ring from the bottom
+        of the shallow end now, where two weeks ago she would not put her face in.
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow sub"><b style="color:var(--text)">Coach Yong</b> · Sat 4 Oct</div>
+      </div>
+    </div>
+
+    <div class="h">Recent classes</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <div class="grow"><b>Sat 18 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
+        <span class="pill p-green">Attended</span>
+      </div>
+      <div class="line"></div>
+      <div class="row" style="margin-bottom:10px">
+        <div class="grow"><b>Sat 11 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
+        <span class="pill p-green">Attended</span>
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow"><b>Sat 4 Oct</b><div class="sub">10:00 · SSGT Pool A</div></div>
+        <span class="pill p-amber">Missed</span>
+      </div>
+    </div>
+  </main>
+  <nav>
+    <button class="on"><b>🏠</b>Home</button>
+    <button><b>📅</b>Schedule</button>
+    <button><b>🎟</b>Credits</button>
+    <button><b>🧾</b>Billing</button>
+  </nav>
+</section>
+
+<!-- ─── Schedule ────────────────────────────────────────────────────── -->
+<section id="s-sched" class="hidden">
+  <header>
+    <img src="../logo.png" alt="Star Swim">
+    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+  </header>
+  <main>
+    <div class="h">This week</div>
+    <div class="card">
+      <div class="row"><div class="grow"><b>Wednesday 22 Oct</b></div></div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="kid k1" style="width:32px;height:32px;font-size:12px">LY</div>
+        <div class="grow"><b>Lee Yee Mei</b><div class="sub">20:00–20:45 · SSGT · Adult</div></div>
+        <span class="pill p-slate">Attended</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row"><div class="grow"><b>Saturday 25 Oct</b></div></div>
+      <div class="line"></div>
+      <div class="row" style="margin-bottom:12px">
+        <div class="kid k1" style="width:32px;height:32px;font-size:12px">LY</div>
+        <div class="grow"><b>Liew Li Yu</b><div class="sub">10:00–10:45 · SSGT · Learn to Swim 3</div></div>
+        <span class="pill p-blue">Tomorrow</span>
+      </div>
+      <div class="row">
+        <div class="kid k2" style="width:32px;height:32px;font-size:12px">LY</div>
+        <div class="grow"><b>Liew Yi Jin</b><div class="sub">11:00–11:45 · SSGT · Learn to Swim 2</div></div>
+        <span class="pill p-blue">Tomorrow</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row"><div class="grow"><b>Sunday 26 Oct</b></div></div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="kid k3" style="width:32px;height:32px;font-size:12px">LY</div>
+        <div class="grow"><b>Liew Yi Xin</b><div class="sub">09:00–09:40 · CENTRO · Preschool</div></div>
+        <span class="pill p-blue">Sunday</span>
+      </div>
+    </div>
+
+    <div class="h">Last week</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <div class="kid k1" style="width:32px;height:32px;font-size:12px">LY</div>
+        <div class="grow"><b>Liew Li Yu</b><div class="sub">Sat 18 Oct · 10:00 · SSGT</div></div>
+        <span class="pill p-green">Attended</span>
+      </div>
+      <div class="row">
+        <div class="kid k3" style="width:32px;height:32px;font-size:12px">LY</div>
+        <div class="grow"><b>Liew Yi Xin</b><div class="sub">Sun 19 Oct · 09:00 · CENTRO</div></div>
+        <span class="pill p-amber">Missed</span>
+      </div>
+    </div>
+  </main>
+  <nav>
+    <button><b>🏠</b>Home</button>
+    <button class="on"><b>📅</b>Schedule</button>
+    <button><b>🎟</b>Credits</button>
+    <button><b>🧾</b>Billing</button>
+  </nav>
+</section>
+
+<!-- ─── Credits ─────────────────────────────────────────────────────── -->
+<section id="s-credits" class="hidden">
+  <header>
+    <img src="../logo.png" alt="Star Swim">
+    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+  </header>
+  <main>
+    <div class="h">Credits</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:14px">
+        <div class="kid k1">LY</div>
+        <div class="grow"><b>Liew Li Yu</b><div class="sub">Last topped up 2 Oct · 10 classes</div></div>
+        <div style="text-align:right"><div class="money" style="font-size:22px">8</div><div class="sub">left</div></div>
+      </div>
+      <div class="line"></div>
+      <div class="row" style="margin-bottom:14px">
+        <div class="kid k2">LY</div>
+        <div class="grow"><b>Liew Yi Jin</b><div class="sub">Last topped up 2 Oct · 10 classes</div></div>
+        <div style="text-align:right"><div class="money" style="font-size:22px">8</div><div class="sub">left</div></div>
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="kid k3">LY</div>
+        <div class="grow"><b>Liew Yi Xin</b><div class="sub">Last topped up 6 Sep · 10 classes</div></div>
+        <div style="text-align:right"><div class="money" style="font-size:22px; color:var(--amber-tx)">2</div><div class="sub">left</div></div>
+      </div>
+    </div>
+
+    <div class="h">Recent activity</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <div class="grow"><b>Liew Yi Xin</b><div class="sub">Sun 19 Oct · class attended</div></div>
+        <div class="money" style="color:var(--red-tx)">−1</div>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <div class="grow"><b>Liew Li Yu</b><div class="sub">Sat 18 Oct · class attended</div></div>
+        <div class="money" style="color:var(--red-tx)">−1</div>
+      </div>
+      <div class="row">
+        <div class="grow"><b>Liew Li Yu</b><div class="sub">Thu 2 Oct · 10-class package</div></div>
+        <div class="money" style="color:var(--green-tx)">+10</div>
+      </div>
+    </div>
+  </main>
+  <nav>
+    <button><b>🏠</b>Home</button>
+    <button><b>📅</b>Schedule</button>
+    <button class="on"><b>🎟</b>Credits</button>
+    <button><b>🧾</b>Billing</button>
+  </nav>
+</section>
+
+<!-- ─── Billing ─────────────────────────────────────────────────────── -->
+<section id="s-billing" class="hidden">
+  <header>
+    <img src="../logo.png" alt="Star Swim">
+    <div class="who"><b>Liew Yek Yoong</b>4 swimmers</div>
+  </header>
+  <main>
+    <div class="h">Outstanding</div>
+    <div class="card" style="border-color:var(--amber-bd); background:var(--amber-bg)">
+      <div class="row">
+        <div class="grow">
+          <b>INV-2026-0412</b>
+          <div class="sub" style="color:var(--amber-tx)">Due 31 Oct · Liew Yi Xin · 10-class package</div>
+        </div>
+        <div class="money" style="font-size:19px">RM 450.00</div>
+      </div>
+    </div>
+
+    <div class="h">Paid</div>
+    <div class="card">
+      <div class="row" style="margin-bottom:14px">
+        <div class="grow"><b>INV-2026-0388</b>
+          <div class="sub">2 Oct · Liew Li Yu, Liew Yi Jin · 2 × 10-class</div>
+          <div class="sub">Receipt RC-2026-0351 · Bank transfer</div></div>
+        <div style="text-align:right">
+          <div class="money">RM 900.00</div>
+          <span class="pill p-green" style="margin-top:4px">Paid</span>
+        </div>
+      </div>
+      <div class="line"></div>
+      <div class="row">
+        <div class="grow"><b>INV-2026-0290</b>
+          <div class="sub">6 Sep · Liew Yi Xin · 10-class package</div>
+          <div class="sub">Receipt RC-2026-0266 · DuitNow</div></div>
+        <div style="text-align:right">
+          <div class="money">RM 420.00</div>
+          <span class="pill p-green" style="margin-top:4px">Paid</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sub" style="text-align:center; margin-top:18px">
+      Tap any invoice or receipt to open a printable copy.
+    </div>
+  </main>
+  <nav>
+    <button><b>🏠</b>Home</button>
+    <button><b>📅</b>Schedule</button>
+    <button><b>🎟</b>Credits</button>
+    <button class="on"><b>🧾</b>Billing</button>
+  </nav>
+</section>
+
+<script>
+  // A sketch, not the app. Every number on these screens is made up, and
+  // nothing here talks to the database. ?s=home|sched|credits|billing|otp
+  var want = new URLSearchParams(location.search).get('s') || 'login';
+  var ids = ['login','otp','home','child','sched','credits','billing'];
+  ids.forEach(function(i){
+    document.getElementById('s-'+i).classList.toggle('hidden', i !== want);
+  });
+</script>
+</body>
+</html>
