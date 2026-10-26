@@ -182,7 +182,7 @@
       body: JSON.stringify({ phone: phone })
     }).catch(asOffline).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
-        if (r.ok && d && d.known === true && !d.error) return true;
+        if (r.ok && d && d.known === true && !d.error) return d.channel || 'whatsapp';
         throw new Error((d && d.error)
           || 'We could not send a code just now. Please try again shortly.');
       });
@@ -536,9 +536,12 @@
     note($('loginNote'), '');
     this.disabled = true; this.textContent = 'Sending…';
     var btn = this;
-    sendCode(p).then(function () {
+    sendCode(p).then(function (channel) {
       pendingPhone = p;
-      $('otpSentTo').textContent = 'We sent it to ' + p;
+      // Which way it went matters: somebody waiting on WhatsApp will not
+      // think to look in their text messages.
+      $('otpSentTo').textContent = 'We sent it to ' + p
+        + (channel === 'sms' ? ' by SMS' : ' on WhatsApp');
       note($('otpNote'), '');
       $('code').value = '';
       hide($('s-login')); show($('s-otp'));
@@ -563,8 +566,8 @@
 
   $('resendCode').addEventListener('click', function () {
     var btn = this; btn.disabled = true; btn.textContent = 'Sending…';
-    sendCode(pendingPhone).then(function () {
-      note($('otpNote'), 'Sent again.');
+    sendCode(pendingPhone).then(function (channel) {
+      note($('otpNote'), 'Sent again' + (channel === 'sms' ? ', by SMS.' : ', on WhatsApp.'));
     }).catch(function (e) {
       note($('otpNote'), e.message, true);
     }).then(function () {

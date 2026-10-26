@@ -47,6 +47,12 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
+// How the code travels. Supabase defaults this to SMS and only sends by
+// WhatsApp if asked, so not asking is how a centre that chose WhatsApp
+// quietly pays SMS rates. Set PARENT_OTP_CHANNEL to "sms" to switch back
+// without touching this file.
+const CHANNEL = (Deno.env.get("PARENT_OTP_CHANNEL") ?? "whatsapp").toLowerCase();
+
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, content-type, apikey",
@@ -164,20 +170,35 @@ Deno.serve(async (req) => {
   // true here and only here: this request has already been checked
   // against the centre's own records, which is the thing Supabase cannot
   // do for us.
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
-    method: "POST",
-    headers: { apikey: ANON || SERVICE_ROLE, "Content-Type": "application/json" },
-    body: JSON.stringify({ phone, create_user: true }),
-  });
+  async function send(channel: string) {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/otp`, {
+      method: "POST",
+      headers: { apikey: ANON || SERVICE_ROLE, "Content-Type": "application/json" },
+      body: JSON.stringify({ phone, create_user: true, channel }),
+    });
+    return { ok: res.ok, status: res.status, text: res.ok ? "" : await res.text() };
+  }
 
-  if (!res.ok) {
-    const text = await res.text();
-    console.error("otp send failed", res.status, text);
+  let out = await send(CHANNEL);
+
+  // A parent with no WhatsApp is uncommon in Ipoh and not imaginary, and
+  // Twilio refuses that send rather than silently dropping it. One SMS
+  // costs more than one WhatsApp and far less than a family locked out,
+  // so it falls back once and says which way it went.
+  let usedChannel = CHANNEL;
+  if (!out.ok && CHANNEL === "whatsapp") {
+    console.error("whatsapp send failed, falling back to sms", out.status, out.text);
+    out = await send("sms");
+    usedChannel = "sms";
+  }
+
+  if (!out.ok) {
+    console.error("otp send failed", out.status, out.text);
     return reply({
       known: true,
       error: "We could not send a code just now. Please try again shortly.",
     }, 502);
   }
 
-  return reply({ known: true, phone });
+  return reply({ known: true, phone, channel: usedChannel });
 });
