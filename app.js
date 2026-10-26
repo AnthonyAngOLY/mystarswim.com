@@ -814,7 +814,12 @@ function App({ currentUser, onLogout }){
   }
 
   // ── Invoice CRUD ───────────────────────────────────────────────────
-  async function createInvoice({ accountName, accountEmail, accountPhone, lines, notes, dueDate, branchId }){
+  // accountId is what the parent app reads an invoice through. The name
+  // and phone are free text a person typed; two families can share
+  // either, and matching on them is how one family sees another's bill.
+  // A sale to somebody who is not an account passes null, and a null
+  // invoice is simply invisible in the parent app — the safe direction.
+  async function createInvoice({ accountId, accountName, accountEmail, accountPhone, lines, notes, dueDate, branchId }){
     // Read current settings (fresh from DB to get latest seq)
     const settRows = await selectRows('invoice_settings','*').catch(()=>[]);
     const sett = settRows?.[0] || invoiceSettings;
@@ -827,7 +832,7 @@ function App({ currentUser, onLogout }){
     const totalAmount = lines.reduce((s,l)=>s+Number(l.amount||0),0);
     const now = new Date();
     const inserted = await insertRows('invoices',{
-      invoice_number:invoiceNumber, account_name:accountName,
+      invoice_number:invoiceNumber, account_id:accountId||null, account_name:accountName,
       account_email:accountEmail||null, account_phone:accountPhone||null,
       status:'draft', issue_date:toDateStr(now), due_date:dueDate||null,
       notes:notes||null, total_amount:totalAmount, amount_paid:0,
@@ -854,8 +859,11 @@ function App({ currentUser, onLogout }){
   // Point-of-sale: create a product invoice (cash sale or against an account)
   // and, if paid now, immediately record the payment/receipt. Returns the
   // invoice + payment for on-screen confirmation and receipt printing.
-  async function createProductSale({ buyerName, buyerEmail, buyerPhone, branchId, lines, paid, paymentMethod, paymentDate, notes }){
+  async function createProductSale({ buyerAccountId, buyerName, buyerEmail, buyerPhone, branchId, lines, paid, paymentMethod, paymentDate, notes }){
     const invoiceId = await createInvoice({
+      // A walk-in buying goggles is not an account and must not acquire
+      // one by accident; a sale against an account passes its id.
+      accountId: buyerAccountId || null,
       accountName: buyerName || 'Cash Sale', accountEmail: buyerEmail || null, accountPhone: buyerPhone || null,
       lines, notes: notes || null, dueDate: null, branchId: branchId || null
     });
@@ -7416,7 +7424,8 @@ function ParentsView({ accountSection, setAccountSection, branches, parentGroups
             // Compute billing lines via the same helper BillingPreviewPanel uses
             const { allItems } = computeBillingLines(pg, groupById, packageById, lessonTypeById, lessonTypes);
             await createInvoice({
-              accountName:pg.name, accountEmail:pg.email, accountPhone:pg.phone,
+              accountId:pg.accountId, accountName:pg.name,
+              accountEmail:pg.email, accountPhone:pg.phone,
               lines:allItems,
               notes:'Batch generated', dueDate:null
             });
@@ -7572,7 +7581,7 @@ function ParentsView({ accountSection, setAccountSection, branches, parentGroups
             addSubscription={addSubscription}
             onClose={()=>setBillingKey(null)}
             onGenerateInvoice={async (lines, meta) => {
-              const id = await createInvoice({ accountName:pg.name, accountEmail:pg.email, accountPhone:pg.phone, lines, ...meta });
+              const id = await createInvoice({ accountId:pg.accountId, accountName:pg.name, accountEmail:pg.email, accountPhone:pg.phone, lines, ...meta });
               if(id){ setBillingKey(null); setAccountSection('invoices'); setView('accounts'); }
             }}
           />}
@@ -16075,7 +16084,7 @@ function ShopSale({ accounts, products, branches, currentBranchId, onCreateSale,
     setBusy(true);
     try{
       const lines=cart.map(c=>{ const q=Math.max(1,Number(c.quantity)||1); return { description: c.sku ? `${c.description} · SKU: ${c.sku}` : c.description, amount:q*(Number(c.unitPrice)||0), quantity:q, lineType:'product' }; });
-      const res=await onCreateSale({ buyerName, buyerEmail: mode==='account'?(acct?.email||null):null, buyerPhone: buyerPhone||null, branchId: branchId||null, lines, paid:paidNow, paymentMethod:method, paymentDate:date, notes:notes.trim()||null });
+      const res=await onCreateSale({ buyerAccountId: mode==='account'?(acct?.accountId||null):null, buyerName, buyerEmail: mode==='account'?(acct?.email||null):null, buyerPhone: buyerPhone||null, branchId: branchId||null, lines, paid:paidNow, paymentMethod:method, paymentDate:date, notes:notes.trim()||null });
       setResult(res); setShowPreview(false);
       if(res && res.payment){ setTimeout(()=>printReceipt(res.payment, res.invoice), 250); }
     }catch(e){ alert(e?.message||'Failed to create sale'); }

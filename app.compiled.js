@@ -1298,7 +1298,13 @@ function App({
   }
 
   // ── Invoice CRUD ───────────────────────────────────────────────────
+  // accountId is what the parent app reads an invoice through. The name
+  // and phone are free text a person typed; two families can share
+  // either, and matching on them is how one family sees another's bill.
+  // A sale to somebody who is not an account passes null, and a null
+  // invoice is simply invisible in the parent app — the safe direction.
   async function createInvoice({
+    accountId,
     accountName,
     accountEmail,
     accountPhone,
@@ -1329,6 +1335,7 @@ function App({
     const now = new Date();
     const inserted = await insertRows('invoices', {
       invoice_number: invoiceNumber,
+      account_id: accountId || null,
       account_name: accountName,
       account_email: accountEmail || null,
       account_phone: accountPhone || null,
@@ -1370,6 +1377,7 @@ function App({
   // and, if paid now, immediately record the payment/receipt. Returns the
   // invoice + payment for on-screen confirmation and receipt printing.
   async function createProductSale({
+    buyerAccountId,
     buyerName,
     buyerEmail,
     buyerPhone,
@@ -1381,6 +1389,9 @@ function App({
     notes
   }) {
     const invoiceId = await createInvoice({
+      // A walk-in buying goggles is not an account and must not acquire
+      // one by accident; a sale against an account passes its id.
+      accountId: buyerAccountId || null,
       accountName: buyerName || 'Cash Sale',
       accountEmail: buyerEmail || null,
       accountPhone: buyerPhone || null,
@@ -12897,6 +12908,7 @@ function ParentsView({
           allItems
         } = computeBillingLines(pg, groupById, packageById, lessonTypeById, lessonTypes);
         await createInvoice({
+          accountId: pg.accountId,
           accountName: pg.name,
           accountEmail: pg.email,
           accountPhone: pg.phone,
@@ -13105,6 +13117,7 @@ function ParentsView({
       onClose: () => setBillingKey(null),
       onGenerateInvoice: async (lines, meta) => {
         const id = await createInvoice({
+          accountId: pg.accountId,
           accountName: pg.name,
           accountEmail: pg.email,
           accountPhone: pg.phone,
@@ -31856,6 +31869,7 @@ function ShopSale({
         };
       });
       const res = await onCreateSale({
+        buyerAccountId: mode === 'account' ? acct?.accountId || null : null,
         buyerName,
         buyerEmail: mode === 'account' ? acct?.email || null : null,
         buyerPhone: buyerPhone || null,
