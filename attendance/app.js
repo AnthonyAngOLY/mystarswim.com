@@ -1376,8 +1376,67 @@
     }).then(function (rows) {
       rsShifts = rows || [];
       renderRoster();
+      return loadRosterLive();
     }).catch(function (e) {
       $('rosterList').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  // ── Draft or live ────────────────────────────────────────────────────
+  // A week is a draft until somebody publishes it: no alerts, invisible
+  // to staff, cannot be punched. The bar says which, because the two
+  // look identical on this screen otherwise and the difference is
+  // whether people are being chased for not turning up.
+  function loadRosterLive() {
+    return rpc('roster_week_state', { p_week_start: rsWeekStart })
+      .then(renderRosterLive)
+      .catch(function () { $('rsLive').innerHTML = ''; });
+  }
+
+  function liveSentence(when, by) {
+    var tail = [];
+    if (when) tail.push('published ' + when);
+    if (by)   tail.push('by ' + by);
+    return 'Staff see this week and can check in'
+      + (tail.length ? ' \u00b7 ' + tail.join(' ') : '') + '.';
+  }
+
+  function renderRosterLive(st) {
+    if (!st) { $('rsLive').innerHTML = ''; return; }
+    var live = !!st.live;
+    var when = st.published_at
+      ? new Intl.DateTimeFormat('en-GB', { timeZone: TZ, day: 'numeric', month: 'short',
+          hour: '2-digit', minute: '2-digit' }).format(new Date(st.published_at))
+      : '';
+    $('rsLive').innerHTML =
+      '<div class="livebar ' + (live ? 'live' : 'draft') + '">'
+      + '<b>' + (live ? '\u25cf LIVE' : '\u270e DRAFT') + '</b>'
+      // Built as a sentence rather than glued from fragments, because
+      // the glue left "can check in.." whenever there was no name to
+      // add — the sort of thing no test notices and every reader does.
+      + '<span>' + esc(live ? liveSentence(when, st.published_by)
+                            : 'Nobody sees this week and no absence alerts are raised.')
+      + '</span>'
+      + '<button id="rsFlip">' + (live ? 'Back to draft' : '\u25cf Go live') + '</button>'
+      + '</div>';
+
+    $('rsFlip').addEventListener('click', function () {
+      var past = Number(st.past_shifts || 0);
+      var msg = live
+        ? 'Take this week back to draft?\n\nStaff stop seeing it, no more alerts '
+          + 'are raised, and any raised for this week are closed.'
+        : 'Publish this week?\n\nStaff will see these ' + (st.shifts || 0)
+          + ' session(s) and can check in.'
+          + (past ? '\n\n' + past + ' of them are on days already past. Those are '
+                    + 'checked at once, and anyone who did not punch is marked absent.' : '');
+      if (!window.confirm(msg)) return;
+      var b = this; b.disabled = true; b.textContent = 'Working\u2026';
+      rpc('set_roster_week', { p_week_start: rsWeekStart, p_live: !live })
+        .then(function (res) {
+          if (!res || res.ok !== true) throw new Error((res && res.error) || 'Could not change that.');
+          return loadRoster();
+        })
+        .catch(function (e) { rosterNote(e.message, true); b.disabled = false; });
     });
   }
 

@@ -166,6 +166,10 @@ begin
       from shifts s
      where s.crew_id = v_me
        and s.is_void = false
+       -- A draft week is a roster nobody has been asked to work yet, so
+       -- it puts no coach beside any water. See
+       -- supabase_roster_draft_live.sql.
+       and roster_week_is_live(s.shift_date)
        and s.shift_date between p_from and p_to
   ),
   -- Crew: every class in the water they are standing beside, during the

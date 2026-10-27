@@ -13730,6 +13730,80 @@ function AttendanceLocationsView({ locations, saveLocation, retireLocation, sett
 // ── Attendance: Roster ───────────────────────────────────────────────────
 // One week at a time, a row per worker. Sessions are dated rows (shifts);
 // recurring patterns come in Phase 4, so everything here is an explicit date.
+// ── Draft or live ─────────────────────────────────────────────────────────
+// A week of roster is a draft until somebody publishes it. The banner is
+// loud on purpose: a draft week looks exactly like a live one otherwise,
+// and the difference is whether staff are being chased for not turning
+// up to it. See supabase_roster_draft_live.sql.
+function RosterLiveBar({ weekStart, onChanged }){
+  const [st,setSt]=useState(null);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+
+  async function load(){
+    try{
+      const out=await rest('rpc/roster_week_state',
+        { method:'POST', body: JSON.stringify({ p_week_start: weekStart }) });
+      setSt(out && typeof out==='object' ? out : null); setErr('');
+    }catch(e){ setErr(e.message); setSt(null); }
+  }
+  useEffect(()=>{ load(); },[weekStart]);
+
+  async function flip(live){
+    // Publishing a week whose days have already gone is how a morning of
+    // false absences happens, so the count is in the question.
+    const past = Number(st?.past_shifts||0);
+    const msg = live
+      ? `Publish ${weekRangeLabel(weekStart)}?\n\n`
+        + `Staff will see these ${st?.shifts||0} session(s) on their phones and can check in.\n`
+        + (past
+            ? `\n${past} of them are on days that have already passed. Those will be `
+              + `checked immediately, and anyone who did not punch will be marked absent.\n`
+            : '')
+      : `Take ${weekRangeLabel(weekStart)} back to draft?\n\n`
+        + 'Staff stop seeing it, no more alerts are raised, and any that were '
+        + 'raised for this week are closed.\n';
+    if(!confirm(msg)) return;
+    setBusy(true); setErr('');
+    try{
+      await rpcCall('set_roster_week',{ p_week_start: weekStart, p_live: live });
+      await load();
+      if(onChanged) await onChanged();
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  }
+
+  if(!st) return err
+    ? <div className="note err" style={{marginBottom:10}}>{err}</div>
+    : null;
+
+  const live = !!st.live;
+  const when = st.published_at
+    ? new Date(st.published_at).toLocaleString(undefined,
+        {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})
+    : null;
+
+  return <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',
+      marginBottom:12,padding:'10px 12px',borderRadius:10,
+      background: live ? '#ECFDF5' : '#FFFBEB',
+      border: '1px solid ' + (live ? '#A7F3D0' : '#FCD34D')}}>
+    <span style={{fontWeight:800,color: live ? '#059669' : '#B45309'}}>
+      {live ? '● LIVE' : '✎ DRAFT'}
+    </span>
+    <span className="small" style={{color: live ? '#059669' : '#B45309',flex:1,minWidth:200}}>
+      {live
+        ? <>Staff can see this week and check in{when ? ` · published ${when}` : ''}
+            {st.published_by ? ` by ${st.published_by}` : ''}.</>
+        : <>Nobody can see this week and no absence alerts are raised.
+            Build it here, then publish when it is agreed.</>}
+    </span>
+    <button className={`btn small ${live?'btn-ghost':'btn-primary'}`} disabled={busy}
+      onClick={()=>flip(!live)}>
+      {busy ? 'Working…' : (live ? 'Back to draft' : '● Go live')}
+    </button>
+  </div>;
+}
+
 function AttendanceRosterView({ shifts, locations, categories, employees, weekStart, setWeekStart, saveShift, voidShift, copyPreviousWeek, addShiftSeries, onRefresh }){
   const [modal,setModal]=useState(null);
   const [busy,setBusy]=useState(false);
@@ -13833,6 +13907,7 @@ function AttendanceRosterView({ shifts, locations, categories, employees, weekSt
                  incomplete:'#B45309', geofence_flag:'#B45309', on_time:'#059669' };
 
   return <div className="card">
+    <RosterLiveBar weekStart={weekStart} onChanged={onRefresh}/>
     <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
       <div style={{fontWeight:800}}>Roster</div>
       <div className="period-stepper" style={{margin:0}}>

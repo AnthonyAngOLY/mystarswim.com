@@ -149,6 +149,14 @@ Deno.serve(async (req) => {
     if (!shift || shift.is_void) return json({ error: "Session not found." }, 404);
     if (shift.crew_id !== crew.id) return json({ error: "That is not your session." }, 403);
 
+    // A roster still being drafted is not one anybody has been asked to
+    // work. It is already invisible on the phone, so reaching this means
+    // a stale screen or a kept link — either way the answer is the same
+    // as for a session that is not there, because as far as the worker
+    // is concerned it is not.
+    const { data: liveWeek } = await db.rpc("roster_week_is_live", { p_date: shift.shift_date });
+    if (liveWeek !== true) return json({ error: "Session not found." }, 404);
+
     const [{ data: settings }, { data: loc }] = await Promise.all([
       db.from("attendance_settings").select("*").single(),
       db.from("locations").select("id, name, lat, lng, radius_m").eq("id", shift.location_id).single(),

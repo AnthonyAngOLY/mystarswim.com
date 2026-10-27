@@ -146,6 +146,19 @@
   /* ── Classes: the swimmers in front of the coach ───────────────── */
   /* A day strip rather than a separate week screen: looking ahead is one
      tap, and a fourth tab nobody presses is not a feature. */
+  /* Draft or live, on the week the office is looking at. Loud, because a
+     draft week looks exactly like a live one otherwise. */
+  .livebar{display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+    padding:9px 11px; border-radius:11px; margin-bottom:10px; font-size:12.5px; line-height:1.45}
+  .livebar.draft{background:var(--amber-bg); border:1px solid var(--amber-bd); color:var(--amber-tx)}
+  .livebar.live {background:var(--green-bg); border:1px solid var(--green-bd); color:var(--green-tx)}
+  .livebar b{font-size:12.5px; font-weight:800; flex:none}
+  .livebar span{flex:1; min-width:150px}
+  .livebar button{flex:none; border-radius:9px; padding:7px 11px; font:inherit;
+    font-size:12.5px; font-weight:800; cursor:pointer; border:1px solid var(--border);
+    background:var(--surface); color:var(--text)}
+  .livebar.draft button{background:var(--primary); border-color:var(--primary); color:#fff}
+
   .daystrip{display:flex; gap:5px; overflow-x:auto; padding:2px 0 8px; -webkit-overflow-scrolling:touch}
   .daystrip button{
     flex:1 0 auto; min-width:44px; padding:7px 4px; border-radius:10px; cursor:pointer;
@@ -530,6 +543,7 @@
         <div class="wk-label" id="wkLabel"></div>
         <button class="wk-arrow" id="wkNext" aria-label="Next week">›</button>
       </div>
+      <div id="rsLive"></div>
       <div class="day-strip" id="dayStrip"></div>
       <h2 class="rs-day" id="rsDayLabel"></h2>
       <div id="rosterMsg"></div>
