@@ -261,11 +261,23 @@ comment on function get_my_session_roster(date, date, boolean) is
 -- Moving between attended and absent moves no credit, because one has
 -- already been taken. That is the rule the office screen already
 -- applies, written once here instead of twice.
-create or replace function mark_attendance(p_row_id uuid, p_state text)
+-- Dropped first, not replaced: adding a parameter with a default makes
+-- a second function rather than changing this one, and then every
+-- two-argument call is ambiguous between them and fails.
+drop function if exists mark_attendance(uuid, text);
+
+-- p_confirm: the caller has seen the no-credit warning and is marking
+-- anyway. Without it, a swimmer with nothing left comes back as a
+-- question rather than a deduction — see supabase_class_credit_policy.sql.
+create or replace function mark_attendance(
+  p_row_id uuid, p_state text, p_confirm boolean default false)
 returns jsonb
 language plpgsql security definer set search_path = public
 as $$
 declare
+  st          class_policy_settings;
+  v_before    numeric;
+  v_child     text;
   v_me        uuid;
   v_office    boolean;
   v_old       text;
@@ -276,6 +288,7 @@ declare
   v_cancelled boolean;
   v_mine      boolean;
   v_delta     int;
+  v_moved     int := 0;
   v_bal       numeric;
 begin
   if p_state not in ('pending', 'attended', 'absent') then
@@ -330,6 +343,38 @@ begin
     return jsonb_build_object('ok', true, 'state', p_state, 'credit_moved', 0);
   end if;
 
+  -- ── The no-credit question ──
+  -- Asked whether or not the centre allows a balance below nil: a
+  -- swimmer in the water who has not paid is the same fact either way,
+  -- and the person marking them is the one placed to say something.
+  select * into st from class_policy_settings where id;
+  if v_old = 'pending' and p_state in ('attended', 'absent')
+     and v_sid is not null and v_lt is not null then
+    select coalesce(b.remaining_balance, 0) into v_before
+      from student_credit_balances b
+     where b.student_id = v_sid and b.lesson_type_id = v_lt;
+    v_before := coalesce(v_before, 0);
+
+    if v_before <= 0 and not coalesce(p_confirm, false) then
+      select wss.student_name into v_child
+        from weekly_session_students wss where wss.id = p_row_id;
+      return jsonb_build_object(
+        'ok', false, 'needs_confirm', true,
+        'balance', v_before,
+        'child', coalesce(v_child, 'This swimmer'),
+        'allow_negative', coalesce(st.allow_negative_credits, true),
+        'error', coalesce(v_child, 'This swimmer')
+          || (case when v_before = 0 then ' has no credits left.'
+                   else ' is already ' || abs(v_before) || ' class'
+                        || (case when abs(v_before) = 1 then '' else 'es' end)
+                        || ' in arrears.' end)
+          || ' Billing or a renewal is needed.'
+          || (case when coalesce(st.allow_negative_credits, true)
+                   then ' Marking them records the class as unpaid.'
+                   else ' Marking them records the class as unpaid; the balance stays at nil.' end));
+    end if;
+  end if;
+
   -- attended and absent both consume; pending does not.
   v_delta := case
     when v_old = 'pending' and p_state in ('attended','absent') then -1
@@ -344,28 +389,61 @@ begin
     -- The ledger first, because it is the record. The balance is a cache
     -- of it, and a cache that moves without the record behind it is how
     -- nobody can say why a swimmer is short a class.
+    --
+    -- A class taken with nothing in hand is written as attendance_unpaid
+    -- rather than attendance, so the defaulters report can find it
+    -- whichever way the negative-balance rule is set.
     insert into credit_purchases
       (student_id, lesson_type_id, purchase_date, credits_added, source, notes)
     values
-      (v_sid, v_lt, v_date, v_delta, 'attendance',
+      (v_sid, v_lt, v_date,
+       -- With negatives switched off the balance does not move, so the
+       -- ledger must not claim it did, or the two drift apart and
+       -- nobody can say which is right.
+       case when v_delta < 0 and coalesce(v_before, 1) <= 0
+                 and not coalesce(st.allow_negative_credits, true)
+            then 0 else v_delta end,
+       case when v_delta < 0 and coalesce(v_before, 1) <= 0
+            then 'attendance_unpaid' else 'attendance' end,
        case when v_delta < 0 then 'Marked ' || p_state else 'Un-marked, was ' || v_old end);
 
-    -- No floor at zero: a swimmer who attends with none left reads −1,
-    -- which is the office seeing a class owed rather than not seeing it.
+    -- Whether a balance may go below nil is the centre's rule. Allowed,
+    -- it reads −1 and the office sees a class owed. Not allowed, it
+    -- stops at nil and the unpaid class is counted in the ledger
+    -- instead — the debt is recorded either way, only differently.
     insert into student_credit_balances
       (student_id, lesson_type_id, initial_balance, remaining_balance)
-    values (v_sid, v_lt, 0, v_delta)
+    values (v_sid, v_lt, 0,
+            case when v_delta < 0 and not coalesce(st.allow_negative_credits, true)
+                 then 0 else v_delta end)
     on conflict (student_id, lesson_type_id) do update
-      set remaining_balance = student_credit_balances.remaining_balance + v_delta,
+      set remaining_balance =
+            case when not coalesce(st.allow_negative_credits, true)
+                 then greatest(0, student_credit_balances.remaining_balance + v_delta)
+                 else student_credit_balances.remaining_balance + v_delta end,
           updated_at = now();
 
     select remaining_balance into v_bal
       from student_credit_balances
      where student_id = v_sid and lesson_type_id = v_lt;
+
+    v_moved := case when v_delta < 0 and coalesce(v_before, 1) <= 0
+                         and not coalesce(st.allow_negative_credits, true)
+                    then 0 else v_delta end;
   end if;
 
+  -- What actually moved, not what was intended. With negatives switched
+  -- off the balance holds at nil, and saying a credit was taken when
+  -- none was is how a coach and the office end up with two different
+  -- accounts of the same class.
   return jsonb_build_object('ok', true, 'state', p_state,
-                            'credit_moved', v_delta, 'balance', v_bal);
+                            'credit_moved', v_moved,
+                            -- Taken with nothing in hand. True whichever
+                            -- way the negative rule is set: the class was
+                            -- unpaid either way, and only the balance
+                            -- behaves differently. Matches the ledger row.
+                            'unpaid', (v_delta < 0 and coalesce(v_before, 1) <= 0),
+                            'balance', v_bal);
 end $$;
 
 comment on function mark_attendance(uuid, text) is
