@@ -1319,7 +1319,27 @@
         var next = (cur.attendance_status === want) ? 'pending' : want;
         clsBusy = row;
         b.disabled = true;
-        rpc('mark_attendance', { p_row_id: row, p_state: next }).then(function (res) {
+
+        function send(confirmed) {
+          return rpc('mark_attendance',
+            { p_row_id: row, p_state: next, p_confirm: !!confirmed });
+        }
+
+        send(false).then(function (res) {
+          // A swimmer with nothing left comes back as a question, not a
+          // refusal. The coach is the one standing next to them and the
+          // only person placed to say "have a word at the desk".
+          if (res && res.ok === false && res.needs_confirm) {
+            var ask = res.error + '\n\n'
+              + (res.allow_negative
+                  ? 'Mark them anyway? The office will see the class as owed.'
+                  : 'Mark them anyway? The class is recorded as unpaid.');
+            if (!window.confirm(ask)) { clsBusy = null; b.disabled = false; return null; }
+            return send(true);
+          }
+          return res;
+        }).then(function (res) {
+          if (res === null) return;
           clsBusy = null;
           if (!res || res.ok !== true) {
             renderClasses();

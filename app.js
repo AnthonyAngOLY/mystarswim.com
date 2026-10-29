@@ -2076,7 +2076,46 @@ function App({ currentUser, onLogout }){
     if(!canEditSess){ alert('Replacements are handled by a Scheduler.'); return false; }
     if(!studentId || !sessionId || !lessonTypeId){ alert('Cannot mark for replacement: missing session information.'); return false; }
     const label = `${DAYS_S[day]} ${minuteToTime(startMinute)}`;
-    if(!confirm(`Move this swimmer out of ${lessonTypeName} ${label} for replacement?\n\nThey will become a replacement candidate in any other ${lessonTypeName} class this week. The original slot will be released.`)) return false;
+
+    // When the parent told us, which is what the notice rule measures —
+    // not when this button was pressed. Pre-filled with now, because that
+    // is right nearly always; corrected when entering yesterday's call.
+    const nowLocal = (() => { const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset());
+      return d.toISOString().slice(0,16); })();
+    const told = prompt(
+      `When did the parent tell us?\n\n`
+      + `Leave as it is if they are telling you now. Change it if you are entering a call from `
+      + `earlier — the notice we were given is measured from this.`,
+      nowLocal);
+    if(told === null) return false;
+    const requestedAt = new Date(told);
+    if(isNaN(requestedAt.getTime())){ alert('That is not a date and time I can read.'); return false; }
+
+    // Records the request and settles it against the notice rule. This is
+    // also where the policy can say no.
+    let verdict;
+    try{
+      verdict = await rpcCall('request_replacement', {
+        p_student_id: studentId, p_session_id: sessionId,
+        p_requested_at: requestedAt.toISOString() });
+    }catch(err){ alert(err.message); return false; }
+
+    const hrs = Number(verdict?.notice_hours ?? 0);
+    const noticeSaid = hrs >= 48 ? `${Math.floor(hrs/24)} days' notice`
+                     : hrs >= 1  ? `${Math.round(hrs)} hours' notice`
+                     : hrs >= 0  ? 'less than an hour\u2019s notice'
+                                 : 'notice only after the class had run';
+    if(!confirm(
+        `Move this swimmer out of ${lessonTypeName} ${label} for replacement?\n\n`
+        + `${verdict?.is_emergency ? '\u26a0 Recorded as an emergency \u2014 ' : ''}${noticeSaid}`
+        + `${verdict?.is_emergency ? `, under the ${verdict.policy_hours}-hour rule.` : '.'}\n\n`
+        + `They become a replacement candidate in any other ${lessonTypeName} class this week. `
+        + `The original slot is released.`)){
+      await rpcCall('cancel_replacement_request',
+        { p_student_id: studentId, p_lesson_type_id: lessonTypeId,
+          p_reason: 'Not confirmed at the prompt' }).catch(()=>{});
+      return false;
+    }
     try{
       await deleteRows('weekly_session_students', { session_id: sessionId, student_id: studentId });
       // Upsert pending entry — re-marking the same swimmer simply refreshes it.
@@ -2983,6 +3022,13 @@ function App({ currentUser, onLogout }){
         for(const r of replRows){
           if(r.studentId && lt?.id && pendingByKey[`${r.studentId}:${lt.id}:${wk}`]){
             try{ await deleteRows('replacement_pending', { student_id: r.studentId, week_start_date: wk, lesson_type_id: lt.id }); } catch(_){}
+            // Close the request off as placed. Best effort: a replacement
+            // arranged before this existed, or outside the flow, still
+            // happened, and failing to close a record is not a reason to
+            // fail the placement in front of the parent.
+            try{ await rpcCall('mark_replacement_placed', {
+              p_student_id: r.studentId, p_lesson_type_id: lt.id,
+              p_placed_session_id: sessionId || null }); } catch(_){}
           }
         }
         await loadReplacementPending();
@@ -3017,12 +3063,32 @@ function App({ currentUser, onLogout }){
     finally{ setSaveBusy(false); }
   }
 
+  // The credit rule lives in the database, not here. This used to patch
+  // the balance directly, which had three faults: it gave up silently
+  // when a swimmer had no balance row, so their first class cost
+  // nothing; it floored at zero, so arrears were invisible; and it wrote
+  // no ledger row, so nobody could say why a swimmer was short.
   async function adjustCredit(studentId, lessonTypeId, delta){
-    const key = creditKey(studentId, lessonTypeId);
-    const bal = creditByKey[key];
-    if(!bal) return;
-    const next = Math.max(0, (bal.remaining_balance || 0) + delta);
-    try{ await patchRows('student_credit_balances', { student_id: studentId, lesson_type_id: lessonTypeId }, { remaining_balance: next, updated_at: new Date().toISOString() }); await loadCreditBalances(); }
+    async function go(confirmed){
+      const res = await rest('rpc/adjust_credit', { method:'POST', body: JSON.stringify({
+        p_student_id: studentId, p_lesson_type_id: lessonTypeId,
+        p_delta: delta, p_confirm: !!confirmed }) });
+      return Array.isArray(res) ? res[0] : res;
+    }
+    try{
+      let r = await go(false);
+      if(r && r.ok === false && r.needs_confirm){
+        if(!confirm(`${r.error}\n\n`
+            + (r.allow_negative
+                ? 'Mark it anyway? The balance will go below nil and they will show on '
+                  + 'Reports \u2192 Unpaid classes.'
+                : 'Mark it anyway? The balance stays at nil and the class is recorded as '
+                  + 'unpaid on Reports \u2192 Unpaid classes.'))) return;
+        r = await go(true);
+      }
+      if(r && r.ok === false) throw new Error(r.error || 'Failed to adjust credit');
+      await loadCreditBalances();
+    }
     catch(err){ alert(err.message || 'Failed to adjust credit'); }
   }
 
@@ -4656,7 +4722,7 @@ function App({ currentUser, onLogout }){
       {/* ── Accounts: left-column nav + content ── */}
       {!loading && view==='accounts' && <div className="side-shell">
         <SectionNav ariaLabel="Accounts section" value={accountSection} onChange={setAccountSection}
-          items={[['accounts','Accounts'],['familyGroups','Groups'],['swimmers','Swimmers'],['invoices','Invoices'],['receipts','Receipts'],['pendingCredits','Pending Credits'],['aging','Aging'],['codes','Discounts'],...(canSystem?[['reports','Reports']]:[])]} />
+          items={[['accounts','Accounts'],['familyGroups','Groups'],['swimmers','Swimmers'],['invoices','Invoices'],['receipts','Receipts'],['pendingCredits','Pending Credits'],['replacements','Replacements'],['aging','Aging'],['codes','Discounts'],...(canSystem?[['reports','Reports']]:[])]} />
         <div className="side-content">
           {['accounts','familyGroups','swimmers','invoices','receipts'].includes(accountSection) && <div style={{marginBottom:12,maxWidth:440}}>
             <input className="input" value={accountSearchQ} onChange={e=>setAccountSearchQ(e.target.value)}
@@ -4772,6 +4838,7 @@ function App({ currentUser, onLogout }){
         groupById={id => groupById[id]} lessonTypeById={lessonTypeById}
         packageById={packageById} onConfirm={confirmCredit} onReverse={reverseCredit}
       />}
+      {!loading && view==='accounts' && accountSection==='replacements' && <ReplacementTrackerView/>}
       {!loading && view==='accounts' && accountSection==='aging' && <AgingReportView invoices={invoices} pmts={pmts} branches={options.branches||[]} />}
       {!loading && view==='accounts' && accountSection==='reports' && canSystem && <ReportsView
         invoices={invoices} pmts={pmts} pendingCredits={pendingCredits}
@@ -4826,11 +4893,12 @@ function App({ currentUser, onLogout }){
       {/* ── Settings: left-column nav + content ── */}
       {!loading && view==='settings' && canSettings && <div className="side-shell">
         <SectionNav ariaLabel="Settings section" value={adminSection} onChange={setAdminSection}
-          items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users'],...(isOwner?[['retention','Documents']]:[])]} />
+          items={[['summary','Summary'],['branches','Branches'],['pools','Pools & Hours'],['instructors','Instructors'],['lessonTypes','Lesson Types'],['classPolicy','Credits & Classes'],['programme','Programme'],['terms','Terms'],['billingTerms','Billing Terms'],['products','Products'],['paymentMethods','Payment Methods'],['invoiceSettings','Invoice Numbering'],['website','Website'],['users','Users'],...(isOwner?[['retention','Documents']]:[])]} />
         <div className="side-content">
           {adminSection==='retention' && isOwner && <DocRetentionView
             months={docRetentionMonths} setMonths={saveDocRetention}
             runPurge={runLeaveDocPurge} />}
+          {adminSection==='classPolicy' && <ClassPolicyView/>}
           {adminSection==='summary' && <SummaryView summary={summary} pools={activePools()} />}
           {adminSection==='branches' && <BranchesAdminView
             branches={options.branches||[]}
@@ -6939,6 +7007,361 @@ function StudentEditor({ row, lessonTypes, packages, onSave, hideAccountSections
 }
 
 // ============================================================================
+// ── Reports › Unpaid classes ──────────────────────────────────────────────
+// Swimmers who have been in the water without a credit for it. Read from
+// the ledger rather than the balance, so it is right whether or not the
+// centre lets a balance go below nil — with negatives off the balance
+// says nothing and the ledger still knows.
+function UnpaidClassesReport(){
+  const [rows,setRows]=useState(null);
+  const [st,setSt]=useState(null);
+  const [err,setErr]=useState('');
+
+  async function load(){
+    try{
+      const [d,p]=await Promise.all([
+        rest('rpc/credit_defaulters',{ method:'POST', body:'{}' }),
+        selectRows('class_policy_settings','*','&limit=1')
+      ]);
+      setRows(Array.isArray(d)?d:[]); setSt(p?.[0]||null); setErr('');
+    }catch(e){ setErr(e.message); setRows([]); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  if(rows===null) return <div className="card"><div className="small subtle">Loading…</div></div>;
+
+  const owed = rows.reduce((a,r)=>a+Number(r.unpaid_classes||0),0);
+  const neg  = !!st?.allow_negative_credits;
+
+  return <div>
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800}}>💳 Unpaid classes</div>
+          <div className="small subtle" style={{marginTop:4}}>
+            Swimmers who have attended a class they had no credit for. Somebody to ring about
+            a renewal, not a fault.
+          </div>
+        </div>
+        <button className="btn btn-ghost small" onClick={load}>↻ Refresh</button>
+      </div>
+      {!!rows.length && <div className="note" style={{marginTop:12,fontSize:13,
+          background:'var(--amber-bg)',border:'1px solid var(--amber-bd)',color:'#B45309'}}>
+        <b>{owed}</b> class{owed===1?'':'es'} taken without credit, across <b>{rows.length}</b> swimmer
+        {rows.length===1?'':'s'}.
+        {neg ? ' Balances are allowed below nil, so the balance column is the arrears.'
+             : ' Balances stop at nil, so the count is the arrears rather than the balance.'}
+      </div>}
+    </div>
+
+    {err && <div className="note err" style={{marginBottom:10}}>{err}</div>}
+
+    <div className="card">
+      {!rows.length
+        ? <div className="empty" style={{padding:26}}>Nobody owes a class. Everything is paid up.</div>
+        : <table>
+            <thead><tr>
+              <th>Swimmer</th><th>Parent</th><th>Phone</th><th>Lesson type</th>
+              <th className="num">Balance</th><th className="num">Unpaid</th><th>Last one</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r,i)=><tr key={(r.student_id||'')+i}>
+                <td style={{fontWeight:700}}>{r.child}</td>
+                <td className="small subtle">{r.parent}</td>
+                <td className="small">{r.parent_phone
+                  ? <a className="plain" href={`https://wa.me/${String(r.parent_phone).replace(/[^0-9]/g,'')}`}
+                       target="_blank" rel="noopener noreferrer"
+                       style={{color:'#16A34A',fontWeight:700}}>💬 {r.parent_phone}</a>
+                  : <span className="subtle">no number</span>}</td>
+                <td className="small">{r.lesson}</td>
+                <td className="num" style={Number(r.balance)<0?{color:'#DC2626',fontWeight:800}:undefined}>
+                  {Number(r.balance||0)}</td>
+                <td className="num" style={{fontWeight:800}}>{r.unpaid_classes}</td>
+                <td className="small subtle">{r.last_unpaid_on
+                  ? new Date(r.last_unpaid_on+'T00:00:00').toLocaleDateString(undefined,
+                      {day:'numeric',month:'short'})
+                  : '—'}</td>
+              </tr>)}
+            </tbody>
+          </table>}
+    </div>
+  </div>;
+}
+
+// ── Accounts › Replacements ───────────────────────────────────────────────
+// How often each swimmer misses a class, and how often they tell us too
+// late to count as notice. Its own page rather than a tab under Reports,
+// because Reports is sysadmin-only and this is a scheduler's screen.
+function ReplacementTrackerView(){
+  const [rows,setRows]=useState(null);
+  const [st,setSt]=useState(null);
+  const [q,setQ]=useState('');
+  const [only,setOnly]=useState('all'); // all | over | any
+  const [err,setErr]=useState('');
+
+  async function load(){
+    try{
+      const [t,p]=await Promise.all([
+        rest('rpc/replacement_tracker',{ method:'POST', body:'{}' }),
+        selectRows('class_policy_settings','*','&limit=1')
+      ]);
+      setRows(Array.isArray(t)?t:[]); setSt(p?.[0]||null); setErr('');
+    }catch(e){ setErr(e.message); setRows([]); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  if(rows===null) return <div className="card"><div className="small subtle">Loading…</div></div>;
+
+  const needle=q.trim().toLowerCase();
+  const shown=rows.filter(r=>
+    (!needle || String(r.child||'').toLowerCase().includes(needle)
+             || String(r.parent||'').toLowerCase().includes(needle))
+    && (only==='all' || (only==='over' ? r.over_limit : Number(r.emergency_replacements||0)>0)));
+
+  const trackedFrom = rows[0]?.emergency_tracked_from;
+  const limit = Number(st?.emergency_rate_limit||0.25);
+  const overCount = rows.filter(r=>r.over_limit).length;
+  const pc = n => (Number(n||0)*100).toFixed(0)+'%';
+
+  return <div>
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800}}>🔁 Replacements</div>
+          <div className="small subtle" style={{marginTop:4}}>
+            Every swimmer, how many classes they have had, and how many they have asked to
+            replace. A request with less than {st?.replacement_notice_hours||24} hours notice
+            counts as an emergency.
+          </div>
+        </div>
+        <button className="btn btn-ghost small" onClick={load}>↻ Refresh</button>
+      </div>
+
+      {/* The honest line. Replacement counts go back through the whole
+          history; emergencies only start from the day notice began being
+          recorded, because it never was before. */}
+      <div className="note info" style={{marginTop:12,fontSize:13}}>
+        <b>Replacements</b> are counted from each swimmer's whole history.
+        <b> Emergencies</b> are counted from {trackedFrom
+          ? new Date(trackedFrom+'T00:00:00').toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'})
+          : 'today'}, which is when we started recording when a parent told us. Nothing before
+        that can be sorted into late or planned, so it is not guessed at.
+      </div>
+
+      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',marginTop:12}}>
+        <input className="input" style={{maxWidth:260}} placeholder="Search swimmer or parent…"
+               value={q} onChange={e=>setQ(e.target.value)}/>
+        <button className={`btn small ${only==='all'?'btn-primary':'btn-ghost'}`} onClick={()=>setOnly('all')}>
+          All ({rows.length})</button>
+        <button className={`btn small ${only==='any'?'btn-primary':'btn-ghost'}`} onClick={()=>setOnly('any')}>
+          Any emergency ({rows.filter(r=>Number(r.emergency_replacements||0)>0).length})</button>
+        <button className={`btn small ${only==='over'?'btn-primary':'btn-ghost'}`} onClick={()=>setOnly('over')}>
+          Over {pc(limit)} ({overCount})</button>
+      </div>
+    </div>
+
+    {err && <div className="note err" style={{marginBottom:10}}>{err}</div>}
+
+    <div className="card">
+      {!shown.length
+        ? <div className="empty" style={{padding:26}}>Nobody matches that.</div>
+        : <table>
+            <thead><tr>
+              <th>Swimmer</th><th>Parent</th>
+              <th className="num">Classes</th>
+              <th className="num">Replaced</th>
+              <th className="num">Emergency</th>
+              <th className="num">Rate</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {shown.map(r=><tr key={r.student_id}
+                  style={r.over_limit?{background:'#FFF1F1'}:undefined}>
+                <td style={{fontWeight:700}}>{r.child}</td>
+                <td className="small subtle">{r.parent}</td>
+                <td className="num">{r.classes}</td>
+                <td className="num">{r.replacements}
+                  {Number(r.classes)>0 && <span className="small subtle"> ({pc(r.replacement_rate)})</span>}</td>
+                <td className="num" style={Number(r.emergency_replacements)>0?{fontWeight:800}:undefined}>
+                  {r.emergency_replacements}</td>
+                <td className="num" style={r.over_limit?{fontWeight:800,color:'#DC2626'}:undefined}>
+                  {r.enough_history ? pc(r.emergency_rate) : '—'}</td>
+                <td>
+                  {r.over_limit
+                    ? <span className="pill" style={{background:'#FEE2E2',color:'#991B1B',
+                        border:'1px solid #FCA5A5',fontSize:11,fontWeight:800,
+                        padding:'2px 8px',borderRadius:999}}>Over the limit</span>
+                    : !r.enough_history
+                      ? <span className="small subtle">too few classes to judge</span>
+                      : null}
+                </td>
+              </tr>)}
+            </tbody>
+          </table>}
+    </div>
+
+    {!st?.enforce_emergency_limit && overCount>0 && <div className="note" style={{marginTop:12,
+        background:'var(--amber-bg)',border:'1px solid var(--amber-bd)',color:'#B45309',fontSize:13}}>
+      {overCount} swimmer{overCount===1?' is':'s are'} over {pc(limit)}, and nothing is being
+      refused — the rule is switched off in Settings → Credits &amp; Classes. Worth leaving off
+      until these numbers have had a term to settle.
+    </div>}
+  </div>;
+}
+
+// ── Settings › Credits & Classes ──────────────────────────────────────────
+// The rules the centre used to keep in its head, in the one place it can
+// change them. Everything here is a decision somebody at Star Swim makes,
+// not a technical setting — so each one says what it will do, in the
+// terms the person flipping it thinks in.
+function ClassPolicyView(){
+  const [st,setSt]=useState(null);
+  const [dirty,setDirty]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [err,setErr]=useState('');
+  const [msg,setMsg]=useState('');
+
+  async function load(){
+    try{
+      const r=await selectRows('class_policy_settings','*','&limit=1');
+      setSt(r?.[0]||null); setDirty(false); setErr('');
+    }catch(e){ setErr(e.message); }
+  }
+  useEffect(()=>{ load(); },[]);
+  function up(k,v){ setSt(x=>({...x,[k]:v})); setDirty(true); setMsg(''); }
+
+  async function save(){
+    setBusy(true); setErr(''); setMsg('');
+    try{
+      const keep=['replacements_enabled','replacement_notice_hours','emergency_rate_limit',
+                  'enforce_emergency_limit','emergency_min_classes','allow_negative_credits'];
+      const patch={}; keep.forEach(k=>{ patch[k]=st[k]; });
+      patch.updated_at=new Date().toISOString();
+      await patchRows('class_policy_settings',{id:true},patch);
+      setMsg('Saved.'); setDirty(false);
+    }catch(e){ setErr(e.message); }
+    setBusy(false);
+  }
+
+  if(!st) return <div className="card">{err
+    ? <div className="note err">{err}</div>
+    : <div className="small subtle">Loading…</div>}</div>;
+
+  const pct = Math.round(Number(st.emergency_rate_limit||0.25)*100);
+  const oneIn = Math.round(1/Number(st.emergency_rate_limit||0.25));
+
+  return <div style={{maxWidth:760}}>
+    <div className="card">
+      <div style={{fontSize:18,fontWeight:800}}>Credits &amp; Classes</div>
+      <div className="small subtle" style={{marginTop:4}}>
+        How missed classes may be made up, and what happens when a swimmer attends
+        one they have not paid for.
+      </div>
+    </div>
+    {err && <div className="note err" style={{margin:'10px 0'}}>{err}</div>}
+    {msg && <div className="note ok" style={{margin:'10px 0'}}>{msg}</div>}
+
+    <div className="card" style={{marginTop:12}}>
+      <div style={{fontWeight:800,marginBottom:10}}>🔁 Replacement classes</div>
+
+      <label style={{display:'flex',gap:8,alignItems:'flex-start',fontWeight:700}}>
+        <input type="checkbox" checked={!!st.replacements_enabled}
+               onChange={e=>up('replacements_enabled',e.target.checked)}/>
+        <span>Allow a missed class to be replaced
+          <div className="small subtle" style={{fontWeight:400,marginTop:2}}>
+            Switch this off and the Mark for replacement button goes from the schedule.
+            A missed class is simply a missed class.
+          </div></span>
+      </label>
+
+      {st.replacements_enabled && <>
+        <div className="field" style={{marginTop:14,maxWidth:240}}>
+          <label>Notice we ask for</label>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            <input className="input" type="number" min={0} max={336} style={{width:90}}
+                   value={st.replacement_notice_hours}
+                   onChange={e=>up('replacement_notice_hours',Number(e.target.value))}/>
+            <span className="small">hours before the class</span>
+          </div>
+          <div className="small subtle" style={{marginTop:4}}>
+            A request with less notice than this is recorded as an emergency. It is still
+            allowed — it is counted.
+          </div>
+        </div>
+
+        <div style={{borderTop:'1px solid var(--border)',margin:'14px 0 12px'}}></div>
+        <div style={{fontWeight:700,marginBottom:8}}>When an emergency stops being one</div>
+
+        <div style={{display:'flex',gap:14,flexWrap:'wrap',alignItems:'flex-end'}}>
+          <div className="field" style={{margin:0,width:190}}>
+            <label>Too often is</label>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input className="input" type="number" min={0.05} max={1} step={0.05} style={{width:90}}
+                     value={st.emergency_rate_limit}
+                     onChange={e=>up('emergency_rate_limit',Number(e.target.value))}/>
+              <span className="small">of classes</span>
+            </div>
+          </div>
+          <div className="field" style={{margin:0,width:210}}>
+            <label>Ignore swimmers with fewer than</label>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input className="input" type="number" min={0} style={{width:90}}
+                     value={st.emergency_min_classes}
+                     onChange={e=>up('emergency_min_classes',Number(e.target.value))}/>
+              <span className="small">classes</span>
+            </div>
+          </div>
+        </div>
+        <div className="small subtle" style={{marginTop:6}}>
+          {pct}% is one class in {oneIn}. Below {st.emergency_min_classes} classes the rate means
+          nothing — one emergency out of two lessons is 50% and tells you only that they are new.
+        </div>
+
+        <label style={{display:'flex',gap:8,alignItems:'flex-start',marginTop:12,fontWeight:700}}>
+          <input type="checkbox" checked={!!st.enforce_emergency_limit}
+                 onChange={e=>up('enforce_emergency_limit',e.target.checked)}/>
+          <span>Refuse a late request from a swimmer over that rate
+            <div className="small subtle" style={{fontWeight:400,marginTop:2}}>
+              Off, the tracker still counts everything and refuses nobody — which is where to
+              start, until the numbers have had a term to settle. On, a last-minute request from
+              somebody over the rate is declined and the class counts as an absence. A request
+              with proper notice is never refused.
+            </div></span>
+        </label>
+      </>}
+    </div>
+
+    <div className="card" style={{marginTop:12}}>
+      <div style={{fontWeight:800,marginBottom:10}}>🎟 Credits</div>
+      <label style={{display:'flex',gap:8,alignItems:'flex-start',fontWeight:700}}>
+        <input type="checkbox" checked={!!st.allow_negative_credits}
+               onChange={e=>up('allow_negative_credits',e.target.checked)}/>
+        <span>Let a balance go below nil
+          <div className="small subtle" style={{fontWeight:400,marginTop:2}}>
+            On, a swimmer who attends with nothing left reads −1 and you can see at a glance
+            what is owed. Off, the balance stops at nil and the unpaid class is counted
+            instead. Either way it lands on Accounts → Reports → Unpaid classes.
+          </div></span>
+      </label>
+      <div className="note info" style={{marginTop:12,fontSize:13}}>
+        Whichever way this is set, marking a swimmer who has no credit asks the person doing it
+        first, and says that billing or a renewal is needed. That is not a setting — a child in
+        the water who has not paid is the same fact either way, and the coach is the one placed
+        to say something.
+      </div>
+    </div>
+
+    <div style={{display:'flex',gap:8,alignItems:'center',margin:'14px 0 30px'}}>
+      <button className="btn btn-primary" disabled={busy||!dirty} onClick={save}>
+        {dirty?'Save changes':'Saved'}
+      </button>
+      <span className="small subtle">
+        Changing a rule does not re-label what has already happened.
+      </span>
+    </div>
+  </div>;
+}
+
 // ── Progress notes, from the desk ─────────────────────────────────────────
 // What the coaches have told this swimmer's parent, and the office's own
 // way in. The parent already has every one of these, so the office is
@@ -8682,7 +9105,7 @@ function ReportsView({ invoices, pmts, pendingCredits, students, sessions, credi
   }, [sessions, today]);
 
   // ── Tab routing ─────────────────────────────────────────────────────────
-  const tabs = [['dashboard','📊 Dashboard'],['retention','🔁 Retention & Churn']];
+  const tabs = [['dashboard','📊 Dashboard'],['retention','🔁 Retention & Churn'],['unpaid','💳 Unpaid classes']];
 
   return <>
     <div className="card" style={{marginBottom:12}}>
@@ -8705,6 +9128,7 @@ function ReportsView({ invoices, pmts, pendingCredits, students, sessions, credi
       branchById2={branchById2} branchScope={branchScope}
     />}
 
+    {tab === 'unpaid' && <UnpaidClassesReport/>}
     {tab === 'retention' && <RetentionReport
       students={scopedStudents} pmts={scopedPmts}
       lastAttendedByStu={lastAttendedByStu} sessions={sessions}

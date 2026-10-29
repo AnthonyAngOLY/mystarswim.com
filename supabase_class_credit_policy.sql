@@ -433,6 +433,85 @@ comment on function credit_defaulters() is
   'allowed.';
 
 
+-- ─── 6b. The office's way in ────────────────────────────────────────────
+-- The scheduler marks attendance from the Session modal, which works a
+-- student at a time and has no weekly_session_students row id to hand,
+-- so mark_attendance does not fit. Rather than write the credit rule a
+-- second time in the browser — which is how an office screen and a
+-- poolside screen end up disagreeing about the same class — the rule
+-- stays here and both call into it.
+create or replace function adjust_credit(
+  p_student_id uuid, p_lesson_type_id uuid, p_delta int,
+  p_confirm boolean default false)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  st class_policy_settings; v_before numeric; v_child text; v_moved int; v_bal numeric;
+begin
+  if not can_write_office() then
+    return jsonb_build_object('ok', false, 'error', 'Not yours to change.');
+  end if;
+  if p_delta = 0 or p_student_id is null or p_lesson_type_id is null then
+    return jsonb_build_object('ok', true, 'credit_moved', 0);
+  end if;
+  select * into st from class_policy_settings where id;
+
+  select coalesce(remaining_balance, 0) into v_before
+    from student_credit_balances
+   where student_id = p_student_id and lesson_type_id = p_lesson_type_id;
+  v_before := coalesce(v_before, 0);
+
+  if p_delta < 0 and v_before <= 0 and not coalesce(p_confirm, false) then
+    select name into v_child from students where id = p_student_id;
+    return jsonb_build_object('ok', false, 'needs_confirm', true,
+      'balance', v_before, 'child', coalesce(v_child, 'This swimmer'),
+      'allow_negative', coalesce(st.allow_negative_credits, true),
+      'error', coalesce(v_child, 'This swimmer')
+        || (case when v_before = 0 then ' has no credits left.'
+                 else ' is already ' || abs(v_before) || ' class'
+                      || (case when abs(v_before) = 1 then '' else 'es' end)
+                      || ' in arrears.' end)
+        || ' Billing or a renewal is needed.');
+  end if;
+
+  v_moved := case when p_delta < 0 and v_before <= 0
+                       and not coalesce(st.allow_negative_credits, true)
+                  then 0 else p_delta end;
+
+  insert into credit_purchases
+    (student_id, lesson_type_id, purchase_date, credits_added, source, notes)
+  values
+    (p_student_id, p_lesson_type_id,
+     (now() at time zone 'Asia/Kuala_Lumpur')::date, v_moved,
+     case when p_delta < 0 and v_before <= 0 then 'attendance_unpaid' else 'attendance' end,
+     case when p_delta < 0 then 'Marked from the office' else 'Credit returned' end);
+
+  -- The row is created if it is missing. adjustCredit in the browser
+  -- used to give up silently when a swimmer had no balance row at all,
+  -- so the very first class never cost anything.
+  insert into student_credit_balances
+    (student_id, lesson_type_id, initial_balance, remaining_balance)
+  values (p_student_id, p_lesson_type_id, 0, v_moved)
+  on conflict (student_id, lesson_type_id) do update
+    set remaining_balance =
+          case when not coalesce(st.allow_negative_credits, true)
+               then greatest(0, student_credit_balances.remaining_balance + p_delta)
+               else student_credit_balances.remaining_balance + p_delta end,
+        updated_at = now();
+
+  select remaining_balance into v_bal from student_credit_balances
+   where student_id = p_student_id and lesson_type_id = p_lesson_type_id;
+
+  return jsonb_build_object('ok', true, 'credit_moved', v_moved, 'balance', v_bal,
+                            'unpaid', (p_delta < 0 and v_before <= 0));
+end $$;
+
+comment on function adjust_credit(uuid, uuid, int, boolean) is
+  'The office''s path to the same credit rule mark_attendance applies. '
+  'Asks before taking a credit a swimmer does not have, writes the '
+  'ledger, and creates the balance row if it is missing.';
+
+
 -- ─── 7. Locks ───────────────────────────────────────────────────────────
 alter table class_policy_settings enable row level security;
 alter table replacement_requests  enable row level security;
