@@ -652,6 +652,37 @@
     .lesson-add-btn:hover{background:var(--primary-soft);color:var(--primary-on-soft);border-color:var(--primary)}
     @media (max-width:768px){.lesson-row{grid-template-columns:1fr 1fr 52px 36px}}
 
+    /* ── Settings › Lesson Types, one row and its two panels ─────────────
+       This used to reuse .lesson-row above, which is a four-column grid
+       built for invoice line items. The row card took column one and an
+       open panel took column two, which is why a single panel appeared
+       to the right — by accident. Opening both put the second panel in a
+       56px column and the page fell apart.
+
+       Edit opens downwards across the full width, because it is a form
+       with fields that need room. Packages opens to the right, beside
+       the row it belongs to. Both at once: packages to the right, the
+       editor underneath spanning both. */
+    .lt-settings-row{display:grid; grid-template-columns:minmax(0,1fr); gap:10px; align-items:start}
+    .lt-settings-row.has-pkgs{grid-template-columns:minmax(0,1fr) minmax(280px,360px)}
+    /* Rows pinned, not left to auto-placement: the editor is written
+       before the packages panel in the markup, so auto-placement put
+       packages on a third row underneath it rather than beside the
+       card. */
+    .lt-settings-row > .lt-row-card{grid-column:1 / -1; grid-row:1; min-width:0}
+    .lt-settings-row.has-pkgs > .lt-row-card{grid-column:1; grid-row:1; min-width:0}
+    .lt-pkg-panel{grid-column:2; grid-row:1; min-width:0}
+    .lt-edit-panel{grid-column:1 / -1; grid-row:2; min-width:0}
+    /* Below the point where two columns stop fitting, everything stacks.
+       A packages panel squeezed into a phone-width column is the same
+       bug in a smaller space. */
+    @media (max-width:1100px){
+      .lt-settings-row.has-pkgs{grid-template-columns:minmax(0,1fr)}
+      .lt-settings-row.has-pkgs > .lt-row-card{grid-column:1 / -1; grid-row:1}
+      .lt-pkg-panel{grid-column:1 / -1; grid-row:2}
+      .lt-edit-panel{grid-row:3}
+    }
+
     /* ── Collapsible Register Swimmer card ───────────────────────────────── */    .register-card{padding:0;transition:box-shadow .2s ease;overflow:hidden}
     .register-card.is-closed:hover{box-shadow:0 4px 16px rgba(14,165,233,.12)}
     .register-header{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:transparent;border:none;cursor:pointer;text-align:left;font:inherit;color:inherit;border-radius:14px;transition:background .15s ease}

@@ -5919,7 +5919,7 @@ function SettingsView({ section, options, currentBranchId, status, addOption, to
 
       <div className="settings-list">
         {branchTypes.length ? branchTypes.map((r, idx) => { const n = counts[r.id] || 0; const pkgCount = (options.packages||[]).filter(p=>p.lesson_type_id===r.id).length; const poolName = (options.pools.find(p=>p.id===r.default_pool_id)?.name); const editingThis = editingLessonId===r.id; const pkgPanelOpen = pkgPanelLtId===r.id; const rBranch = showBranchTag ? branchById(r.branch_id) : null; return <div key={r.id}
-          className={`lesson-row ${dragClass('lt', idx)}`} {...dragProps('lt', 'scheduler_lesson_types', branchTypes, idx)}>
+          className={`lt-settings-row ${pkgPanelOpen?'has-pkgs':''} ${dragClass('lt', idx)}`} {...dragProps('lt', 'scheduler_lesson_types', branchTypes, idx)}>
           <div className={`lt-row-card ${!r.is_active ? 'lt-row-hidden' : ''}`}>
             <div className="lt-row-top">
               <div className="lt-row-lead">
@@ -5959,8 +5959,8 @@ function SettingsView({ section, options, currentBranchId, status, addOption, to
               </div>
             </div>
           </div>
-          {editingLessonId === r.id ? <LessonTypeEditor row={r} pools={options.pools} onSave={(patch)=>{ saveLessonType(r, patch); setEditingLessonId(null); }} /> : null}
-          {pkgPanelLtId === r.id ? <LessonTypePackages
+          {editingLessonId === r.id ? <div className="lt-edit-panel"><LessonTypeEditor row={r} pools={options.pools} onSave={(patch)=>{ saveLessonType(r, patch); setEditingLessonId(null); }} /></div> : null}
+          {pkgPanelLtId === r.id ? <div className="lt-pkg-panel"><LessonTypePackages
             lessonType={r}
             packages={(options.packages||[]).filter(p=>p.lesson_type_id===r.id).slice().sort((a,b)=>(a.sort_order||0)-(b.sort_order||0))}
             editPkgId={editPkgId}
@@ -5970,7 +5970,7 @@ function SettingsView({ section, options, currentBranchId, status, addOption, to
             deleteOption={deleteOption}
             patchOption={patchOption}
             reorderOption={reorderOption}
-          /> : null}
+          /></div> : null}
         </div>; }) : <div className="empty">No lesson types</div>}
       </div>
     </div>

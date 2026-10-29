@@ -9877,7 +9877,7 @@ function SettingsView({
       const rBranch = showBranchTag ? branchById(r.branch_id) : null;
       return /*#__PURE__*/React.createElement("div", {
         key: r.id,
-        className: `lesson-row ${dragClass('lt', idx)}`,
+        className: `lt-settings-row ${pkgPanelOpen ? 'has-pkgs' : ''} ${dragClass('lt', idx)}`,
         ...dragProps('lt', 'scheduler_lesson_types', branchTypes, idx)
       }, /*#__PURE__*/React.createElement("div", {
         className: `lt-row-card ${!r.is_active ? 'lt-row-hidden' : ''}`
@@ -9953,14 +9953,18 @@ function SettingsView({
         className: "lt-meta-label"
       }, "Age"), /*#__PURE__*/React.createElement("span", {
         className: `lt-meta-value ${r.age_min_months != null || r.age_max_months != null ? '' : 'lt-meta-empty'}`
-      }, r.age_min_months != null || r.age_max_months != null ? `${r.age_min_months != null ? Math.floor(r.age_min_months / 12) + 'y' : '·'}–${r.age_max_months != null ? Math.floor(r.age_max_months / 12) + 'y' : '·'}` : 'Any age')))), editingLessonId === r.id ? /*#__PURE__*/React.createElement(LessonTypeEditor, {
+      }, r.age_min_months != null || r.age_max_months != null ? `${r.age_min_months != null ? Math.floor(r.age_min_months / 12) + 'y' : '·'}–${r.age_max_months != null ? Math.floor(r.age_max_months / 12) + 'y' : '·'}` : 'Any age')))), editingLessonId === r.id ? /*#__PURE__*/React.createElement("div", {
+        className: "lt-edit-panel"
+      }, /*#__PURE__*/React.createElement(LessonTypeEditor, {
         row: r,
         pools: options.pools,
         onSave: patch => {
           saveLessonType(r, patch);
           setEditingLessonId(null);
         }
-      }) : null, pkgPanelLtId === r.id ? /*#__PURE__*/React.createElement(LessonTypePackages, {
+      })) : null, pkgPanelLtId === r.id ? /*#__PURE__*/React.createElement("div", {
+        className: "lt-pkg-panel"
+      }, /*#__PURE__*/React.createElement(LessonTypePackages, {
         lessonType: r,
         packages: (options.packages || []).filter(p => p.lesson_type_id === r.id).slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)),
         editPkgId: editPkgId,
@@ -9970,7 +9974,7 @@ function SettingsView({
         deleteOption: deleteOption,
         patchOption: patchOption,
         reorderOption: reorderOption
-      }) : null);
+      })) : null);
     }) : /*#__PURE__*/React.createElement("div", {
       className: "empty"
     }, "No lesson types"))), (() => {
