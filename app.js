@@ -7047,24 +7047,37 @@ function IntakeShareModal({ onClose }){
         with the link — they do not need an account.
       </div>
 
-      <div className="field">
+      {/* Copy sits on the field it copies, where a hand expects it. */}
+      <div className="field" style={{marginBottom:10}}>
         <label>The link</label>
-        <input className="input" readOnly value={url}
-               onFocus={e=>e.target.select()}
-               style={{fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',fontSize:13}}/>
+        <div style={{display:'flex',gap:8,alignItems:'stretch'}}>
+          <input className="input" readOnly value={url}
+                 onFocus={e=>e.target.select()}
+                 style={{flex:1,minWidth:0,
+                         fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',fontSize:13}}/>
+          <button className="btn btn-primary" style={{flex:'none',whiteSpace:'nowrap',padding:'0 16px'}}
+                  onClick={()=>copy(url,'link')}>
+            {copied==='link' ? '✓ Copied' : 'Copy'}
+          </button>
+        </div>
       </div>
 
-      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:6}}>
-        <button className="btn btn-primary small" onClick={()=>copy(url,'link')}>
-          {copied==='link' ? '✓ Copied' : '🔗 Copy link'}
-        </button>
-        <button className="btn btn-ghost small" onClick={()=>copy(message,'message')}>
+      {/* One column, always. Three across fits a 520px dialog and nothing
+          narrower, and auto-fit answered a cramped width with two and a
+          stray — the same ragged thing in a smaller space. Stacked is
+          the only arrangement that is deliberate at every width, and it
+          lets the labels say what they do. */}
+      <div style={{display:'grid',gap:8,gridTemplateColumns:'minmax(0,1fr)'}}>
+        <button className="btn btn-ghost" style={{whiteSpace:'nowrap'}}
+                onClick={()=>copy(message,'message')}>
           {copied==='message' ? '✓ Copied' : '💬 Copy with a message'}
         </button>
-        <a className="btn btn-ghost small" style={{textDecoration:'none'}}
+        <a className="btn btn-ghost" style={{textDecoration:'none',whiteSpace:'nowrap',
+             display:'flex',alignItems:'center',justifyContent:'center'}}
            href={`https://wa.me/?text=${encodeURIComponent(message)}`}
            target="_blank" rel="noopener noreferrer">↗ Send on WhatsApp</a>
-        <a className="btn btn-ghost small" style={{textDecoration:'none',marginLeft:'auto'}}
+        <a className="btn btn-ghost" style={{textDecoration:'none',whiteSpace:'nowrap',
+             display:'flex',alignItems:'center',justifyContent:'center'}}
            href={url} target="_blank" rel="noopener noreferrer">Open the form ↗</a>
       </div>
 
@@ -7072,7 +7085,8 @@ function IntakeShareModal({ onClose }){
         This browser would not let me copy it. Select the link above and copy it by hand.
       </div>}
 
-      <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}>
+      <div style={{display:'flex',justifyContent:'flex-end',
+                   marginTop:16,paddingTop:14,borderTop:'1px solid var(--border)'}}>
         <button className="btn btn-ghost" onClick={onClose}>Close</button>
       </div>
     </div>

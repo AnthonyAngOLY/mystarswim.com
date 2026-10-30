@@ -12257,42 +12257,67 @@ function IntakeShareModal({
       marginBottom: 14
     }
   }, "Send this to a parent and they can enrol their own swimmer. It works for anybody with the link — they do not need an account."), /*#__PURE__*/React.createElement("div", {
-    className: "field"
-  }, /*#__PURE__*/React.createElement("label", null, "The link"), /*#__PURE__*/React.createElement("input", {
+    className: "field",
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "The link"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'stretch'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
     className: "input",
     readOnly: true,
     value: url,
     onFocus: e => e.target.select(),
     style: {
+      flex: 1,
+      minWidth: 0,
       fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace',
       fontSize: 13
     }
-  })), /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
     style: {
-      display: 'flex',
+      flex: 'none',
+      whiteSpace: 'nowrap',
+      padding: '0 16px'
+    },
+    onClick: () => copy(url, 'link')
+  }, copied === 'link' ? '✓ Copied' : 'Copy'))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
       gap: 8,
-      flexWrap: 'wrap',
-      marginTop: 6
+      gridTemplateColumns: 'minmax(0,1fr)'
     }
   }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-primary small",
-    onClick: () => copy(url, 'link')
-  }, copied === 'link' ? '✓ Copied' : '🔗 Copy link'), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
+    className: "btn btn-ghost",
+    style: {
+      whiteSpace: 'nowrap'
+    },
     onClick: () => copy(message, 'message')
   }, copied === 'message' ? '✓ Copied' : '💬 Copy with a message'), /*#__PURE__*/React.createElement("a", {
-    className: "btn btn-ghost small",
+    className: "btn btn-ghost",
     style: {
-      textDecoration: 'none'
+      textDecoration: 'none',
+      whiteSpace: 'nowrap',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     href: `https://wa.me/?text=${encodeURIComponent(message)}`,
     target: "_blank",
     rel: "noopener noreferrer"
   }, "↗ Send on WhatsApp"), /*#__PURE__*/React.createElement("a", {
-    className: "btn btn-ghost small",
+    className: "btn btn-ghost",
     style: {
       textDecoration: 'none',
-      marginLeft: 'auto'
+      whiteSpace: 'nowrap',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
     },
     href: url,
     target: "_blank",
@@ -12306,7 +12331,9 @@ function IntakeShareModal({
     style: {
       display: 'flex',
       justifyContent: 'flex-end',
-      marginTop: 16
+      marginTop: 16,
+      paddingTop: 14,
+      borderTop: '1px solid var(--border)'
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost",
