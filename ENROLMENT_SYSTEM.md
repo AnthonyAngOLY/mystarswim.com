@@ -637,8 +637,16 @@ Three charges, as you described them:
 | Fee | When | Scope |
 |---|---|---|
 | **Registration** | once, ever | per swimmer, first time they join the club |
-| **Annual membership** | once per calendar year | per swimmer *or* per family — §19 |
+| **Annual membership** | once per calendar year | **per swimmer** |
 | **Monthly programme** | every month enrolled | per swimmer per programme |
+
+**Annual membership is per swimmer, not per family.** Decided. It keeps
+`charges.student_id` non-null for every charge type, so one table and
+one unique key covers all three fees with no special case. The cost of
+the decision is a January bill that multiplies by the number of
+children — a three-swimmer family pays three subscriptions at once — so
+the billing tracker must show the whole of what is coming, not each
+charge on its own. See §17.
 
 ### The annual fee is keyed to a year, not to a date
 
@@ -663,6 +671,10 @@ charges
 
   UNIQUE (student_id, charge_type, period_key) where not void
 ```
+
+Every charge hangs off a swimmer, including the annual one. There is no
+family-level charge and so no second shape to reason about.
+
 
 That unique constraint is the entire design. With it:
 
@@ -815,7 +827,10 @@ almost unchanged:
 - **Announcements** — lift Part One's broadcast and inbox entirely. The
   reminder machinery works the same; only the wording changes.
 - **Billing** — invoices, receipts, outstanding, and the next annual
-  renewal with its date and amount.
+  renewal with its date and amount. Because membership is per swimmer,
+  show the **family total** for the renewal as well as the per-swimmer
+  figure. A parent of three who is told "RM 120 due in January" and then
+  billed RM 360 will ring, and they will be right to.
 - **Attendance** — per swimmer: the next session, recent marks, and a
   rate for the term. Show `excused` distinctly from `absent`, or the
   first parent who rang in sick will say the app called their child
@@ -855,14 +870,18 @@ is the part most worth copying verbatim.
 
 ---
 
-## 19. Decisions still open
+## 19. Decisions
+
+### Settled
+
+1. **Annual membership is per swimmer.** Every charge hangs off a
+   swimmer; there is no family-level charge. Simpler schema, one unique
+   key for all three fees. Folded into §14.
+
+### Still open
 
 These change the schema, so settle them before building:
 
-1. **Annual fee: per swimmer or per family?** Per swimmer is simpler and
-   scales with use; per family is kinder to a three-child household and
-   is what many clubs do. It changes whether `charges.student_id` can be
-   null in favour of an `account_id`.
 2. **Pro-rating.** A November joiner paying a full year — convention, or
    a rule? §14 says build so it can change; it still has to be decided.
 3. **Route A verification** (§11). Number plus a matching fact, approval
