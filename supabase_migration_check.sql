@@ -19,7 +19,7 @@
 --    CHECK BY EYE  the file only moves data, so there is no object to
 --                 find. The note says what to look at instead.
 --
---  Run it, then paste the whole result back to Claude.
+--  One query, one result. Run it and paste the whole thing back.
 -- ════════════════════════════════════════════════════════════════════════
 
 with
@@ -246,29 +246,83 @@ chk (ord, file, adds, state) as (values
                                             and src like '%attendance_unpaid%')
            then 'IN' else 'NOT IN' end)
 )
-select case state when 'NOT IN' then '>>> RUN THIS' else '' end as action,
-       state, file, adds
-  from chk
- order by case state when 'NOT IN' then 0 when 'CHECK BY EYE' then 1
-                     when 'IN' then 2 else 3 end, ord;
+-- ════════════════════════════════════════════════════════════════════════
+--  ONE RESULT, ON PURPOSE
+-- ════════════════════════════════════════════════════════════════════════
+--  This was three separate queries, and the Supabase SQL editor shows
+--  only the last one — so the file list, which is the point of the whole
+--  exercise, was never on screen. Twice the lock table came back instead
+--  and read as the answer.
+--
+--  So it is one query now. Three parts, stacked, with the part column
+--  saying which is which:
+--
+--    migration        the files, worst news first
+--    trial data       what the go-live purge would clear
+--    table security   row security, open ones first
+--
+--  Paste the whole thing back. It is long and that is fine.
+-- ════════════════════════════════════════════════════════════════════════
+select part, action, state, name, detail
+  from (
 
--- ── And the ones that are not migrations ────────────────────────────────
--- Three files leave nothing behind to find, by design, so they cannot be
--- detected and are not in the list above:
---
---   supabase_migration_check.sql          this file
---   supabase_parent_phone_worklist.sql    read-only, run it as often as
---                                         you like; the list shrinking is
---                                         the point
---   supabase_go_live_purge.sql            clears the trial attendance. The
---                                         counts below are what it would
---                                         clear, so a row of zeros means
---                                         either it has run or there was
---                                         never anything to clear.
---
--- supabase_attendance_clear_test_data.sql is the purge's predecessor and
--- the same applies.
---
+    -- ── The files ───────────────────────────────────────────────────────
+    select 1 as grp,
+           case state when 'NOT IN' then 0 when 'CHECK BY EYE' then 1
+                      when 'IN' then 2 else 3 end as sub,
+           ord as ord,
+           'migration'::text                                        as part,
+           (case state when 'NOT IN' then '>>> RUN THIS' else '' end)::text as action,
+           state::text                                              as state,
+           file::text                                               as name,
+           adds::text                                               as detail
+      from chk
+
+    union all
+
+    -- ── What the purge would clear ──────────────────────────────────────
+    -- Three files leave nothing behind to find, by design, and so are not
+    -- in the list above:
+    --
+    --   supabase_migration_check.sql        this file
+    --   supabase_parent_phone_worklist.sql  read-only; the list shrinking
+    --                                       is the point
+    --   supabase_go_live_purge.sql          clears the trial attendance.
+    --
+    -- supabase_attendance_clear_test_data.sql is the purge's predecessor
+    -- and the same applies. Three zeros below mean either the purge has
+    -- run or there was never anything to clear.
+    select 2,
+           0,
+           (case what when 'shifts' then 1 when 'punches' then 2 else 3 end),
+           'trial data'::text,
+           ''::text,
+           ''::text,
+           what::text,
+           v::text
+      from cnt
+     where what in ('shifts','punches','alerts')
+
+    union all
+
+    -- ── Which tables are open to the public key ─────────────────────────
+    -- Row security off means the anon key in every page we serve can read
+    -- and write that table.
+    select 3,
+           (case when c.relrowsecurity then 1 else 0 end),
+           0,
+           'table security'::text,
+           (case when c.relrowsecurity then '' else '>>> OPEN TO THE ANON KEY' end)::text,
+           (case when c.relrowsecurity then 'locked' else 'open' end)::text,
+           c.relname::text,
+           ''::text
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public' and c.relkind = 'r'
+
+  ) z
+ order by grp, sub, ord, name;
+
 -- ── Edge Functions are not in this list ─────────────────────────────────
 -- Nothing in the database knows which Edge Functions are deployed, so no
 -- query can answer it. Check them by eye in the dashboard, under Edge
@@ -286,23 +340,3 @@ select case state when 'NOT IN' then '>>> RUN THIS' else '' end as action,
 --
 -- Anything deployed that is NOT in the list above is not in the repo.
 -- Open it in the dashboard and find out what it is before deleting it.
-select (xpath('/row/c/text()', query_to_xml(
-          case when to_regclass('public.shifts') is null then 'select 0 as c'
-               else 'select count(*) as c from shifts' end, false, true, '')))[1]::text::bigint as shifts_now,
-       (xpath('/row/c/text()', query_to_xml(
-          case when to_regclass('public.punches') is null then 'select 0 as c'
-               else 'select count(*) as c from punches' end, false, true, '')))[1]::text::bigint as punches_now,
-       (xpath('/row/c/text()', query_to_xml(
-          case when to_regclass('public.alerts') is null then 'select 0 as c'
-               else 'select count(*) as c from alerts' end, false, true, '')))[1]::text::bigint as alerts_now;
-
--- ── Which tables are still open to the public key ───────────────────────
--- Row security off means the anon key in every page we serve can read and
--- write that table. The attendance and HR tables were locked down as they
--- were built; the scheduler's own tables never have been.
-select c.relname as table_name,
-       case when c.relrowsecurity then 'locked' else '>>> OPEN TO THE ANON KEY' end as rls
-  from pg_class c
-  join pg_namespace n on n.oid = c.relnamespace
- where n.nspname = 'public' and c.relkind = 'r'
- order by c.relrowsecurity, c.relname;
