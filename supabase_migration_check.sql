@@ -28,7 +28,14 @@ col as (
     from information_schema.columns where table_schema = 'public'
 ),
 fn as (
-  select p.proname::text as n, p.prosrc as src
+  -- src is prosrc, which holds ONLY the body between the $$ markers. A
+  -- name in the RETURNS TABLE clause is not in it — it is a parameter
+  -- name, and lives in proargnames. A probe that looked for a returned
+  -- column inside src read as NOT IN forever, on a file that had been
+  -- run. Hence args, for the cases where the signature is what changed.
+  select p.proname::text as n,
+         p.prosrc as src,
+         coalesce(array_to_string(p.proargnames, ','), '') as args
     from pg_proc p join pg_namespace s on s.oid = p.pronamespace
    where s.nspname = 'public'
 ),
@@ -135,8 +142,11 @@ chk (ord, file, adds, state) as (values
       case when exists (select 1 from fn where n='crew_delete_or_explain')
            then 'IN' else 'NOT IN' end),
   (25, 'supabase_login_linkage_repair.sql', 'dead sign-in pointers cleared',
+      -- The two versions of this function differ only in what they
+      -- return: has_signed_in before, ready_to_link and last_login_at
+      -- after. That is the signature, so it is args, not src.
       case when exists (select 1 from fn where n='office_logins_for_linking'
-                          and src like '%ready_to_link%')
+                          and args like '%ready_to_link%')
            then 'IN' else 'NOT IN' end),
   (26, 'supabase_roles_restructure.sql', 'the four seats as they are named now',
       case when exists (select 1 from fn where n='attendance_is_admin' and src like '%center_owner%')
