@@ -327,8 +327,22 @@ update shifts s
 
 
 -- ─── 7. What this just did ──────────────────────────────────────────────
-select 'weeks with shifts, all now draft' as thing,
-       count(distinct roster_week_of(shift_date))::text as n
+-- The first line reads the database rather than echoing a constant, so it
+-- cannot tell you the lock is on when it is not. This file has twice been
+-- run from a cached copy of an earlier version, and the four lines below
+-- it are identical in both, so there was nothing in the output to say
+-- which one had run. Now there is.
+select 'roster_weeks locked against the anon key' as thing,
+       case when exists (
+         select 1 from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'public' and c.relname = 'roster_weeks'
+            and c.relrowsecurity)
+       then 'yes'
+       else '>>> NO — this is an old copy of the file. Fetch it again.' end as n
+union all
+select 'weeks with shifts, all now draft',
+       count(distinct roster_week_of(shift_date))::text
   from shifts where not is_void
 union all
 select 'shifts now invisible to staff', count(*)::text
