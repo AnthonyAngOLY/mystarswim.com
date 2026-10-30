@@ -448,6 +448,7 @@ function App({ currentUser, onLogout }){
   });
   const isMobile = useIsMobile();
   const [mobileMoreOpen,setMobileMoreOpen] = useState(false);
+  const [intakeShareOpen,setIntakeShareOpen] = useState(false);
   // The 7-column week grid is unusable on a phone — steer mobile users to
   // the Daily agenda whenever Weekly would render.
   useEffect(()=>{ if(isMobile && view==='schedule' && scheduleSection==='week') setScheduleSection('day'); },[isMobile, view, scheduleSection]);
@@ -459,13 +460,13 @@ function App({ currentUser, onLogout }){
   }
   // Robust: header rendering follows the CURRENT VIEW, not a separate `side`
   // state, so the header can never drift out of sync with the content area.
-  const isOnSystemView = ['adminDirectory','adminVouchers','adminCrew','adminPromos','attendance','leave'].includes(view);
+  const isOnSystemView = ['adminDirectory','adminVouchers','adminCrew','attendance','leave'].includes(view);
   // Defensive: if view and side ever get out of sync (e.g. after login flow
   // or a stale route), snap view back to the side's home. Prevents the
   // "half-breed" state where system nav is shown but schedule content mounts.
   useEffect(()=>{
     const scheduleViews = new Set(['schedule','programme','accounts','shop','messages','enroll','settings','students']);
-    const systemViews = new Set(['adminDirectory','adminVouchers','adminCrew','adminPromos','attendance','leave']);
+    const systemViews = new Set(['adminDirectory','adminVouchers','adminCrew','attendance','leave']);
     if(side==='schedule' && systemViews.has(view)) setView('schedule');
     if(side==='system' && scheduleViews.has(view)) setView('adminDirectory');
     // Timetable (view only) has one screen. Nothing in the nav offers
@@ -4337,19 +4338,24 @@ function App({ currentUser, onLogout }){
           <button className={`nav-btn ${view==='shop'?'active':''}`} onClick={()=>setView('shop')} title="Shop">🛒 <span className="nav-label">Shop</span></button>
           <button className={`nav-btn ${view==='messages'?'active':''}`} onClick={()=>setView('messages')} title="Messages" style={{position:'relative'}}>✉️ <span className="nav-label">Messages</span>{newMsgCount>0&&<span style={{position:'absolute',top:2,right:2,background:'#EF4444',color:'#fff',fontSize:10,fontWeight:800,borderRadius:999,minWidth:16,height:16,lineHeight:'16px',padding:'0 4px',textAlign:'center'}}>{newMsgCount>99?'99+':newMsgCount}</span>}</button>
           <button className={`nav-btn ${view==='enroll'?'active':''}`} onClick={()=>setView('enroll')} title="Explore">🔍 <span className="nav-label">Explore</span></button>
-          <button type="button" className="nav-btn nav-btn-link" onClick={()=>window.open('./intake.html','_blank','noopener,noreferrer')} title="Intake form (new tab)">📝 <span className="nav-label">Intake ↗</span></button>
           {canSettings && <button className={`nav-btn ${view==='settings'?'active':''}`} onClick={()=>{ setView('settings'); setAdminSection('pools'); }} title="Settings">⚙️ <span className="nav-label">Settings</span></button>}
           </>}
+          {/* Outside the gate above on purpose. The form is public, so
+              sharing its link is not a privilege — Timetable (view only)
+              answers the phone like anybody else. */}
+          <button type="button" className="nav-btn nav-btn-link" onClick={()=>setIntakeShareOpen(true)} title="Share the intake form">📝 <span className="nav-label">Intake</span></button>
         </>}
         {side==='system' && <>
           <button className={`nav-btn ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')} title="Directory">📇 <span className="nav-label">Directory</span></button>
           <button className={`nav-btn ${view==='adminVouchers'?'active':''}`} onClick={()=>setView('adminVouchers')} title="Payment Vouchers">🧾 <span className="nav-label">Vouchers</span></button>
-          <button className={`nav-btn ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')} title="Website Promotions">📢 <span className="nav-label">Promotions</span></button>
           {/* Crew, Leave and Attendance sit together at the end: they are the
               three screens about the same people, in the order you work them. */}
           <button className={`nav-btn ${view==='adminCrew'?'active':''}`} onClick={()=>setView('adminCrew')} title="Crew">👥 <span className="nav-label">Crew</span>{pendingCrewCount>0 && <span style={{marginLeft:5,background:'#EF4444',color:'#fff',borderRadius:999,fontSize:10,fontWeight:800,padding:'1px 6px'}}>{pendingCrewCount}</span>}</button>
           <button className={`nav-btn ${view==='leave'?'active':''}`} onClick={()=>setView('leave')} title="Leave">🏖 <span className="nav-label">Leave</span>{pendingLeaveCount>0 && <span style={{marginLeft:5,background:'#EF4444',color:'#fff',borderRadius:999,fontSize:10,fontWeight:800,padding:'1px 6px'}}>{pendingLeaveCount}</span>}</button>
           <button className={`nav-btn ${view==='attendance'?'active':''}`} onClick={()=>setView('attendance')} title="Attendance">⏱️ <span className="nav-label">Attendance</span></button>
+          {/* Reachable from this side too: somebody in Crew or Vouchers
+              takes the call as often as somebody in the schedule. */}
+          <button type="button" className="nav-btn nav-btn-link" onClick={()=>setIntakeShareOpen(true)} title="Share the intake form">📝 <span className="nav-label">Intake</span></button>
         </>}
         </div>
         {canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && <button type="button" className="nav-btn" style={{background:side==='system'?'#EEF7FD':'#F0FDF4',border:'1px solid var(--border)',fontWeight:800}} onClick={()=>switchSide(side==='schedule'?'system':'schedule')} title={`Switch to ${side==='schedule'?'System':'Scheduling'} side`}>{side==='schedule'?'🏢 System ↔':'📅 Scheduling ↔'}</button>}
@@ -4369,7 +4375,6 @@ function App({ currentUser, onLogout }){
       </> : <>
         <button className={`mtab ${view==='adminDirectory'?'active':''}`} onClick={()=>setView('adminDirectory')}><span className="mtab-ic">📇</span>Directory</button>
         <button className={`mtab ${view==='adminVouchers'?'active':''}`} onClick={()=>setView('adminVouchers')}><span className="mtab-ic">🧾</span>Vouchers</button>
-        <button className={`mtab ${view==='adminPromos'?'active':''}`} onClick={()=>setView('adminPromos')}><span className="mtab-ic">📢</span>Promos</button>
         <button className={`mtab ${view==='adminCrew'?'active':''}`} onClick={()=>setView('adminCrew')}><span className="mtab-ic">👥</span>Crew</button>
         <button className={`mtab ${view==='leave'?'active':''}`} onClick={()=>setView('leave')}><span className="mtab-ic">🏖</span>Leave{pendingLeaveCount>0 && <span style={{marginLeft:4,background:'#EF4444',color:'#fff',borderRadius:999,fontSize:9,fontWeight:800,padding:'0 5px'}}>{pendingLeaveCount}</span>}</button>
       </>}
@@ -4379,6 +4384,8 @@ function App({ currentUser, onLogout }){
       </button>
     </nav>}
 
+    {intakeShareOpen && <IntakeShareModal onClose={()=>setIntakeShareOpen(false)} />}
+
     {/* ── "More" sheet — everything that doesn't fit the bar ── */}
     {isMobile && currentUser && mobileMoreOpen && <div className="more-sheet-backdrop" onClick={()=>setMobileMoreOpen(false)}>
       <div className="more-sheet" onClick={e=>e.stopPropagation()}>
@@ -4386,9 +4393,9 @@ function App({ currentUser, onLogout }){
         {side==='schedule' && <>
           <button className="more-item" onClick={()=>{ setView('messages'); }}>✉️ Messages {newMsgCount>0&&<span className="more-badge">{newMsgCount>99?'99+':newMsgCount}</span>}</button>
           <button className="more-item" onClick={()=>{ setView('enroll'); }}>🔍 Explore</button>
-          <button className="more-item" onClick={()=>{ window.open('./intake.html','_blank','noopener,noreferrer'); setMobileMoreOpen(false); }}>📝 Intake form ↗</button>
           {canSettings && <button className="more-item" onClick={()=>{ setView('settings'); setAdminSection('pools'); }}>⚙️ Settings</button>}
         </>}
+        <button className="more-item" onClick={()=>{ setIntakeShareOpen(true); setMobileMoreOpen(false); }}>📝 Share the intake form</button>
         {side==='system' && <button className="more-item" onClick={()=>{ setView('attendance'); }}>⏱️ Attendance</button>}
         {canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) &&
           <button className="more-item" onClick={()=>{ switchSide(side==='schedule'?'system':'schedule'); }}>{side==='schedule'?'🏢 Switch to System':'📅 Switch to Scheduling'}</button>}
@@ -4710,14 +4717,6 @@ function App({ currentUser, onLogout }){
           onRefresh={loadAttendance}
         />}
       </>}
-      {!loading && side==='system' && view==='adminPromos' && canSystem && <AdminPromosView
-        promos={promos}
-        savePromo={adminSavePromo}
-        deletePromo={adminDeletePromo}
-        toggleActive={adminTogglePromoActive}
-        onRefresh={loadAdminAll}
-      />}
-
       {/* ── Accounts views (no side-column for billing sub-sections) ── */}
       {/* ── Accounts: left-column nav + content ── */}
       {!loading && view==='accounts' && <div className="side-shell">
@@ -4948,6 +4947,11 @@ function App({ currentUser, onLogout }){
             onMove={movePaymentMethod}
           />}
           {adminSection==='website' && <WebsitePanel
+            promos={promos}
+            savePromo={adminSavePromo}
+            deletePromo={adminDeletePromo}
+            togglePromoActive={adminTogglePromoActive}
+            onRefreshPromos={loadAdminAll}
             settings={websiteSettings}
             lessonTypes={options.lessonTypes||[]}
             branches={options.branches||[]}
@@ -7007,6 +7011,74 @@ function StudentEditor({ row, lessonTypes, packages, onSave, hideAccountSections
 }
 
 // ============================================================================
+// ── The intake link, to hand ──────────────────────────────────────────────
+// The form is public: anyone holding the link can enrol a child, and that
+// is the point of it. So sharing it is not a privilege — every seat can,
+// including Timetable (view only), who answers the phone like anybody
+// else when the desk is busy.
+//
+// It used to open in a new tab and nothing else, which meant sharing it
+// was "open it, select the address bar, copy". This is that, done once.
+function IntakeShareModal({ onClose }){
+  const url = (typeof window !== 'undefined' ? window.location.origin : '') + '/intake.html';
+  const [copied,setCopied]=useState('');
+
+  async function copy(text, what){
+    try{
+      if(navigator.clipboard && window.isSecureContext){ await navigator.clipboard.writeText(text); }
+      else {
+        // Older phones and anything not on https. Without this the button
+        // silently does nothing, which is worse than not offering it.
+        const ta=document.createElement('textarea');
+        ta.value=text; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.left='-9999px';
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+      }
+      setCopied(what); setTimeout(()=>setCopied(''),2200);
+    }catch(_){ setCopied('failed'); setTimeout(()=>setCopied(''),2600); }
+  }
+
+  const message = `Hi! Please register your swimmer with Star Swim using this form:\n${url}`;
+
+  return <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-card" onClick={e=>e.stopPropagation()} style={{maxWidth:520}}>
+      <div style={{fontSize:17,fontWeight:800}}>📝 Intake form</div>
+      <div className="small subtle" style={{marginTop:4,marginBottom:14}}>
+        Send this to a parent and they can enrol their own swimmer. It works for anybody
+        with the link — they do not need an account.
+      </div>
+
+      <div className="field">
+        <label>The link</label>
+        <input className="input" readOnly value={url}
+               onFocus={e=>e.target.select()}
+               style={{fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',fontSize:13}}/>
+      </div>
+
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:6}}>
+        <button className="btn btn-primary small" onClick={()=>copy(url,'link')}>
+          {copied==='link' ? '✓ Copied' : '🔗 Copy link'}
+        </button>
+        <button className="btn btn-ghost small" onClick={()=>copy(message,'message')}>
+          {copied==='message' ? '✓ Copied' : '💬 Copy with a message'}
+        </button>
+        <a className="btn btn-ghost small" style={{textDecoration:'none'}}
+           href={`https://wa.me/?text=${encodeURIComponent(message)}`}
+           target="_blank" rel="noopener noreferrer">↗ Send on WhatsApp</a>
+        <a className="btn btn-ghost small" style={{textDecoration:'none',marginLeft:'auto'}}
+           href={url} target="_blank" rel="noopener noreferrer">Open the form ↗</a>
+      </div>
+
+      {copied==='failed' && <div className="note err" style={{marginTop:10}}>
+        This browser would not let me copy it. Select the link above and copy it by hand.
+      </div>}
+
+      <div style={{display:'flex',justifyContent:'flex-end',marginTop:16}}>
+        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  </div>;
+}
+
 // ── Reports › Unpaid classes ──────────────────────────────────────────────
 // Swimmers who have been in the water without a credit for it. Read from
 // the ledger rather than the balance, so it is right whether or not the
@@ -11507,7 +11579,11 @@ function InvoiceDetailPanel({ invoice, lines, pmts, pendingCredits, isOverdue, m
 // Two halves: (1) Schedule Preview switchboard — which lesson types /
 // branches surface in the sanitised public_schedule_preview view;
 // (2) Pricing cards — marketing-owned, decoupled from internal packages.
-function WebsitePanel({ settings, lessonTypes, branches, pricing, onSaveSettings, onAddCard, onUpdateCard, onDeleteCard, onMoveCard, onMoveCategory }){
+function WebsitePanel({ settings, lessonTypes, branches, pricing, onSaveSettings, onAddCard, onUpdateCard, onDeleteCard, onMoveCard, onMoveCategory, promos, savePromo, deletePromo, togglePromoActive, onRefreshPromos }){
+  // Promotions used to be its own button on the System side. They are a
+  // website thing — a bar across every page and a card on the homepage —
+  // so they live with the rest of the website now.
+  const [wtab,setWtab]=useState('site');
   const migrated = settings!=null;
   const visLt = new Set(settings?.visible_lesson_type_ids||[]);
   const visBr = new Set(settings?.visible_branch_ids||[]);
@@ -11547,6 +11623,17 @@ function WebsitePanel({ settings, lessonTypes, branches, pricing, onSaveSettings
   const catPri = c => c==='Toddlers'?0 : c==='LTS Children'?1 : 2;
   const cats = Object.keys(catMin).sort((a,b)=> (catMin[a]-catMin[b]) || (catPri(a)-catPri(b)) || a.localeCompare(b));
   return <div style={{display:'flex',flexDirection:'column',gap:16}}>
+    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+      {[['site','🌐 Pages & pricing'],['promos','📢 Promotions']].map(([k,l])=>
+        <button key={k} className={`btn small ${wtab===k?'btn-primary':'btn-ghost'}`}
+                onClick={()=>setWtab(k)}>{l}</button>)}
+    </div>
+
+    {wtab==='promos' && <AdminPromosView
+      promos={promos} savePromo={savePromo} deletePromo={deletePromo}
+      toggleActive={togglePromoActive} onRefresh={onRefreshPromos} />}
+
+    {wtab==='site' && <>
     {!migrated && <div className="card" style={{background:'#FEF3C7',border:'1px solid #FDE68A',padding:'10px 14px',fontSize:12.5}}>
       ⚠ Website tables not found — run <code>supabase_public_website_migration.sql</code> first. Controls below will save once the migration is in.
     </div>}
@@ -11649,6 +11736,7 @@ function WebsitePanel({ settings, lessonTypes, branches, pricing, onSaveSettings
         </div>;
       })}
     </div>
+    </>}
   </div>;
 }
 
@@ -16938,6 +17026,11 @@ function ProductsAdminView({ products, addProduct, updateProduct, deleteProduct,
     <div className="card" style={{marginBottom:14}}>
       <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>🛍 Product Catalogue</div>
       <div className="small subtle">Items you sell (goggles, caps, swim diapers…). Add a photo, SKU, description and price — the photo and details show in the Shop so staff pick the right item. Drag the ⠿ handle on a card to re-order the catalogue. Shared across all branches; price stays editable per sale.</div>
+      <div className="small subtle" style={{marginTop:6}}>
+        <b>Hide</b> takes a product out of the Shop without removing it. Everything you have
+        ever sold stays on this page, so a line that is off the shelf this term can come back
+        next term with its photo, price and history intact.
+      </div>
     </div>
 
     {/* Top row: new product entry */}
@@ -16947,21 +17040,39 @@ function ProductsAdminView({ products, addProduct, updateProduct, deleteProduct,
     </div>
 
     {/* Catalogue grid (starts on the next row) */}
-    {(products||[]).length>0 && <div className="small subtle" style={{fontWeight:700,marginBottom:8}}>Catalogue ({(products||[]).length})</div>}
+    {(products||[]).length>0 && (() => {
+      const hidden = (products||[]).filter(p=>p.is_active===false).length;
+      return <div className="small subtle" style={{fontWeight:700,marginBottom:8}}>
+        Catalogue ({(products||[]).length})
+        {hidden>0 && <span style={{fontWeight:400}}> · {(products||[]).length-hidden} in the Shop,
+          {' '}{hidden} hidden</span>}
+      </div>;
+    })()}
     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))',gap:14,alignItems:'start'}}>
       {(products||[]).map(p => editingId===p.id
         ? <div key={p.id}><div className="small subtle" style={{fontWeight:700,marginBottom:6}}>Editing</div><ProductEditCard vals={editForm} setVals={setEditForm} onSave={saveEdit} onCancel={()=>setEditingId(null)} saveLabel="Save" /></div>
         : <div key={p.id} className="card"
             onDragOver={e=>{ e.preventDefault(); if(overId!==p.id) setOverId(p.id); }}
             onDrop={e=>{ e.preventDefault(); onDrop(p.id); }}
-            style={{padding:0,overflow:'hidden',display:'flex',flexDirection:'column',position:'relative',opacity:dragId===p.id?0.4:1,outline:(overId===p.id&&dragId&&dragId!==p.id)?'2px solid var(--primary)':'none',outlineOffset:'-1px',transition:'opacity .12s'}}>
+            style={{padding:0,overflow:'hidden',display:'flex',flexDirection:'column',position:'relative',
+              // Hidden products stay on this page — it is the catalogue,
+              // not the shop window — but they are visibly not for sale.
+              opacity: dragId===p.id ? 0.4 : (p.is_active===false ? 0.62 : 1),
+              borderStyle: p.is_active===false ? 'dashed' : 'solid',
+              outline:(overId===p.id&&dragId&&dragId!==p.id)?'2px solid var(--primary)':'none',outlineOffset:'-1px',transition:'opacity .12s'}}>
             <div draggable onDragStart={e=>{ setDragId(p.id); e.dataTransfer.effectAllowed='move'; }} onDragEnd={()=>{ setDragId(null); setOverId(null); }}
               title="Drag to re-order" aria-label="Drag to re-order"
               style={{position:'absolute',top:6,left:6,zIndex:2,display:'inline-grid',gridTemplateColumns:'5px 5px',gap:3,padding:6,borderRadius:6,background:'rgba(255,255,255,.85)',boxShadow:'0 1px 3px rgba(0,0,0,.18)',cursor:'grab'}}>
               {[0,1,2,3].map(i=><span key={i} style={{width:5,height:5,borderRadius:'50%',background:'#64748B'}} />)}
             </div>
             <div onClick={()=> p.image_url && setLightboxSrc(p.image_url)} title={p.image_url?'Click to enlarge':undefined} style={{height:130,background:'var(--surface-2)',display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',cursor:p.image_url?'zoom-in':'default'}}>
-              {p.image_url ? <img src={p.image_url} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}} /> : <span className="small subtle">No photo</span>}
+              {p.image_url ? <img src={p.image_url} alt=""
+                style={{width:'100%',height:'100%',objectFit:'cover',
+                        filter: p.is_active===false ? 'grayscale(1)' : 'none'}} />
+                : <span className="small subtle">No photo</span>}
+              {p.is_active===false && <span style={{position:'absolute',top:6,right:6,
+                background:'#475569',color:'#fff',fontSize:10,fontWeight:800,
+                padding:'3px 8px',borderRadius:999,letterSpacing:'.03em'}}>HIDDEN</span>}
             </div>
             <div style={{padding:'10px 12px',display:'flex',flexDirection:'column',gap:4,flex:1}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:8}}>
@@ -16970,8 +17081,18 @@ function ProductsAdminView({ products, addProduct, updateProduct, deleteProduct,
               </div>
               {p.sku && <div className="small subtle" style={{fontFamily:'monospace',fontSize:11}}>SKU: {p.sku}</div>}
               {p.description && <div className="small subtle" style={{fontSize:12,lineHeight:1.4}}>{p.description}</div>}
-              <div style={{display:'flex',gap:6,marginTop:'auto',paddingTop:8}}>
+              <div style={{display:'flex',gap:6,marginTop:'auto',paddingTop:8,flexWrap:'wrap'}}>
                 <button className="btn btn-ghost small" onClick={()=>startEdit(p)}>✎ Edit</button>
+                {/* Hiding rather than deleting: a product off the shelf
+                    this term is usually back next term, and deleting it
+                    would take its name off every receipt that sold it. */}
+                <button className="btn btn-ghost small"
+                  title={p.is_active===false
+                    ? 'Put this back in the shop'
+                    : 'Take this out of the shop — it stays here'}
+                  onClick={()=>updateProduct(p.id, { is_active: p.is_active===false })}>
+                  {p.is_active===false ? '👁 Show' : '🚫 Hide'}
+                </button>
                 <button className="btn btn-ghost small" style={{color:'#DC2626'}} onClick={()=>deleteProduct(p.id)}>Delete</button>
               </div>
             </div>

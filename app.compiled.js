@@ -797,6 +797,7 @@ function App({
   });
   const isMobile = useIsMobile();
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [intakeShareOpen, setIntakeShareOpen] = useState(false);
   // The 7-column week grid is unusable on a phone — steer mobile users to
   // the Daily agenda whenever Weekly would render.
   useEffect(() => {
@@ -811,13 +812,13 @@ function App({
   }
   // Robust: header rendering follows the CURRENT VIEW, not a separate `side`
   // state, so the header can never drift out of sync with the content area.
-  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance', 'leave'].includes(view);
+  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'attendance', 'leave'].includes(view);
   // Defensive: if view and side ever get out of sync (e.g. after login flow
   // or a stale route), snap view back to the side's home. Prevents the
   // "half-breed" state where system nav is shown but schedule content mounts.
   useEffect(() => {
     const scheduleViews = new Set(['schedule', 'programme', 'accounts', 'shop', 'messages', 'enroll', 'settings', 'students']);
-    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'adminPromos', 'attendance', 'leave']);
+    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'attendance', 'leave']);
     if (side === 'schedule' && systemViews.has(view)) setView('schedule');
     if (side === 'system' && scheduleViews.has(view)) setView('adminDirectory');
     // Timetable (view only) has one screen. Nothing in the nav offers
@@ -6487,14 +6488,7 @@ function App({
     title: "Explore"
   }, "🔍 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
-  }, "Explore")), /*#__PURE__*/React.createElement("button", {
-    type: "button",
-    className: "nav-btn nav-btn-link",
-    onClick: () => window.open('./intake.html', '_blank', 'noopener,noreferrer'),
-    title: "Intake form (new tab)"
-  }, "📝 ", /*#__PURE__*/React.createElement("span", {
-    className: "nav-label"
-  }, "Intake ↗")), canSettings && /*#__PURE__*/React.createElement("button", {
+  }, "Explore")), canSettings && /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'settings' ? 'active' : ''}`,
     onClick: () => {
       setView('settings');
@@ -6503,7 +6497,14 @@ function App({
     title: "Settings"
   }, "⚙️ ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
-  }, "Settings")))), side === 'system' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+  }, "Settings"))), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "nav-btn nav-btn-link",
+    onClick: () => setIntakeShareOpen(true),
+    title: "Share the intake form"
+  }, "📝 ", /*#__PURE__*/React.createElement("span", {
+    className: "nav-label"
+  }, "Intake"))), side === 'system' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'adminDirectory' ? 'active' : ''}`,
     onClick: () => setView('adminDirectory'),
     title: "Directory"
@@ -6516,12 +6517,6 @@ function App({
   }, "🧾 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
   }, "Vouchers")), /*#__PURE__*/React.createElement("button", {
-    className: `nav-btn ${view === 'adminPromos' ? 'active' : ''}`,
-    onClick: () => setView('adminPromos'),
-    title: "Website Promotions"
-  }, "📢 ", /*#__PURE__*/React.createElement("span", {
-    className: "nav-label"
-  }, "Promotions")), /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'adminCrew' ? 'active' : ''}`,
     onClick: () => setView('adminCrew'),
     title: "Crew"
@@ -6559,7 +6554,14 @@ function App({
     title: "Attendance"
   }, "⏱️ ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
-  }, "Attendance")))), canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && /*#__PURE__*/React.createElement("button", {
+  }, "Attendance")), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "nav-btn nav-btn-link",
+    onClick: () => setIntakeShareOpen(true),
+    title: "Share the intake form"
+  }, "📝 ", /*#__PURE__*/React.createElement("span", {
+    className: "nav-label"
+  }, "Intake")))), canUseScheduler(currentUser?.role) && canUseAdminSystem(currentUser?.role) && /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "nav-btn",
     style: {
@@ -6609,11 +6611,6 @@ function App({
   }, /*#__PURE__*/React.createElement("span", {
     className: "mtab-ic"
   }, "🧾"), "Vouchers"), /*#__PURE__*/React.createElement("button", {
-    className: `mtab ${view === 'adminPromos' ? 'active' : ''}`,
-    onClick: () => setView('adminPromos')
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "mtab-ic"
-  }, "📢"), "Promos"), /*#__PURE__*/React.createElement("button", {
     className: `mtab ${view === 'adminCrew' ? 'active' : ''}`,
     onClick: () => setView('adminCrew')
   }, /*#__PURE__*/React.createElement("span", {
@@ -6643,7 +6640,9 @@ function App({
     className: "mtab-ic"
   }, "☰"), "More", side === 'schedule' && newMsgCount > 0 && /*#__PURE__*/React.createElement("span", {
     className: "mtab-badge"
-  }, newMsgCount > 99 ? '99+' : newMsgCount))), isMobile && currentUser && mobileMoreOpen && /*#__PURE__*/React.createElement("div", {
+  }, newMsgCount > 99 ? '99+' : newMsgCount))), intakeShareOpen && /*#__PURE__*/React.createElement(IntakeShareModal, {
+    onClose: () => setIntakeShareOpen(false)
+  }), isMobile && currentUser && mobileMoreOpen && /*#__PURE__*/React.createElement("div", {
     className: "more-sheet-backdrop",
     onClick: () => setMobileMoreOpen(false)
   }, /*#__PURE__*/React.createElement("div", {
@@ -6664,19 +6663,19 @@ function App({
     onClick: () => {
       setView('enroll');
     }
-  }, "🔍 Explore"), /*#__PURE__*/React.createElement("button", {
-    className: "more-item",
-    onClick: () => {
-      window.open('./intake.html', '_blank', 'noopener,noreferrer');
-      setMobileMoreOpen(false);
-    }
-  }, "📝 Intake form ↗"), canSettings && /*#__PURE__*/React.createElement("button", {
+  }, "🔍 Explore"), canSettings && /*#__PURE__*/React.createElement("button", {
     className: "more-item",
     onClick: () => {
       setView('settings');
       setAdminSection('pools');
     }
-  }, "⚙️ Settings")), side === 'system' && /*#__PURE__*/React.createElement("button", {
+  }, "⚙️ Settings")), /*#__PURE__*/React.createElement("button", {
+    className: "more-item",
+    onClick: () => {
+      setIntakeShareOpen(true);
+      setMobileMoreOpen(false);
+    }
+  }, "📝 Share the intake form"), side === 'system' && /*#__PURE__*/React.createElement("button", {
     className: "more-item",
     onClick: () => {
       setView('attendance');
@@ -7107,13 +7106,7 @@ function App({
     copyPreviousWeek: attCopyPreviousWeek,
     addShiftSeries: attAddShiftSeries,
     onRefresh: loadAttendance
-  })), !loading && side === 'system' && view === 'adminPromos' && canSystem && /*#__PURE__*/React.createElement(AdminPromosView, {
-    promos: promos,
-    savePromo: adminSavePromo,
-    deletePromo: adminDeletePromo,
-    toggleActive: adminTogglePromoActive,
-    onRefresh: loadAdminAll
-  }), !loading && view === 'accounts' && /*#__PURE__*/React.createElement("div", {
+  })), !loading && view === 'accounts' && /*#__PURE__*/React.createElement("div", {
     className: "side-shell"
   }, /*#__PURE__*/React.createElement(SectionNav, {
     ariaLabel: "Accounts section",
@@ -7407,6 +7400,11 @@ function App({
     onUpdate: updatePaymentMethod,
     onMove: movePaymentMethod
   }), adminSection === 'website' && /*#__PURE__*/React.createElement(WebsitePanel, {
+    promos: promos,
+    savePromo: adminSavePromo,
+    deletePromo: adminDeletePromo,
+    togglePromoActive: adminTogglePromoActive,
+    onRefreshPromos: loadAdminAll,
     settings: websiteSettings,
     lessonTypes: options.lessonTypes || [],
     branches: options.branches || [],
@@ -12200,6 +12198,122 @@ function StudentEditor({
 }
 
 // ============================================================================
+// ── The intake link, to hand ──────────────────────────────────────────────
+// The form is public: anyone holding the link can enrol a child, and that
+// is the point of it. So sharing it is not a privilege — every seat can,
+// including Timetable (view only), who answers the phone like anybody
+// else when the desk is busy.
+//
+// It used to open in a new tab and nothing else, which meant sharing it
+// was "open it, select the address bar, copy". This is that, done once.
+function IntakeShareModal({
+  onClose
+}) {
+  const url = (typeof window !== 'undefined' ? window.location.origin : '') + '/intake.html';
+  const [copied, setCopied] = useState('');
+  async function copy(text, what) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Older phones and anything not on https. Without this the button
+        // silently does nothing, which is worse than not offering it.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+      }
+      setCopied(what);
+      setTimeout(() => setCopied(''), 2200);
+    } catch (_) {
+      setCopied('failed');
+      setTimeout(() => setCopied(''), 2600);
+    }
+  }
+  const message = `Hi! Please register your swimmer with Star Swim using this form:\n${url}`;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card",
+    onClick: e => e.stopPropagation(),
+    style: {
+      maxWidth: 520
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 17,
+      fontWeight: 800
+    }
+  }, "📝 Intake form"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4,
+      marginBottom: 14
+    }
+  }, "Send this to a parent and they can enrol their own swimmer. It works for anybody with the link — they do not need an account."), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "The link"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    readOnly: true,
+    value: url,
+    onFocus: e => e.target.select(),
+    style: {
+      fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace',
+      fontSize: 13
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    onClick: () => copy(url, 'link')
+  }, copied === 'link' ? '✓ Copied' : '🔗 Copy link'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => copy(message, 'message')
+  }, copied === 'message' ? '✓ Copied' : '💬 Copy with a message'), /*#__PURE__*/React.createElement("a", {
+    className: "btn btn-ghost small",
+    style: {
+      textDecoration: 'none'
+    },
+    href: `https://wa.me/?text=${encodeURIComponent(message)}`,
+    target: "_blank",
+    rel: "noopener noreferrer"
+  }, "↗ Send on WhatsApp"), /*#__PURE__*/React.createElement("a", {
+    className: "btn btn-ghost small",
+    style: {
+      textDecoration: 'none',
+      marginLeft: 'auto'
+    },
+    href: url,
+    target: "_blank",
+    rel: "noopener noreferrer"
+  }, "Open the form ↗")), copied === 'failed' && /*#__PURE__*/React.createElement("div", {
+    className: "note err",
+    style: {
+      marginTop: 10
+    }
+  }, "This browser would not let me copy it. Select the link above and copy it by hand."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      marginTop: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost",
+    onClick: onClose
+  }, "Close"))));
+}
+
 // ── Reports › Unpaid classes ──────────────────────────────────────────────
 // Swimmers who have been in the water without a credit for it. Read from
 // the ledger rather than the balance, so it is right whether or not the
@@ -20894,8 +21008,17 @@ function WebsitePanel({
   onUpdateCard,
   onDeleteCard,
   onMoveCard,
-  onMoveCategory
+  onMoveCategory,
+  promos,
+  savePromo,
+  deletePromo,
+  togglePromoActive,
+  onRefreshPromos
 }) {
+  // Promotions used to be its own button on the System side. They are a
+  // website thing — a bar across every page and a card on the homepage —
+  // so they live with the rest of the website now.
+  const [wtab, setWtab] = useState('site');
   const migrated = settings != null;
   const visLt = new Set(settings?.visible_lesson_type_ids || []);
   const visBr = new Set(settings?.visible_branch_ids || []);
@@ -20977,7 +21100,23 @@ function WebsitePanel({
       flexDirection: 'column',
       gap: 16
     }
-  }, !migrated && /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, [['site', '🌐 Pages & pricing'], ['promos', '📢 Promotions']].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: `btn small ${wtab === k ? 'btn-primary' : 'btn-ghost'}`,
+    onClick: () => setWtab(k)
+  }, l))), wtab === 'promos' && /*#__PURE__*/React.createElement(AdminPromosView, {
+    promos: promos,
+    savePromo: savePromo,
+    deletePromo: deletePromo,
+    toggleActive: togglePromoActive,
+    onRefresh: onRefreshPromos
+  }), wtab === 'site' && /*#__PURE__*/React.createElement(React.Fragment, null, !migrated && /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       background: '#FEF3C7',
@@ -21343,7 +21482,7 @@ function WebsitePanel({
       },
       onClick: () => onDeleteCard(c.id)
     }, "🗑"))))))));
-  })));
+  }))));
 }
 
 // Small coloured pill for a payment method — used on invoice rows, receipts and filters.
@@ -33910,7 +34049,12 @@ function ProductsAdminView({
     }
   }, "🛍 Product Catalogue"), /*#__PURE__*/React.createElement("div", {
     className: "small subtle"
-  }, "Items you sell (goggles, caps, swim diapers…). Add a photo, SKU, description and price — the photo and details show in the Shop so staff pick the right item. Drag the ⠿ handle on a card to re-order the catalogue. Shared across all branches; price stays editable per sale.")), /*#__PURE__*/React.createElement("div", {
+  }, "Items you sell (goggles, caps, swim diapers…). Add a photo, SKU, description and price — the photo and details show in the Shop so staff pick the right item. Drag the ⠿ handle on a card to re-order the catalogue. Shared across all branches; price stays editable per sale."), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 6
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Hide"), " takes a product out of the Shop without removing it. Everything you have ever sold stays on this page, so a line that is off the shelf this term can come back next term with its photo, price and history intact.")), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 18,
       maxWidth: 300
@@ -33927,13 +34071,20 @@ function ProductsAdminView({
     onSave: addNew,
     onCancel: null,
     saveLabel: "Add Product"
-  })), (products || []).length > 0 && /*#__PURE__*/React.createElement("div", {
-    className: "small subtle",
-    style: {
-      fontWeight: 700,
-      marginBottom: 8
-    }
-  }, "Catalogue (", (products || []).length, ")"), /*#__PURE__*/React.createElement("div", {
+  })), (products || []).length > 0 && (() => {
+    const hidden = (products || []).filter(p => p.is_active === false).length;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        fontWeight: 700,
+        marginBottom: 8
+      }
+    }, "Catalogue (", (products || []).length, ")", hidden > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontWeight: 400
+      }
+    }, " · ", (products || []).length - hidden, " in the Shop,", ' ', hidden, " hidden"));
+  })(), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill,minmax(230px,1fr))',
@@ -33971,7 +34122,10 @@ function ProductsAdminView({
       display: 'flex',
       flexDirection: 'column',
       position: 'relative',
-      opacity: dragId === p.id ? 0.4 : 1,
+      // Hidden products stay on this page — it is the catalogue,
+      // not the shop window — but they are visibly not for sale.
+      opacity: dragId === p.id ? 0.4 : p.is_active === false ? 0.62 : 1,
+      borderStyle: p.is_active === false ? 'dashed' : 'solid',
       outline: overId === p.id && dragId && dragId !== p.id ? '2px solid var(--primary)' : 'none',
       outlineOffset: '-1px',
       transition: 'opacity .12s'
@@ -34028,11 +34182,25 @@ function ProductsAdminView({
     style: {
       width: '100%',
       height: '100%',
-      objectFit: 'cover'
+      objectFit: 'cover',
+      filter: p.is_active === false ? 'grayscale(1)' : 'none'
     }
   }) : /*#__PURE__*/React.createElement("span", {
     className: "small subtle"
-  }, "No photo")), /*#__PURE__*/React.createElement("div", {
+  }, "No photo"), p.is_active === false && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: 'absolute',
+      top: 6,
+      right: 6,
+      background: '#475569',
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: 800,
+      padding: '3px 8px',
+      borderRadius: 999,
+      letterSpacing: '.03em'
+    }
+  }, "HIDDEN")), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: '10px 12px',
       display: 'flex',
@@ -34074,12 +34242,19 @@ function ProductsAdminView({
       display: 'flex',
       gap: 6,
       marginTop: 'auto',
-      paddingTop: 8
+      paddingTop: 8,
+      flexWrap: 'wrap'
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: () => startEdit(p)
   }, "✎ Edit"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    title: p.is_active === false ? 'Put this back in the shop' : 'Take this out of the shop — it stays here',
+    onClick: () => updateProduct(p.id, {
+      is_active: p.is_active === false
+    })
+  }, p.is_active === false ? '👁 Show' : '🚫 Hide'), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     style: {
       color: '#DC2626'
