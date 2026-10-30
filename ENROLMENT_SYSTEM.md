@@ -402,10 +402,11 @@ it schedules freely and tells the truth at the moment of attendance.
 
 # PART TWO — the club
 
-**Status: specified, not built.** Everything below is design. Where a
-requirement had a decision hiding inside it, the decision is named and a
-recommendation given rather than quietly chosen. §19 lists what is still
-genuinely open.
+**Status: specified, not built.** Everything below is design, and every
+policy question in it has been answered by the club — §19 lists the
+seven decisions and what each one costs. Where a requirement had a
+decision hiding inside it, the decision is named rather than quietly
+assumed, so that whoever builds this knows what was chosen on purpose.
 
 A swimming club is not a swim school with different wording. Three
 things change at the root, and almost everything else follows:
@@ -441,7 +442,9 @@ Taken literally that is two identity keys, and two keys means they will
 disagree. One parent types their IC on Tuesday and their membership
 number on Friday and becomes two families. So:
 
-> **The membership number is the one key. The IC is a way of finding it.**
+> **The membership number is the account number.** One family, one
+> number, and it is the primary key everything hangs off. The IC is a
+> way of finding it, never a second key.
 
 - Every account has exactly one membership number. It is issued once and
   never changes.
@@ -494,16 +497,45 @@ An IC is a national identity number and should be treated as sensitive:
 - Indexed for lookup, but the index should be on a normalised form
   (digits only) so `850101-14-5531` and `8501011455 31` find each other.
 
+### Two series, not one
+
+There are two numbers and they answer different questions.
+
+| | Scope | Answers |
+|---|---|---|
+| **Membership number** | the family / account | who pays, who signs in, who a child belongs to |
+| **Swimmer Club ID** | one swimmer | who is this body in the water |
+
+A swimmer gets their own Club ID at first enrolment and keeps it for
+life — through squad changes, through a sibling leaving, through the
+family's membership lapsing and resuming. It is what goes on a gala
+entry, a lane sheet, a timing chip and a results export, and it is the
+thing other systems will key on.
+
+Both are issued the same way: server-side, from a counter, in a
+transaction, walking past anything already taken. Both are immutable.
+
+Keep the two visually distinct so nobody reads one for the other on a
+form — for example `M-000421` for the family and `S-001138` for the
+swimmer. Different letter, different length, no overlap.
+
+> A swimmer's Club ID must **not** be derived from the membership
+> number. `M-000421-02` looks tidy until the child's parents separate,
+> or a swimmer moves to another family's membership, and the ID now
+> states something untrue that is printed on three years of results.
+
 ### A family has two parents
 
 Clubs routinely have both parents dealing with the club. Decide early:
 
-- **One account, two contacts** — the membership number belongs to the
-  family; both parents are contacts on it, either may sign in.
-  *Recommended.* It matches how a club actually behaves and it is what
-  Part One's `phone_primary` / `phone_secondary` already does.
-- One account per parent, linked — more faithful, much more work, and
-  every bill needs a payer rule.
+**Decided: one account, two contacts.** The membership number belongs to
+the family; both parents are contacts on it and either may sign in. It
+matches how a club actually behaves, and it is what Part One's
+`phone_primary` / `phone_secondary` already does.
+
+Note the consequence for §11: **either registered mobile verifies.** A
+father adding a child must not be turned away because the mother's
+number is the primary one.
 
 ---
 
@@ -540,65 +572,154 @@ Membership numbers are printed on kit bags, read out at galas, written
 on entry forms and shared between parents arranging lifts. Treat one as
 public knowledge.
 
-Three ways to close it. Pick one:
+**Decided: membership number plus the registered mobile.** Both must
+match before anything attaches. Two facts, one public and one not.
 
-1. **Number plus one matching fact.** They type the membership number
-   *and* the registered mobile (or the last four of the IC). Both must
-   match. Cheap, familiar, and good enough for a club.
-   **Recommended for Route A.**
-2. **Attach on approval.** The public form creates a *pending*
-   attachment; the office sees "X wants to add a child to M-0421" and
-   approves. Safest, and it puts a person in a loop that mostly does not
-   need one.
-3. **Parent app only.** Route A cannot attach at all — it can only
-   create a new account. A returning parent must sign in. Cleanest
-   security, worst for the parent who has forgotten they have an
-   account, and it will create duplicate accounts.
+```
+  membership number  M-000421
+  mobile             01x-xxx xxxx
 
-Whichever you choose, **attaching to an existing account is a privileged
-act and must be logged**: who attached, when, from which route, and
-against which verification. That log is the only thing that answers "how
-did this child end up on our bill" six months later.
+  both match one account  →  attach, and log it
+  number matches, mobile does not
+      →  "Those do not match our records. Call the centre."
+         Do NOT say which one was wrong.
+  number matches nothing  →  same sentence, same reason
+```
+
+Three details that decide whether this actually works:
+
+- **Either registered mobile counts.** The account carries two (§9), and
+  a father must not be refused because the mother's is primary.
+- **Compare normalised**, through the same phone function everything
+  else uses. `012-345 6789`, `0123456789` and `+60123456789` are one
+  number or this fails for honest people.
+- **Rate-limit by membership number.** Six attempts an hour, as the
+  parent app's sign-in gate does. Without it the mobile is guessable by
+  machine, and the whole check is decoration.
+
+**Say nothing useful when it fails.** "That number is not ours" tells a
+stranger which numbers are. One sentence for every failure.
+
+**Every attachment is logged** — who, when, from which route, against
+which verification. That log is the only thing that answers "how did
+this child end up on our bill" six months later.
 
 ---
 
-## 12. Consents — indemnity and code of conduct
+## 12. What is signed, and for whom
 
-Two documents, both re-accepted on each new enrolment.
+**Decided: everything is per child, at the moment that child is
+enrolled.** Not per family, not per year.
+
+A parent enrolling two children at once completes the set twice, once
+for each. A parent adding a third child in March completes it once more,
+for that child only — nothing already signed is touched or re-asked.
+
+Three things are captured per swimmer:
+
+1. **Indemnity** — the club's liability waiver
+2. **Code of conduct** — behaviour, at the pool and at galas
+3. **Medical declaration** — see §12b. This is the one that is not a
+   signature but a set of answers, and it is the one that matters at
+   6am on a cold poolside.
 
 ```
 consents
   id
-  account_id            who accepted
-  student_id            for whom
+  account_id            the family
+  student_id            the swimmer this covers
   document_type         'indemnity' | 'code_of_conduct'
   document_version      which text they actually saw
-  season_year           which year it covers        ← see below
+  signed_year           the calendar year they signed in
   accepted_at           server clock, never the browser's
   accepted_by_name      typed signature
   signed_via            'public_form' | 'parent_app' | 'paper'
   ip, user_agent
+  is_void, voided_at, voided_by, void_reason
 ```
 
-Three properties that matter, all learned the hard way in Part One:
+Properties that matter, all learned the hard way in Part One:
 
-- **Version the document.** Store which version of the indemnity they
-  signed, not just that they signed one. Without it, an indemnity is
-  unenforceable the first time you edit the text.
-- **Server clock only.** A browser's clock is a claim, not a timestamp.
+- **Version the document.** Store which version they signed, not just
+  that they signed. Without it an indemnity is unenforceable the first
+  time somebody edits the text.
+- **Server clock only.** A browser's clock is a claim.
 - **Never delete one.** Void it, with a reason.
-
-### The decision: how often?
-
-Per child per enrolment, or per child per year?
-
-**Recommended: per child, per season year** — the same year the annual
-fee is keyed to (§14). A club's indemnity is naturally annual, it lines
-up with renewal, and it means January's renewal is one flow that
-collects the money and the signature together. A consent for 2026 does
-not cover 2027.
+- **`signed_year` costs nothing and buys an option.** Today nothing
+  enforces an annual re-sign. If the club later decides the indemnity
+  should be renewed each season, the rule becomes a query against a
+  column that is already populated truthfully, rather than a migration
+  with nothing to backfill from.
 
 ---
+
+## 12b. The medical declaration
+
+Per swimmer, and different in kind from the two signatures: it is not an
+agreement, it is **information that changes and is needed in a hurry**.
+
+```
+medical_declarations
+  id
+  student_id
+  declared_at, declared_by_name
+  is_current            boolean — exactly one true per swimmer
+
+  can_swim_unaided      boolean
+  conditions            text[]   asthma, epilepsy, diabetes, …
+  condition_notes       text
+  allergies             text[]
+  allergy_notes         text
+  medication            text     what they carry, and where it is kept
+  dietary               text
+
+  doctor_name, doctor_phone
+  emergency_contact_name, emergency_contact_phone, relationship
+
+  consent_to_treat      boolean  — may we get them treated if we cannot
+                                   reach you
+  photo_consent         boolean  — may their picture appear in club media
+
+  superseded_by         id of the declaration that replaced this one
+  is_void, …
+```
+
+### Four things to get right
+
+**A declaration is never edited — it is superseded.** A child develops
+asthma in year two; that is a new declaration, with the old one kept and
+marked superseded. The old one is what the club was working from last
+season, and that matters if anything ever goes wrong.
+
+**Exactly one is current.** Enforce it (a partial unique index on
+`student_id where is_current`), do not merely intend it. Two current
+declarations means a coach reads whichever the query happens to return.
+
+**A coach must be able to see it at the poolside, and almost nobody else
+should.** This is health data about a child. The shape that works:
+
+- The coach's screen shows, against each swimmer in their own squad, a
+  **medical flag** — a marker that there is something to know.
+- Tapping it shows the conditions, medication, allergies, emergency
+  contact and treatment consent. Nothing else about the child.
+- **Every view is logged.** Not to deter the coaches, but because a log
+  is the only honest answer to "who had access to this".
+- The office sees it in full. Reception, finance and timetable seats do
+  not.
+
+**Photo consent is not a formality.** It has to be readable from
+wherever photos get used — galas, the website, social media — or it is a
+box ticked and then ignored. Surface it in any squad list a coach or a
+media volunteer exports.
+
+### Renewal
+
+The declaration does not expire with the calendar, but stale medical
+information is worse than none, because it is trusted. **Prompt the
+parent to confirm or update it each year at renewal** — one screen, "is
+this still right?", with a confirm that writes a new `declared_at` and
+nothing else if unchanged. That is a nudge, not a gate: a swimmer is
+never stopped from training over it.
 
 ## 13. Programmes and squads
 
@@ -716,18 +837,29 @@ A billing tracker that can honestly answer:
   front screen in December. It is the charge that surprises people, and
   a surprise in January is a complaint in January.
 
-### The objection to raise with the club, once
+### No pro-rating. Ever.
 
-A family joining on 20 November pays a full year's membership for six
-weeks, then pays again in January. That is a legitimate club convention
-and plenty of clubs run it. It is also the single most likely thing to
-generate an argument at the front desk.
+**Decided.** The annual membership is paid in full whenever a swimmer
+joins. A family joining on 20 November pays the whole 2026 fee for six
+weeks of it, and pays again in January. There is no half-year, no
+monthly apportionment and no discretion in the generator.
 
-The data model above supports a pro-rate or a half-year rule without
-restructuring — the amount is decided when the charge is raised, so a
-rule like "join after 1 October and the annual charge is half" is a
-change to the generator and nothing else. **Decide the policy now, build
-the generator so the policy can change.**
+That is a clean rule and worth defending as one: the fee buys
+*membership of the club for the year 2026*, not a quantity of weeks.
+Said that way it is obviously not divisible, and the front desk has one
+sentence rather than a negotiation.
+
+Two things follow for the build:
+
+- **The generator takes no join date into account.** It asks only
+  whether an `annual` charge exists for this swimmer and this year. One
+  comparison, no arithmetic, nothing to get wrong in a leap year or
+  across a timezone.
+- **Say it before they pay, not after.** The enrolment form and the
+  parent app should both state plainly, at the point of joining, that
+  the annual fee covers the calendar year and renews in January. A
+  November joiner who was told is a member; one who finds out in
+  January is a complaint.
 
 ---
 
@@ -836,8 +968,19 @@ almost unchanged:
   first parent who rang in sick will say the app called their child
   truant.
 
-Plus **Add a swimmer**, which is Route B from §10 and the thing that
-makes the membership-number problem mostly disappear.
+Plus two things that fall out of the decisions above:
+
+- **Add a swimmer** — Route B from §10, and the thing that makes the
+  membership-number problem mostly disappear. It collects the three
+  per-child items from §12 and §12b for the new swimmer and touches
+  nothing already signed.
+- **Keep my details right** — the annual nudge to confirm or update each
+  swimmer's medical declaration (§12b). One screen, "is this still
+  right?", and a confirm that writes a fresh date if nothing changed.
+
+Show the family's membership number and each swimmer's Club ID
+somewhere plain. Parents are asked for them at galas and by the office,
+and the alternative is a phone call to reception.
 
 Everything in Part One about reads being keyed to the signed-in account,
 with no account id ever passed as a parameter, applies here unchanged. It
@@ -862,36 +1005,59 @@ is the part most worth copying verbatim.
 - replacement and make-up classes, unless the club wants them
 
 **New, with no equivalent in Part One:**
-- membership numbers and their issuance
+- membership numbers, swimmer Club IDs, and the issuance of both
 - IC as a lookup aid, with the care §9 describes
+- attaching to an existing account on number + registered mobile (§11)
+- per-child medical declarations, superseded rather than edited (§12b)
 - period-keyed charges and an idempotent generator
 - materialised session occurrences and expected-versus-actual attendance
 - squad-level analytics
 
 ---
 
-## 19. Decisions
+## 19. Decisions — all settled
 
-### Settled
+Every question this document raised has been answered by the club. They
+are recorded here so that whoever builds it knows these were decided,
+not defaulted, and knows what each one costs.
 
-1. **Annual membership is per swimmer.** Every charge hangs off a
-   swimmer; there is no family-level charge. Simpler schema, one unique
-   key for all three fees. Folded into §14.
+| # | Decision | What it costs you |
+|---|---|---|
+| 1 | **Annual membership is per swimmer.** Every charge hangs off a swimmer; no family-level charge | A January bill that multiplies by the number of children — so the parent app shows the family total, §17 |
+| 2 | **Annual fee is always paid in full.** No pro-rating, no half-year | A November joiner pays twice in two months. Say so at the point of joining, §14 |
+| 3 | **A returning parent attaches on membership number + registered mobile.** Both must match | One more field on the form, a rate limit, and a deliberately unhelpful failure message, §11 |
+| 4 | **Everything is signed per child, at enrolment.** Indemnity, code of conduct and medical declaration, once per swimmer | Adding a third child means one more form, not a new account. Nothing already signed is re-asked, §12 |
+| 5 | **One account, two contacts.** The membership number is the family's; either parent may sign in | Either registered mobile must satisfy §11's check |
+| 6 | **Each swimmer also gets a Club ID**, separate from the family's membership number | Two counters, two immutable series, and the Club ID must never be derived from the membership number, §9 |
+| 7 | **Non-payment never blocks training.** Chasing is a person's job | The attendance screens need to know nothing about money, which is why they stay simple |
 
-### Still open
+### What follows from them, taken together
 
-These change the schema, so settle them before building:
+**The membership number is the account number.** One family, one number,
+one row everything hangs off. The IC finds it; the mobile proves it; the
+Club ID identifies a swimmer within it.
 
-2. **Pro-rating.** A November joiner paying a full year — convention, or
-   a rule? §14 says build so it can change; it still has to be decided.
-3. **Route A verification** (§11). Number plus a matching fact, approval
-   queue, or parent-app only.
-4. **Consent frequency** (§12). Per enrolment or per season year.
-5. **Two parents, one account or two** (§9).
-6. **Does a swimmer get their own number** as well as the family
-   membership number? Clubs that enter galas usually need one. It is
-   easy now and awkward later.
-7. **When does non-payment stop a swimmer training?** The school
-   deliberately never blocks scheduling on money. A club with a squad
-   list and a season may want a different answer — but decide it, rather
-   than discovering it at poolside.
+**Money and the pool never touch.** Charges are generated on a period
+key and chased by a human. Attendance records who turned up. Neither
+queries the other, and no screen has to decide what to do about a
+swimmer who is behind. That is the single biggest simplification in this
+design and it was decision 7 that bought it.
+
+**The per-child shape repeats everywhere.** Consents, medical
+declarations, Club IDs, registration fees, annual fees, monthly fees and
+attendance are all per swimmer. Only the account, the membership number
+and the login are per family. One sentence, and most of the schema
+follows from it.
+
+### The two things genuinely left to the builder
+
+Not policy, so not for the club to answer — but they will bite if nobody
+decides them:
+
+- **How far ahead to materialise session occurrences** (§15). A term is
+  the natural unit. Too far and every timetable change rewrites a year;
+  too near and the schedule runs out over a holiday when nobody is
+  looking.
+- **Who may see a medical declaration** (§12b). The shape is described —
+  coach sees their own squad, office sees all, everybody else sees
+  nothing, every view logged — but the seats are this club's to name.
