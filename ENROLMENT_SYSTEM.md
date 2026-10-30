@@ -1,5 +1,16 @@
 # From a stranger on the website to a paid, scheduled swimmer
 
+> **Two parts.**
+> **Part One** describes the Star Swim school system as it is built and
+> running. It is the reference.
+> **Part Two** describes the swimming club platform, which is specified
+> but not built. It reuses Part One's spine and throws away its money
+> model. Read Part One first; Part Two assumes it.
+
+---
+
+# PART ONE — the school, as built
+
 A description of the enrolment-to-invoice loop as it is actually built at
 Star Swim, written so it can be rebuilt on another platform. It describes
 behaviour and reasoning, not Supabase specifics — the parts that are
@@ -385,3 +396,483 @@ enrolling in a class require credits?** We said no, deliberately.
 Scheduling and money move at different speeds, and a system that refuses
 to schedule an unpaid swimmer forces the office to lie to it. Instead
 it schedules freely and tells the truth at the moment of attendance.
+
+---
+---
+
+# PART TWO — the club
+
+**Status: specified, not built.** Everything below is design. Where a
+requirement had a decision hiding inside it, the decision is named and a
+recommendation given rather than quietly chosen. §19 lists what is still
+genuinely open.
+
+A swimming club is not a swim school with different wording. Three
+things change at the root, and almost everything else follows:
+
+| | School (Part One) | Club (Part Two) |
+|---|---|---|
+| **What a parent buys** | credits — a pack of lessons | membership and a place in a squad |
+| **What attendance does** | spends a credit | records whether they turned up |
+| **Who a family is** | matched by phone number | identified by a membership number |
+
+Drop the credit ledger entirely: `pending_credits`,
+`credit_purchases`, `student_credit_balances`, and packages-as-credit-
+packs all go. Attendance stops being a transaction and becomes a
+record. That is a simplification of the money and a complication of the
+attendance, which is the right trade for a club.
+
+Make-up classes also go unless you want them. A club squad trains on
+fixed nights; a missed session is a missed session. If you do want them,
+lift §7's events-not-state rule and nothing else from the school's
+replacement machinery — it is the part we got most wrong.
+
+---
+
+## 9. Identity — the membership number
+
+### The rule, stated so it can be implemented
+
+You asked for: a membership number if they have one, otherwise match on
+Identity Card, and if not by IC then a membership number must be issued
+and used thereafter.
+
+Taken literally that is two identity keys, and two keys means they will
+disagree. One parent types their IC on Tuesday and their membership
+number on Friday and becomes two families. So:
+
+> **The membership number is the one key. The IC is a way of finding it.**
+
+- Every account has exactly one membership number. It is issued once and
+  never changes.
+- The IC is stored on the account as a **lookup aid**, not as an
+  identity. It answers "which membership number is this?" and nothing
+  else.
+- An account may exist with no IC at all — a foreign parent, a passport
+  holder, somebody who declines. That must not block them.
+
+### What enrolment asks
+
+```
+  Do you have a club membership number?
+      YES → enter it → verify (see §11) → attach to that account
+      NO  → Do you have a Malaysian IC?
+              YES → look it up
+                      found     → "You are member M-0421. Is this you?"
+                      not found → issue a new number
+              NO  → issue a new number
+```
+
+A found IC **never silently attaches**. It offers, and a person confirms.
+An IC is typed by hand, is twelve digits, and a transposed pair lands on
+a real stranger.
+
+### Issuing a number
+
+Same problem as invoice numbering in §5, same answer:
+
+- Allocated server-side from a counter, in a transaction, walking past
+  any number already taken.
+- Never derived from anything that can change — not the branch, not the
+  year, not the name. A family that moves squad keeps its number.
+- Readable aloud over a bad phone line. Drop `I`, `O`, `0`, `1` from any
+  alphabetic portion, or use digits only.
+- Suggested shape: `M-` plus six digits, zero-padded. Enough for a
+  century of a club, short enough to say.
+
+### Storing the IC
+
+An IC is a national identity number and should be treated as sensitive:
+
+- **Stored once**, on the account. Do not denormalise it onto every
+  swimmer the way Part One denormalises the guardian's name — that
+  advice was about repairability, and it does not apply to an identity
+  document.
+- **Masked on screen** by default (`••••••-••-1234`), revealed on an
+  explicit action by a seat that needs it.
+- **Never in a URL, a log line, or an error message.**
+- Indexed for lookup, but the index should be on a normalised form
+  (digits only) so `850101-14-5531` and `8501011455 31` find each other.
+
+### A family has two parents
+
+Clubs routinely have both parents dealing with the club. Decide early:
+
+- **One account, two contacts** — the membership number belongs to the
+  family; both parents are contacts on it, either may sign in.
+  *Recommended.* It matches how a club actually behaves and it is what
+  Part One's `phone_primary` / `phone_secondary` already does.
+- One account per parent, linked — more faithful, much more work, and
+  every bill needs a payer rule.
+
+---
+
+## 10. Enrolling a child
+
+Two routes, deliberately.
+
+### Route A — the public form, with a membership number
+
+For a parent who is not signed in. Same shape as Part One §3: one
+server-side write, nothing the public key can touch directly.
+
+### Route B — the parent app, signed in
+
+The better route, and the one to push people toward. A signed-in parent
+presses **Add a swimmer**, fills in the child, accepts the two
+agreements, done. No membership number to type, because the session
+already knows who they are. No verification problem, because they
+authenticated.
+
+**This route has no identity risk at all**, which is why it should be
+the one on every email, poster and reminder. Route A exists for the
+parent who has not signed in yet.
+
+---
+
+## 11. The thing to get right: a membership number is not a password
+
+> **If typing a membership number is enough to attach a child to that
+> account, then anybody who learns a number can add a child to somebody
+> else's billing — and see that family on the next screen.**
+
+Membership numbers are printed on kit bags, read out at galas, written
+on entry forms and shared between parents arranging lifts. Treat one as
+public knowledge.
+
+Three ways to close it. Pick one:
+
+1. **Number plus one matching fact.** They type the membership number
+   *and* the registered mobile (or the last four of the IC). Both must
+   match. Cheap, familiar, and good enough for a club.
+   **Recommended for Route A.**
+2. **Attach on approval.** The public form creates a *pending*
+   attachment; the office sees "X wants to add a child to M-0421" and
+   approves. Safest, and it puts a person in a loop that mostly does not
+   need one.
+3. **Parent app only.** Route A cannot attach at all — it can only
+   create a new account. A returning parent must sign in. Cleanest
+   security, worst for the parent who has forgotten they have an
+   account, and it will create duplicate accounts.
+
+Whichever you choose, **attaching to an existing account is a privileged
+act and must be logged**: who attached, when, from which route, and
+against which verification. That log is the only thing that answers "how
+did this child end up on our bill" six months later.
+
+---
+
+## 12. Consents — indemnity and code of conduct
+
+Two documents, both re-accepted on each new enrolment.
+
+```
+consents
+  id
+  account_id            who accepted
+  student_id            for whom
+  document_type         'indemnity' | 'code_of_conduct'
+  document_version      which text they actually saw
+  season_year           which year it covers        ← see below
+  accepted_at           server clock, never the browser's
+  accepted_by_name      typed signature
+  signed_via            'public_form' | 'parent_app' | 'paper'
+  ip, user_agent
+```
+
+Three properties that matter, all learned the hard way in Part One:
+
+- **Version the document.** Store which version of the indemnity they
+  signed, not just that they signed one. Without it, an indemnity is
+  unenforceable the first time you edit the text.
+- **Server clock only.** A browser's clock is a claim, not a timestamp.
+- **Never delete one.** Void it, with a reason.
+
+### The decision: how often?
+
+Per child per enrolment, or per child per year?
+
+**Recommended: per child, per season year** — the same year the annual
+fee is keyed to (§14). A club's indemnity is naturally annual, it lines
+up with renewal, and it means January's renewal is one flow that
+collects the money and the signature together. A consent for 2026 does
+not cover 2027.
+
+---
+
+## 13. Programmes and squads
+
+Replaces Part One's lesson types and packages.
+
+```
+programmes        name, squad level, age guidance, branch/venue,
+                  monthly_fee, is_active
+
+squad_sessions    programme_id, weekday, start_time, end_time,
+                  venue_id, coach_id
+                  — the recurring training slots
+
+enrolments        student_id, programme_id,
+                  started_on, ended_on (null = current),
+                  status
+```
+
+A swimmer's training schedule is **derived**: their enrolments give
+their programmes, and each programme's `squad_sessions` give the nights
+they are expected. That is the "in-built schedule" — it is not typed per
+swimmer, it falls out of which squad they are in.
+
+**`started_on` / `ended_on` are not decoration.** A swimmer who moves
+from Development to Senior in March must show as expected at
+Development's sessions in February and Senior's in April, or every
+attendance figure before March is wrong. Close the old enrolment, open a
+new one. Never edit a squad in place.
+
+---
+
+## 14. Billing — three fees, and the one idea that makes them work
+
+Three charges, as you described them:
+
+| Fee | When | Scope |
+|---|---|---|
+| **Registration** | once, ever | per swimmer, first time they join the club |
+| **Annual membership** | once per calendar year | per swimmer *or* per family — §19 |
+| **Monthly programme** | every month enrolled | per swimmer per programme |
+
+### The annual fee is keyed to a year, not to a date
+
+This is the whole trick. You said it plainly: join in November 2026 and
+you pay the 2026 fee; in January 2027 you pay again. So the fee is not
+"twelve months from joining" and it is not pro-rated. It is **the 2026
+fee**, and either you have paid it or you have not.
+
+Therefore do not store it as a date range and compute. Store it as a
+**period-keyed charge**:
+
+```
+charges
+  id
+  student_id
+  charge_type       'registration' | 'annual' | 'monthly'
+  period_key        'once' | '2026' | '2026-11'
+  amount
+  status            'due' | 'invoiced' | 'paid' | 'waived' | 'void'
+  invoice_id        null until invoiced
+  generated_at, generated_by
+
+  UNIQUE (student_id, charge_type, period_key) where not void
+```
+
+That unique constraint is the entire design. With it:
+
+- "Has this swimmer paid for 2027?" is a lookup, not arithmetic.
+- The generator can run **every night, or twice in one morning**, and
+  never double-bills. It inserts and lets the constraint refuse
+  duplicates.
+- A waiver, a scholarship or a hardship case is a status on the charge,
+  not a missing row — so the report still says what *should* have been
+  paid.
+- Changing the price for 2027 does not touch 2026's charges, because
+  the amount was written when the charge was raised.
+
+### Generating charges
+
+One job, idempotent, run on a schedule and runnable by hand:
+
+```
+for each active enrolment:
+    if the swimmer has never had a registration charge
+        → raise 'registration' / 'once'
+    if no 'annual' charge for the current year
+        → raise 'annual' / '2026'
+    if no 'monthly' charge for the current month
+        → raise 'monthly' / '2026-11'
+```
+
+Invoicing then collects **due** charges into an invoice. Keep the two
+steps apart: *what is owed* and *what has been billed* are different
+questions, and merging them is how a family gets two invoices for one
+month.
+
+### What this gives the parent app
+
+A billing tracker that can honestly answer:
+- what is outstanding now
+- what was paid, and when
+- **when the next annual renewal falls, and how much** — put this on the
+  front screen in December. It is the charge that surprises people, and
+  a surprise in January is a complaint in January.
+
+### The objection to raise with the club, once
+
+A family joining on 20 November pays a full year's membership for six
+weeks, then pays again in January. That is a legitimate club convention
+and plenty of clubs run it. It is also the single most likely thing to
+generate an argument at the front desk.
+
+The data model above supports a pro-rate or a half-year rule without
+restructuring — the amount is decided when the charge is raised, so a
+rule like "join after 1 October and the annual charge is half" is a
+change to the generator and nothing else. **Decide the policy now, build
+the generator so the policy can change.**
+
+---
+
+## 15. Attendance without credits
+
+Nothing is spent. The question is only: were they there?
+
+### Expected and actual are two different things
+
+```
+session_occurrences      one row per squad session per date
+  programme_id, squad_session_id, held_on, start_time, end_time,
+  venue_id, coach_id,
+  status 'scheduled' | 'held' | 'cancelled',
+  cancelled_reason
+
+attendance
+  occurrence_id, student_id,
+  expected      boolean   — were they due?
+  status        'present' | 'absent' | 'excused' | 'late'
+  minutes_late  integer
+  marked_by, marked_at, note
+```
+
+**Materialise occurrences a term ahead** rather than computing them
+from a recurrence rule at read time. Two reasons, both from Part One:
+
+- A swimmer who changes squad in March must have the *old* schedule
+  before March. Materialised rows carry their own history; a rule
+  recomputed from today's enrolment rewrites the past.
+- Real life needs exceptions — pool closed, gala weekend, public
+  holiday. An occurrence row can be cancelled with a reason. A
+  recurrence rule cannot.
+
+A cancelled occurrence is **not an absence for anybody**. That must be
+true in the data, not just in the report, or the first wet weekend
+destroys everybody's attendance record.
+
+### The four states, and why `excused` is separate
+
+- `present` — there
+- `late` — there, after the start. Keep the minutes; "always ten minutes
+  late" is a different conversation from "misses a session a month"
+- `absent` — not there, no word
+- `excused` — not there, told us. Illness, exams, family.
+
+`excused` must be its own state and not a flavour of absent. Attendance
+rate and discipline are different measures: a swimmer with 80%
+attendance all excused is a different case from 80% unexplained, and a
+coach needs to see which.
+
+### Marking
+
+Same shape as the school's coach screen and the same rules:
+
+- The coach sees only their own squads, on the day.
+- Marking is corrigible on the day by the coach; after that it is the
+  office's, so a correction reaches somebody.
+- A cancelled session is marked cancelled once, for everyone, not
+  swimmer by swimmer.
+
+---
+
+## 16. What the coaches get
+
+With `expected` and `status` on every occurrence, the analysis falls out:
+
+| Measure | Definition |
+|---|---|
+| Attendance rate | `present + late` ÷ `expected`, over a window |
+| Unexplained rate | `absent` ÷ `expected` — the discipline number |
+| Punctuality | `late` ÷ `(present + late)`, and mean minutes late |
+| Current streak | consecutive expected sessions missed |
+| Trend | this month against the last three |
+
+Two things worth building beyond a table:
+
+- **A squad grid** — swimmers down, sessions across, a mark in each
+  cell. A coach reads a term's discipline in one glance, and patterns
+  (every Thursday, or since the exams started) are visible in a way no
+  percentage shows.
+- **A threshold flag, with a floor.** "Below 70% over the last eight
+  weeks" is useful; the same rule over three weeks is noise. Borrow
+  the school's own `emergency_min_classes` rule: do not judge a swimmer
+  until there are enough sessions for the number to mean anything.
+
+Tie it to selection only after a season of data. A rule enforced on two
+months of a new system will be wrong about somebody, publicly.
+
+---
+
+## 17. The parent app
+
+Three screens, two of them already built in Part One and reusable
+almost unchanged:
+
+- **Announcements** — lift Part One's broadcast and inbox entirely. The
+  reminder machinery works the same; only the wording changes.
+- **Billing** — invoices, receipts, outstanding, and the next annual
+  renewal with its date and amount.
+- **Attendance** — per swimmer: the next session, recent marks, and a
+  rate for the term. Show `excused` distinctly from `absent`, or the
+  first parent who rang in sick will say the app called their child
+  truant.
+
+Plus **Add a swimmer**, which is Route B from §10 and the thing that
+makes the membership-number problem mostly disappear.
+
+Everything in Part One about reads being keyed to the signed-in account,
+with no account id ever passed as a parameter, applies here unchanged. It
+is the part most worth copying verbatim.
+
+---
+
+## 18. What carries over, and what does not
+
+**Lift unchanged from Part One:**
+- `parent_accounts` ↔ `students`, and the adult-is-their-own-parent rule
+- public writes through one server-side endpoint, never the public key
+- one phone-normalising function shared by every caller
+- void, never delete; `is_void` from the first migration
+- events, not just state
+- settings as rows, not constants
+- reads keyed to the caller, never to an argument
+- announcements, the inbox, and the reminder job
+
+**Drop:**
+- credits in every form, and packages as credit packs
+- replacement and make-up classes, unless the club wants them
+
+**New, with no equivalent in Part One:**
+- membership numbers and their issuance
+- IC as a lookup aid, with the care §9 describes
+- period-keyed charges and an idempotent generator
+- materialised session occurrences and expected-versus-actual attendance
+- squad-level analytics
+
+---
+
+## 19. Decisions still open
+
+These change the schema, so settle them before building:
+
+1. **Annual fee: per swimmer or per family?** Per swimmer is simpler and
+   scales with use; per family is kinder to a three-child household and
+   is what many clubs do. It changes whether `charges.student_id` can be
+   null in favour of an `account_id`.
+2. **Pro-rating.** A November joiner paying a full year — convention, or
+   a rule? §14 says build so it can change; it still has to be decided.
+3. **Route A verification** (§11). Number plus a matching fact, approval
+   queue, or parent-app only.
+4. **Consent frequency** (§12). Per enrolment or per season year.
+5. **Two parents, one account or two** (§9).
+6. **Does a swimmer get their own number** as well as the family
+   membership number? Clubs that enter galas usually need one. It is
+   easy now and awkward later.
+7. **When does non-payment stop a swimmer training?** The school
+   deliberately never blocks scheduling on money. A club with a squad
+   list and a season may want a different answer — but decide it, rather
+   than discovering it at poolside.
