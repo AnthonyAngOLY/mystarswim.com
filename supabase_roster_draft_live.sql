@@ -200,9 +200,19 @@ end $$;
 
 -- ─── 3. The alert scanner stops at the draft line ───────────────────────
 -- The whole body is restated rather than patched, because this function
--- has been replaced three times already and a reader needs to see what
--- it does now, not reconstruct it from a chain of files. The only change
--- from Phase 4b is the roster_week_is_live condition on the loop.
+-- has been replaced four times already and a reader needs to see what it
+-- does now, not reconstruct it from a chain of files.
+--
+-- Restating it is also how it got broken: the first version of this file
+-- was restated from Phase 4b, which is not the newest — alerts_raise_once
+-- came after it and added a `not exists` guard to each insert. Dropping
+-- that guard put back the bug it was written for, where resolving an
+-- alert let the next scan raise it again. Both are in here now: the
+-- raise-once guards, and the draft gate on the loop that is this file's
+-- own reason for existing.
+--
+-- The lesson, for whoever restates it next: diff against every file that
+-- defines it, not against the one you happen to remember.
 create or replace function attendance_scan_alerts()
 returns integer
 language plpgsql security definer set search_path = public
@@ -238,8 +248,13 @@ begin
        order by raised_at
        limit 1;
 
+      -- Raised once per session, ever. `on conflict do nothing` alone
+      -- only stops a second OPEN one, so resolving the first lets the
+      -- next scan raise another. From supabase_alerts_raise_once.sql.
       insert into alerts (shift_id, crew_id, type, worker_reason, worker_reason_at)
-      values (r.id, r.crew_id, 'absent', v_reason, v_reason_at)
+      select r.id, r.crew_id, 'absent', v_reason, v_reason_at
+       where not exists (select 1 from alerts a
+                          where a.shift_id = r.id and a.type = 'absent')
       on conflict do nothing;
       get diagnostics v_ins = row_count;
       v_count := v_count + v_ins;
@@ -256,7 +271,9 @@ begin
     elsif now() > r.starts_at + make_interval(mins => v_set.no_checkin_alert_min)
           and not r.has_in then
       insert into alerts (shift_id, crew_id, type)
-      values (r.id, r.crew_id, 'no_checkin')
+      select r.id, r.crew_id, 'no_checkin'
+       where not exists (select 1 from alerts a
+                          where a.shift_id = r.id and a.type = 'no_checkin')
       on conflict do nothing;
       get diagnostics v_ins = row_count;
       v_count := v_count + v_ins;
@@ -265,7 +282,9 @@ begin
     if r.has_in and not r.has_out
        and now() > r.ends_at + make_interval(mins => v_set.no_checkout_alert_min) then
       insert into alerts (shift_id, crew_id, type)
-      values (r.id, r.crew_id, 'no_checkout')
+      select r.id, r.crew_id, 'no_checkout'
+       where not exists (select 1 from alerts a
+                          where a.shift_id = r.id and a.type = 'no_checkout')
       on conflict do nothing;
       get diagnostics v_ins = row_count;
       v_count := v_count + v_ins;
