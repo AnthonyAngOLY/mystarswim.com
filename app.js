@@ -7178,6 +7178,136 @@ function UnpaidClassesReport(){
 // How often each swimmer misses a class, and how often they tell us too
 // late to count as notice. Its own page rather than a tab under Reports,
 // because Reports is sysadmin-only and this is a scheduler's screen.
+// ── Replacements, as a document ───────────────────────────────────────────
+// The office takes this into a conversation with a parent, so it prints
+// what is on screen — same filter, same order — and says so at the top.
+// A report that quietly widens itself when printed is worse than none,
+// because the version discussed is not the version read.
+//
+// No PDF library. The browser's own "Save as PDF" is in the print dialog
+// and renders text as text, so the result is searchable and selectable
+// rather than a picture of a table. Same approach as the invoices.
+function printReplacementTracker(rows, st, trackedFrom, filterLabel){
+  const w = window.open('', '_blank');
+  if(!w){ alert('Allow popups from this site to print.'); return; }
+
+  const pc     = n => (Number(n||0)*100).toFixed(0)+'%';
+  const limit  = Number(st?.emergency_rate_limit||0.25);
+  const hours  = Number(st?.replacement_notice_hours||24);
+  const logo   = window.location.origin + '/logo.png';
+  const printed= new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+  const from   = trackedFrom
+    ? new Date(trackedFrom+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})
+    : 'today';
+
+  const overCount = rows.filter(r=>r.over_limit).length;
+  const anyCount  = rows.filter(r=>Number(r.emergency_replacements||0)>0).length;
+  const repCount  = rows.filter(r=>Number(r.replacements||0)>0).length;
+
+  const body = rows.map(r=>{
+    const note = r.over_limit
+      ? '<span class="chip">Over the limit</span>'
+      : !r.enough_history ? '<span class="muted">too few classes to judge</span>' : '';
+    const rate = Number(r.replacement_rate||0);
+    return '<tr class="' + (r.over_limit?'is-over':'') + '">'
+      + '<td class="nm">' + adminEsc(r.child) + '</td>'
+      + '<td class="pa">' + adminEsc(r.parent) + '</td>'
+      + '<td class="n">' + Number(r.classes||0) + '</td>'
+      + '<td class="n">' + Number(r.replacements||0)
+        + (Number(r.classes)>0 ? ' <span class="muted">(' + pc(rate) + ')</span>' : '') + '</td>'
+      + '<td class="n' + (Number(r.emergency_replacements)>0?' b':'') + '">'
+        + Number(r.emergency_replacements||0) + '</td>'
+      + '<td class="n' + (r.over_limit?' red b':'') + '">'
+        + (r.enough_history ? pc(r.emergency_rate) : '&mdash;') + '</td>'
+      + '<td class="nt">' + note + '</td></tr>';
+  }).join('');
+
+  const tile = (big, small) =>
+    '<div class="tile"><div class="big">' + big + '</div><div class="lbl">' + small + '</div></div>';
+
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Replacements</title>\n'
++ '<style>\n'
++ '@page{size:A4 portrait;margin:14mm 12mm}\n'
++ '*{box-sizing:border-box;margin:0;padding:0}\n'
+// Tinted rows and the chip are the whole point of a styled export, and
+// browsers drop background colours when printing unless told not to.
++ 'html{-webkit-print-color-adjust:exact;print-color-adjust:exact}\n'
++ "body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:8.5pt;color:#1a1a1a;background:#fff}\n"
+// On screen the window is a preview, so give it the page it is about to
+// become. Print ignores all of this and uses @page.
++ '@media screen{body{background:#eceef1;padding:16px}'
++ '.sheet{max-width:210mm;margin:0 auto;background:#fff;padding:14mm 12mm;'
++ 'box-shadow:0 1px 3px rgba(0,0,0,.14),0 8px 24px rgba(0,0,0,.08);border-radius:2px}}\n'
++ '.hdr{display:flex;justify-content:space-between;align-items:flex-start;'
++ 'padding-bottom:6pt;border-bottom:1pt solid #1a1a1a;margin-bottom:9pt}\n'
++ '.logo{height:26pt;width:auto;object-fit:contain;display:block}\n'
++ '.co{font-size:6.5pt;color:#555;margin-top:4pt;line-height:1.5}\n'
++ '.ttl{font-size:13pt;font-weight:700;letter-spacing:.2px;text-align:right}\n'
++ '.meta{font-size:7pt;color:#777;margin-top:3pt;line-height:1.6;text-align:right}\n'
++ '.tiles{display:flex;gap:7pt;margin-bottom:9pt}\n'
++ '.tile{flex:1;background:#f8f9fa;border-radius:2pt;padding:5pt 7pt}\n'
++ '.tile .big{font-size:14pt;font-weight:700;line-height:1.1}\n'
++ '.tile .lbl{font-size:6pt;text-transform:uppercase;letter-spacing:.5px;color:#999;margin-top:2pt}\n'
++ '.tile.warn{background:#FEF2F2}.tile.warn .big{color:#B91C1C}\n'
++ '.note{font-size:7pt;color:#555;background:#f8f9fa;border-left:2pt solid #d4d4d4;'
++ 'border-radius:1pt;padding:5pt 7pt;margin-bottom:9pt;line-height:1.6}\n'
++ 'table{width:100%;border-collapse:collapse}\n'
+// Carried to every page, so page four is still readable on its own.
++ 'thead{display:table-header-group}\n'
++ 'tr{break-inside:avoid;page-break-inside:avoid}\n'
++ 'thead th{font-size:6.5pt;text-transform:uppercase;letter-spacing:.5px;color:#999;'
++ 'font-weight:600;padding:4pt;border-bottom:1pt solid #e5e5e5;text-align:left}\n'
++ 'thead th.n,thead th.nt{text-align:right}\n'
++ 'td{padding:4pt;border-bottom:1pt solid #f0f0f0;line-height:1.4;vertical-align:top}\n'
++ '.nm{font-weight:600;font-size:8.5pt}\n'
++ '.pa{font-size:7.5pt;color:#666}\n'
++ '.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}\n'
++ '.nt{text-align:right;white-space:nowrap}\n'
++ '.b{font-weight:700}.red{color:#B91C1C}\n'
++ '.muted{color:#999;font-size:7pt;font-weight:400}\n'
++ '.chip{display:inline-block;padding:1pt 5pt;border-radius:2pt;font-size:6.5pt;'
++ 'font-weight:700;background:#FEE2E2;color:#991B1B}\n'
++ '.is-over td{background:#FFF5F5}\n'
++ '.ftr{margin-top:10pt;padding-top:5pt;border-top:1pt solid #e5e5e5;'
++ 'font-size:6pt;color:#aaa;display:flex;justify-content:space-between}\n'
++ '.empty{padding:20pt;text-align:center;color:#999;font-size:8pt}\n'
++ '</style>\n'
++ '<script>window.onload=function(){setTimeout(function(){window.print()},350)}<\/script>\n'
++ '</head><body><div class="sheet">\n'
++ '<div class="hdr">'
++   '<div><img class="logo" src="' + logo + '" onerror="this.style.display=\'none\'">'
++   '<div class="co">' + adminEsc(ADMIN_COMPANY.name) + ' (' + adminEsc(ADMIN_COMPANY.reg) + ')<br>'
++   adminEsc(ADMIN_COMPANY.address) + '</div></div>'
++   '<div><div class="ttl">Replacements</div><div class="meta">'
++   adminEsc(filterLabel) + '<br>Printed ' + printed + '</div></div>'
++ '</div>\n'
++ '<div class="tiles">'
++ tile(rows.length, 'swimmers listed')
++ tile(repCount, 'have replaced a class')
++ tile(anyCount, 'with an emergency')
++ '<div class="tile' + (overCount ? ' warn' : '') + '">'
++ '<div class="big">' + overCount + '</div>'
++ '<div class="lbl">over ' + pc(limit) + '</div></div>'
++ '</div>\n'
++ '<div class="note"><b>Replacements</b> count each swimmer&rsquo;s whole history. '
++ '<b>Emergencies</b> &mdash; a request with less than ' + hours + ' hours notice &mdash; count only '
++ 'from ' + from + ', which is when we began recording when a parent told us. Nothing before that '
++ 'can be sorted into late or planned, so it is not guessed at.</div>\n'
++ (rows.length
+    ? '<table><thead><tr><th>Swimmer</th><th>Parent</th><th class="n">Classes</th>'
+      + '<th class="n">Replaced</th><th class="n">Emergency</th><th class="n">Rate</th>'
+      + '<th class="nt"></th></tr></thead><tbody>' + body + '</tbody></table>'
+    : '<div class="empty">Nobody matches that.</div>')
++ '\n<div class="ftr"><span>' + adminEsc(ADMIN_COMPANY.name) + '</span>'
++ '<span>' + (st?.enforce_emergency_limit
+    ? 'The ' + pc(limit) + ' limit is being enforced.'
+    : 'The ' + pc(limit) + ' limit is watched, not enforced.') + '</span></div>\n'
++ '</div></body></html>';
+
+  w.document.write(html);
+  w.document.close();
+}
+
 function ReplacementTrackerView(){
   const [rows,setRows]=useState(null);
   const [st,setSt]=useState(null);
@@ -7209,6 +7339,15 @@ function ReplacementTrackerView(){
   const overCount = rows.filter(r=>r.over_limit).length;
   const pc = n => (Number(n||0)*100).toFixed(0)+'%';
 
+  // What the printed copy says it is. The export follows the screen, so
+  // the sheet has to admit when it is a subset — otherwise a filtered
+  // page gets read later as the whole centre.
+  const filterLabel = [
+    only==='over' ? 'Over ' + pc(limit) + ' only'
+      : only==='any' ? 'With an emergency only' : 'All swimmers',
+    needle ? 'matching \u201C' + q.trim() + '\u201D' : ''
+  ].filter(Boolean).join(', ');
+
   return <div>
     <div className="card" style={{marginBottom:12}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
@@ -7220,7 +7359,12 @@ function ReplacementTrackerView(){
             counts as an emergency.
           </div>
         </div>
-        <button className="btn btn-ghost small" onClick={load}>↻ Refresh</button>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn btn-ghost small" onClick={load}>↻ Refresh</button>
+          <button className="btn btn-ghost small" disabled={!shown.length}
+                  onClick={()=>printReplacementTracker(shown, st, trackedFrom, filterLabel)}>
+            📄 PDF</button>
+        </div>
       </div>
 
       {/* The honest line. Replacement counts go back through the whole
