@@ -45,7 +45,12 @@ cnt as (
       ('punches', case when to_regclass('public.punches') is null then 'select 0 as c'
          else 'select count(*) as c from punches' end),
       ('alerts',  case when to_regclass('public.alerts')  is null then 'select 0 as c'
-         else 'select count(*) as c from alerts'  end)
+         else 'select count(*) as c from alerts'  end),
+      ('pools_unplaced', case when not exists (
+           select 1 from information_schema.columns
+            where table_schema='public' and table_name='pools'
+              and column_name='location_id') then 'select 0 as c'
+         else 'select count(*) as c from pools where location_id is null' end)
     ) as n(what, q)
 ),
 chk (ord, file, adds, state) as (values
@@ -195,6 +200,50 @@ chk (ord, file, adds, state) as (values
   (42, 'supabase_instructor_pool_links.sql', 'the timetable joined to the attendance app',
       case when exists (select 1 from col where t='scheduler_instructors' and c='crew_id')
              and exists (select 1 from col where t='pools' and c='location_id')
+           then 'IN' else 'NOT IN' end),
+  (43, 'supabase_pool_location_links.sql', 'every pool placed at a location (SBIS Collab included)',
+      case when not exists (select 1 from col where t='pools' and c='location_id')
+             then 'NOT IN'
+           when (select v from cnt where what='pools_unplaced') > 0
+             then 'NOT IN'
+           else 'IN' end),
+  (44, 'supabase_invoice_account_link.sql', 'invoices joined to the family that owes them',
+      case when exists (select 1 from col where t='invoices' and c='account_id')
+           then 'IN' else 'NOT IN' end),
+
+  -- ── The parent app itself ───────────────────────────────────────────
+  (45, 'supabase_parent_messages.sql', 'messages, broadcasts, class reminders',
+      case when to_regclass('public.parent_messages') is not null
+             and exists (select 1 from fn where n='parent_render'
+                                            and src like '%order by t.idx%')
+           then 'IN' else 'NOT IN' end),
+  (46, 'supabase_parent_app_reads.sql', 'what a parent may read: family, schedule, bills',
+      case when exists (select 1 from fn where n='my_schedule')
+           then 'IN' else 'NOT IN' end),
+  (47, 'supabase_parent_account_claim.sql', 'a phone that signs in is matched to its account',
+      case when exists (select 1 from fn where n='claim_parent_account')
+           then 'IN' else 'NOT IN' end),
+  (48, 'supabase_progress_notes.sql', 'coaches'' notes on a swimmer',
+      case when to_regclass('public.student_progress_notes') is not null
+           then 'IN' else 'NOT IN' end),
+
+  -- ── Rostering and credits ───────────────────────────────────────────
+  (49, 'supabase_roster_draft_live.sql', 'a roster week can be drafted before it goes live',
+      case when to_regclass('public.roster_weeks') is not null
+           then 'IN' else 'NOT IN' end),
+  (50, 'supabase_class_credit_policy.sql', 'replacement policy, emergencies, negative credits',
+      case when to_regclass('public.class_policy_settings') is not null
+           then 'IN' else 'NOT IN' end),
+  (51, 'supabase_coach_roster.sql', 'the coach''s class list — run AFTER the file above',
+      -- Three markers, because this file has been re-run twice and an old
+      -- copy still leaves the functions behind. All three or it is not the
+      -- version that is in the repo: the weekday fix, the draft gate, and
+      -- the no-credit confirm.
+      case when exists (select 1 from fn where n='get_my_session_roster'
+                                           and src like '%weekday - 1%'
+                                           and src like '%roster_week_is_live%')
+             and exists (select 1 from fn where n='mark_attendance'
+                                            and src like '%attendance_unpaid%')
            then 'IN' else 'NOT IN' end)
 )
 select case state when 'NOT IN' then '>>> RUN THIS' else '' end as action,
@@ -219,6 +268,24 @@ select case state when 'NOT IN' then '>>> RUN THIS' else '' end as action,
 --
 -- supabase_attendance_clear_test_data.sql is the purge's predecessor and
 -- the same applies.
+--
+-- ── Edge Functions are not in this list ─────────────────────────────────
+-- Nothing in the database knows which Edge Functions are deployed, so no
+-- query can answer it. Check them by eye in the dashboard, under Edge
+-- Functions, where each one shows the date it was last deployed:
+--
+--   punch           has the draft-roster gate. If its last deploy is
+--                   older than supabase_roster_draft_live.sql was run, a
+--                   draft week is still punchable from the phone.
+--   parent-signin   the parent app's gate, and the WhatsApp channel.
+--   public-intake   the public intake form posts to this. Not deployed
+--                   reads in the browser as "failed to fetch", which
+--                   looks like a network fault and is not one.
+--   login, staff-auth, admin-users, leave-docs-purge
+--                   older, and unchanged for some time.
+--
+-- Anything deployed that is NOT in the list above is not in the repo.
+-- Open it in the dashboard and find out what it is before deleting it.
 select (xpath('/row/c/text()', query_to_xml(
           case when to_regclass('public.shifts') is null then 'select 0 as c'
                else 'select count(*) as c from shifts' end, false, true, '')))[1]::text::bigint as shifts_now,
