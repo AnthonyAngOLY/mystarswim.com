@@ -538,20 +538,43 @@ revoke all on replacement_requests  from anon;
 --
 -- This is the report, not a migration. It says what the tracker will
 -- show on its first morning.
-select 'swimmers being tracked' as thing, count(*)::text as n
-  from replacement_tracker()
+--
+-- It reads the tables, not replacement_tracker() and credit_defaulters().
+-- Those two begin with is_website_login(), and the SQL editor is not a
+-- website login — it is the postgres role with no JWT at all. Asking
+-- them here returns no rows, and a report of six zeros reads as "this
+-- centre has no history" when it means "you are not signed in to the
+-- website". The first version of this block did exactly that.
+with
+ trk as (select count(*) n from students where is_active is not false),
+ rep as (select count(*) n, count(distinct student_id) kids
+           from weekly_session_students where coalesce(is_replacement, false)),
+ emg as (select count(*) n, min(requested_at)::date from_date
+           from replacement_requests
+          where is_emergency and not is_void and status <> 'cancelled'),
+ unp as (select count(distinct student_id) n from credit_purchases
+          where source = 'attendance_unpaid'),
+ neg as (select count(distinct student_id) n from student_credit_balances
+          where remaining_balance < 0)
+select 'swimmers being tracked' as thing, (select n from trk)::text as n
 union all
-select 'of those, with a replacement in their history',
-       count(*)::text from replacement_tracker() where replacements > 0
+select 'of those, with a replacement in their history', (select kids from rep)::text
 union all
-select 'replacements on record (all time)',
-       coalesce(sum(replacements), 0)::text from replacement_tracker()
+select 'replacements on record (all time)', (select n from rep)::text
 union all
-select 'last-minute replacements recorded so far',
-       coalesce(sum(emergency_replacements), 0)::text from replacement_tracker()
+select 'last-minute replacements recorded so far', (select n from emg)::text
 union all
 select 'measuring notice from',
-       coalesce(max(emergency_tracked_from)::text, 'today') from replacement_tracker()
+       coalesce((select from_date from emg)::text,
+                (now() at time zone 'Asia/Kuala_Lumpur')::date::text)
 union all
 select 'swimmers who have attended without credit',
-       count(*)::text from credit_defaulters();
+       ((select n from unp) + (select n from neg))::text
+union all
+select 'the rules, as they now stand',
+       'replacements ' || case when replacements_enabled then 'on' else 'off' end
+         || ', notice ' || replacement_notice_hours || 'h'
+         || ', emergency limit ' || emergency_rate_limit
+         || case when enforce_emergency_limit then ' (enforced)' else ' (watched only)' end
+         || ', negative credits ' || case when allow_negative_credits then 'allowed' else 'not allowed' end
+  from class_policy_settings where id;

@@ -446,7 +446,7 @@ begin
                             'balance', v_bal);
 end $$;
 
-comment on function mark_attendance(uuid, text) is
+comment on function mark_attendance(uuid, text, boolean) is
   'The only place an attendance credit moves. attended and absent each '
   'consume one; returning to pending gives it back. Writes the ledger '
   'row as well as the balance, and lets the balance go negative.';
@@ -519,10 +519,10 @@ end $$;
 
 
 revoke all on function get_my_session_roster(date, date, boolean) from public, anon;
-revoke all on function mark_attendance(uuid, text)                from public, anon;
+revoke all on function mark_attendance(uuid, text, boolean)       from public, anon;
 revoke all on function set_session_cancelled(uuid, boolean)       from public, anon;
 grant execute on function get_my_session_roster(date, date, boolean) to authenticated;
-grant execute on function mark_attendance(uuid, text)                to authenticated;
+grant execute on function mark_attendance(uuid, text, boolean)       to authenticated;
 grant execute on function set_session_cancelled(uuid, boolean)       to authenticated;
 
 

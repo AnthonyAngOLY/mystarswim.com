@@ -72,6 +72,24 @@ comment on function roster_week_is_live(date) is
   'no — the quiet answer is the default on purpose.';
 
 
+-- ─── 1b. And locked ─────────────────────────────────────────────────────
+-- Created but never locked, which the migration check caught: with row
+-- security off, the anon key in every page we serve could publish or
+-- unpublish any week. That is the whole draft rule, undone from a
+-- browser console.
+--
+-- Nothing reads this table directly — roster_week_is_live,
+-- roster_week_state and set_roster_week are all security definer and
+-- carry their own permission checks, set_roster_week's being
+-- can_write_office(). So the table is closed completely and the
+-- functions remain the only way in.
+alter table roster_weeks enable row level security;
+drop policy if exists roster_weeks_read on roster_weeks;
+create policy roster_weeks_read on roster_weeks for select
+  using (is_website_login());
+revoke all on roster_weeks from anon;
+
+
 -- ─── 2. The toggle ──────────────────────────────────────────────────────
 -- Returns what it did and what it is about to mean, so the screen can
 -- say something truthful before and after rather than just "done".
