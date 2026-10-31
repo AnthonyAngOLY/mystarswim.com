@@ -84,14 +84,30 @@ begin
 
   -- Assigned to any class this swimmer is in. Not only today's: a coach
   -- should be able to write up a term, not just an hour.
-  return exists (
+  if exists (
     select 1
       from weekly_session_students wss
       join session_instructors si   on si.session_id = wss.session_id
       join scheduler_instructors sc on sc.id = si.instructor_id
      where wss.student_id = p_student
        and ((v_me is not null and sc.crew_id = v_me)
-         or (v_inst is not null and sc.id = v_inst)));
+         or (v_inst is not null and sc.id = v_inst)))
+  then return true; end if;
+
+  -- Or they have marked this swimmer's attendance themselves. Since
+  -- coach_can_mark_session let an unnamed coach mark a class running in
+  -- water they are rostered to, a squad session with three coaches and
+  -- one name leaves two who plainly teach the child and could not write
+  -- a word to the parent about it.
+  --
+  -- Having marked them is the proof, and a narrow one: it says this
+  -- coach stood in front of this swimmer and recorded it. Being merely
+  -- rostered to a busy pool is not enough, or a coach at Botani could
+  -- write to the parents of six classes they have never taught.
+  return v_me is not null and exists (
+    select 1 from weekly_session_students wss
+     where wss.student_id = p_student
+       and wss.marked_by_crew_id = v_me);
 end $$;
 
 

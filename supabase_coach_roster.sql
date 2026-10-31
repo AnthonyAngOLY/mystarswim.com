@@ -63,6 +63,18 @@ alter table scheduler_instructors
 create index if not exists scheduler_instructors_app_user_idx
   on scheduler_instructors (app_user_id) where app_user_id is not null;
 
+-- Who marked a swimmer, and when. Worth having now that more than one
+-- coach may mark the same class: a squad session with three coaches in
+-- the water and one name on the timetable would otherwise leave twenty
+-- marks and no way to say who made them.
+alter table weekly_session_students
+  add column if not exists marked_by_crew_id uuid,
+  add column if not exists marked_at timestamptz;
+
+comment on column weekly_session_students.marked_by_crew_id is
+  'The coach who last set this swimmer''s attendance. Null where the '
+  'office set it, which has its own trail in audit_log.';
+
 comment on column scheduler_instructors.app_user_id is
   'For a coach who is office rather than crew — a Centre Owner or '
   'sysadmin who also teaches. Gives them their class roster without a '
@@ -82,6 +94,58 @@ update scheduler_instructors si
          where coalesce(x.is_active, true)
            and btrim(lower(coalesce(nullif(btrim(x.display_name), ''), x.username)))
                = btrim(lower(si.name))) = 1;
+
+
+-- ═══ 0b. May this coach mark this class? ════════════════════════════════
+-- Being named on the session is one way. Standing beside the water while
+-- it runs is the other, and it is the honest one: a squad session may
+-- have three coaches in it and room on the timetable for one name, and
+-- the two who are not named are no less there.
+--
+-- The geometry is deliberately the same as the roster view above, so
+-- what a coach can see is what a coach can mark. Anything else produces
+-- a card on the screen that refuses when tapped, which reads as a fault.
+--
+-- This widens who may mark. It does not widen what is recorded: every
+-- mark now carries the crew id of whoever made it.
+create or replace function coach_can_mark_session(p_session_id uuid)
+returns boolean
+language plpgsql stable security definer set search_path = public as $$
+declare v_me uuid; v_named boolean; v_there boolean;
+begin
+  v_me := attendance_my_crew_id();
+  if v_me is null or p_session_id is null then return false; end if;
+
+  select exists (
+    select 1 from session_instructors si
+      join scheduler_instructors sc on sc.id = si.instructor_id
+     where si.session_id = p_session_id and sc.crew_id = v_me
+  ) into v_named;
+  if coalesce(v_named, false) then return true; end if;
+
+  -- Rostered to the water this class is in, at the hour it runs, on a
+  -- week somebody has published.
+  select exists (
+    select 1
+      from weekly_sessions ws
+      join pools p  on p.id = ws.pool_id
+      join shifts s on s.location_id = p.location_id
+     where ws.id = p_session_id
+       and s.crew_id = v_me
+       and not s.is_void
+       and roster_week_is_live(s.shift_date)
+       and s.shift_date = (ws.week_start_date + (ws.weekday - 1))::date
+       and (ws.start_minute * interval '1 minute')::time >= s.start_time
+       and (ws.start_minute * interval '1 minute')::time <  s.end_time
+  ) into v_there;
+
+  return coalesce(v_there, false);
+end $$;
+
+comment on function coach_can_mark_session(uuid) is
+  'True where the coach is named on the session, or is rostered to that '
+  'pool''s location while the session runs. The second is what makes a '
+  'three-coach squad session markable by all three.';
 
 
 -- ═══ 1. What this coach is teaching, and who is in it ═══════════════════
@@ -124,7 +188,14 @@ returns table (
   remark          text,
   -- What is left for this class's lesson type. Negative means a class
   -- already owed. The coach marks them either way; they just see it.
-  credits_left    numeric
+  credits_left    numeric,
+  -- Who marked this swimmer. Shown because a squad session may have
+  -- three coaches marking into it, and "already marked" is a different
+  -- thing from "already marked by me".
+  marked_by       text,
+  -- Whether it was this coach. The note pad is offered on exactly this,
+  -- because it is exactly what can_note_on_student will accept.
+  marked_by_me    boolean
 )
 language plpgsql stable security definer set search_path = public
 as $$
@@ -238,12 +309,15 @@ begin
          wss.replacement_from::text,
          coalesce(wss.attendance_status, 'pending')::text,
          wss.remark::text,
-         bal.remaining_balance
+         bal.remaining_balance,
+         mk.full_name::text,
+         (wss.marked_by_crew_id is not null and wss.marked_by_crew_id = v_me)
     from overlapping o
     left join weekly_session_students wss on wss.session_id = o.session_id
     left join weekly_sessions ws2         on ws2.id = o.session_id
     left join student_credit_balances bal on bal.student_id = wss.student_id
                                          and bal.lesson_type_id = ws2.lesson_type_id
+    left join admin_employees mk          on mk.id = wss.marked_by_crew_id
    where p_include_others
       or o.session_id in (select sid from mine)
    order by o.session_date, o.start_time, o.pool_name,
@@ -290,6 +364,7 @@ declare
   v_delta     int;
   v_moved     int := 0;
   v_bal       numeric;
+  v_who       text;
 begin
   if p_state not in ('pending', 'attended', 'absent') then
     return jsonb_build_object('ok', false, 'error', 'Not a state this can be set to.');
@@ -317,18 +392,16 @@ begin
       'error', 'This class is cancelled. Nobody is marked and no credit moves.');
   end if;
 
-  -- A coach may mark only a class they are assigned to, and only on the
-  -- day it happened. After midnight it is the office's to correct — so
-  -- that a mistake reaches somebody rather than being quietly rewritten
-  -- a week later.
+  -- A coach may mark a class they are named on, or one running in water
+  -- they are rostered to at that hour — see coach_can_mark_session. And
+  -- only on the day it happened: after midnight it is the office's to
+  -- correct, so that a mistake reaches somebody rather than being
+  -- quietly rewritten a week later.
   if not v_office then
-    select exists (
-      select 1 from session_instructors si
-        join scheduler_instructors sc on sc.id = si.instructor_id
-       where si.session_id = v_session and sc.crew_id = v_me
-    ) into v_mine;
+    v_mine := coach_can_mark_session(v_session);
     if not coalesce(v_mine, false) then
-      return jsonb_build_object('ok', false, 'error', 'This is not one of your classes.');
+      return jsonb_build_object('ok', false,
+        'error', 'You are not rostered to this class.');
     end if;
     if v_date <> (now() at time zone 'Asia/Kuala_Lumpur')::date then
       return jsonb_build_object('ok', false,
@@ -382,7 +455,9 @@ begin
     else 0 end;
 
   update weekly_session_students
-     set attendance_status = p_state
+     set attendance_status = p_state,
+         marked_by_crew_id = v_me,          -- null when the office marked it
+         marked_at = now()
    where id = p_row_id;
 
   if v_delta <> 0 and v_sid is not null and v_lt is not null then
@@ -432,6 +507,13 @@ begin
                     then 0 else v_delta end;
   end if;
 
+  -- The phone patches its row rather than refetching the week after
+  -- every tap, so the name has to come back with the answer or a squad
+  -- session shows "marked" with no idea by whom until the next load.
+  if v_me is not null then
+    select e.full_name into v_who from admin_employees e where e.id = v_me;
+  end if;
+
   -- What actually moved, not what was intended. With negatives switched
   -- off the balance holds at nil, and saying a credit was taken when
   -- none was is how a coach and the office end up with two different
@@ -443,7 +525,8 @@ begin
                             -- unpaid either way, and only the balance
                             -- behaves differently. Matches the ledger row.
                             'unpaid', (v_delta < 0 and coalesce(v_before, 1) <= 0),
-                            'balance', v_bal);
+                            'balance', v_bal,
+                            'marked_by', case when p_state = 'pending' then null else v_who end);
 end $$;
 
 comment on function mark_attendance(uuid, text, boolean) is
@@ -484,14 +567,14 @@ begin
       'error', 'This class was moved by the office. Speak to them.');
   end if;
 
+  -- The same rule as marking. A coach who may mark the swimmers may say
+  -- the class did not happen; splitting the two would mean standing at a
+  -- cancelled poolside able to do neither one thing nor the other.
   if not v_office then
-    select exists (
-      select 1 from session_instructors si
-        join scheduler_instructors sc on sc.id = si.instructor_id
-       where si.session_id = p_session_id and sc.crew_id = v_me
-    ) into v_mine;
+    v_mine := coach_can_mark_session(p_session_id);
     if not coalesce(v_mine, false) then
-      return jsonb_build_object('ok', false, 'error', 'This is not one of your classes.');
+      return jsonb_build_object('ok', false,
+        'error', 'You are not rostered to this class.');
     end if;
     if v_date <> (now() at time zone 'Asia/Kuala_Lumpur')::date then
       return jsonb_build_object('ok', false, 'error', 'Only today''s class can be marked.');
@@ -518,6 +601,8 @@ begin
 end $$;
 
 
+revoke all on function coach_can_mark_session(uuid)                  from public, anon;
+grant execute on function coach_can_mark_session(uuid)               to authenticated;
 revoke all on function get_my_session_roster(date, date, boolean) from public, anon;
 revoke all on function mark_attendance(uuid, text, boolean)       from public, anon;
 revoke all on function set_session_cancelled(uuid, boolean)       from public, anon;

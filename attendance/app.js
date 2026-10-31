@@ -1025,6 +1025,9 @@
   // Who is in the water, and marking them off. A day strip rather than a
   // second screen: a coach looks ahead a day or two, not at a calendar.
   var clsWeek = null, clsDay = null, clsRows = [], clsOthers = false, clsBusy = null;
+  // The week an automatic widening has already been tried for, so it
+  // happens once rather than looping against a genuinely empty week.
+  var clsAutoWeek = null;
 
   function loadClasses() {
     if (!clsWeek) { clsWeek = mondayOf(todayKL()); clsDay = todayKL(); }
@@ -1033,6 +1036,15 @@
     return rpc('get_my_session_roster', {
       p_from: clsWeek, p_to: addDaysISO(clsWeek, 6), p_include_others: clsOthers
     }).then(function (rows) {
+      // Nothing names them, but something may still be in their water.
+      // The squad case is exactly this: one name on the timetable, three
+      // coaches on the poolside, and two of them told there is nothing
+      // on today. Widen once per week rather than make them find a
+      // button to see the session they are standing in front of.
+      if (!clsOthers && !(rows || []).length && clsAutoWeek !== clsWeek) {
+        clsAutoWeek = clsWeek; clsOthers = true;
+        return loadClasses();
+      }
       clsRows = rows || [];
       renderClasses();
     }).catch(function (e) {
@@ -1114,7 +1126,7 @@
     var anyMine = clsRows.some(function (r) { return r.is_mine; });
     if (!anyMine && !clsOthers) {
       $('clsBody').innerHTML = '<p class="empty">No classes assigned to you this week.<br>'
-        + 'If you are covering for somebody, the office assigns the class to you first.</p>'
+        + 'Any class in a pool you are rostered to is still yours to mark.</p>'
         + clsOthersBtn();
       wireClsOthers();
       return;
@@ -1137,7 +1149,7 @@
 
   function clsOthersBtn() {
     return '<button class="btn ghost" id="clsOthersBtn" style="width:100%;margin-top:6px">'
-      + (clsOthers ? 'Hide other classes at this pool' : 'Show other classes at this pool')
+      + (clsOthers ? 'Only classes assigned to me' : 'Show every class at this pool')
       + '</button>';
   }
   function wireClsOthers() {
@@ -1146,14 +1158,18 @@
   }
 
   function clsCard(c, today) {
-    var marking = c.mine && !c.off;
+    // Every class on this screen is one the coach is rostered to at that
+    // hour, and the server lets them mark any such class — a squad
+    // session may carry three coaches and room for one name. So the only
+    // thing that stops marking is the class not having happened.
+    var marking = !c.off;
     var closed  = !isOffice() && c.date !== today;
 
     var head = '<div class="cls-head">'
       + '<div class="cls-what">' + esc(prettyTime(c.start)) + ' – ' + esc(prettyTime(c.end))
       +   '<div class="cls-sub">' + esc(c.lesson) + ' · ' + esc(c.pool)
       +     (c.mine ? '' : '<br>' + esc(c.coaches)) + '</div></div>'
-      + '<span class="pill">' + (c.off ? 'Did not happen' : (c.mine ? 'Yours' : 'Cover')) + '</span>'
+      + '<span class="pill">' + (c.off ? 'Did not happen' : (c.mine ? 'Yours' : 'Same pool')) + '</span>'
       + '</div>';
 
     var owed = [];
@@ -1165,6 +1181,10 @@
         sub.push('Replacement' + (r.replacement_from ? ' from ' + r.replacement_from : ''));
       }
       if (n != null) sub.push(creditLine(n));
+      // Three coaches marking into one squad session: "already marked"
+      // and "already marked by me" are different facts, and only one of
+      // them means stop.
+      if (r.marked_by && r.attendance_status !== 'pending') sub.push('by ' + r.marked_by);
       var st = r.attendance_status;
       return '<div class="stu">'
         + '<div class="stu-nm">' + esc(r.student_name || '—')
@@ -1172,7 +1192,9 @@
         // No "has notes already" badge: that would mean the roster
         // function returning a count, and two files defining it. The
         // history is one tap away inside the pad.
-        + (c.mine
+        // Offered where the server will accept it: named on the class,
+        // or this coach has marked this swimmer themselves.
+        + ((c.mine || r.marked_by_me)
             ? '<button class="notebtn" data-note="' + esc(r.student_id) + '"'
               + ' data-nm="' + esc(r.student_name || '') + '"'
               + ' title="Write a note for the parent">\u270e</button>'
@@ -1201,14 +1223,18 @@
         + (c.date > today ? 'Marking opens on the day.'
                           : 'That day has closed. Ask the office to change it.') + '</div>';
     }
-    if (c.mine && !closed) {
+    // Whoever may mark the swimmers may say the class did not happen —
+    // and may say it did after all, which is why this cannot hang off
+    // `marking`: that is false once the class is off, and the button to
+    // undo would vanish with the thing it undoes.
+    if (!closed) {
       foot += '<div class="cls-foot"><button class="linkish" data-off="' + esc(c.id) + '">'
         + (c.off ? 'It did happen after all' : 'This class did not happen') + '</button></div>';
     }
     if (!c.mine) {
       foot += '<div class="cls-sub" style="margin-top:8px">'
-        + 'Not your class. If you are covering it, the office assigns it to you '
-        + 'and the swimmers become markable.</div>';
+        + 'Not assigned to you on the timetable. You are rostered to this pool '
+        + 'at this hour, so it is yours to mark.</div>';
     }
 
     return '<div class="cls' + (c.mine ? '' : ' notmine') + (c.off ? ' off' : '') + '">'
@@ -1349,6 +1375,10 @@
           clsRows.forEach(function (r) {
             if (r.row_id !== row) return;
             r.attendance_status = res.state;
+            // Patched, not refetched: a poolside tap should not cost a
+            // round trip for the whole week.
+            r.marked_by = res.marked_by || null;
+            r.marked_by_me = !!res.marked_by;
             if (res.balance != null) r.credits_left = res.balance;
             else if (res.credit_moved) r.credits_left =
               (r.credits_left == null ? null : Number(r.credits_left) + Number(res.credit_moved));
