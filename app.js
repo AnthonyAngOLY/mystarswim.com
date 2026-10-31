@@ -10268,7 +10268,17 @@ function TermsAdminView({ branches, currentBranchId, defaultTerms, onSave }){
   return <>
     <div className="card" style={{marginBottom:12}}>
       <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>📄 Terms &amp; Conditions</div>
-      <div className="small subtle" style={{marginBottom:14}}>Each branch has its own Terms &amp; Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default.</div>
+      <div className="small subtle" style={{marginBottom:10}}>Each branch has its own Terms &amp; Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default.</div>
+      {/* The numbering a legal document already carries is the markup, so
+          nothing has to be learned to get a document that reads properly.
+          ** is there for the occasional line that is none of these. */}
+      <div className="small subtle" style={{marginBottom:14,lineHeight:1.8}}>
+        <b>Formatting</b> — leave a blank line between paragraphs. Then, on its own line,{' '}
+        <code>1. A Heading</code> becomes a section title and A LINE IN CAPITALS becomes the
+        document title. A clause that starts <code>5.2</code> has its number set in bold, and{' '}
+        <code>5.2 Short Title.</code> bolds the title with it. Use{' '}
+        <code>**double asterisks**</code> to bold anything else.
+      </div>
       <div style={{display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
         <div className="field" style={{margin:0,minWidth:220}}><label>Branch</label>
           <select className="select" value={branchId} onChange={e=>setBranchId(e.target.value)}>{active.map(b => <option key={b.id} value={b.id}>{b.name}{b.code?` (${b.code})`:''}</option>)}</select>
@@ -10297,7 +10307,7 @@ function TermsAdminView({ branches, currentBranchId, defaultTerms, onSave }){
         <div className="tc-doc-scroll" style={{maxHeight:480}}>
           <h1 className="tc-h1">{TC_COMPANY}</h1>
           <h2 className="tc-h2">Swimming Lesson Enrolment — Terms &amp; Conditions</h2>
-          {(text||'').split('\n\n').map((para, i) => <p key={i} className="tc-para" style={{whiteSpace:'pre-wrap'}}>{para}</p>)}
+          {window.SSTerms.render(React, text, {pClass:'tc-para', h3Class:'tc-h3', h2Class:'tc-doc-title'})}
         </div>
       </div>
     </div>
@@ -10405,7 +10415,7 @@ ${TC_COMPANY} Administration`);
         <h2 className="tc-h2">Swimming Lesson Enrolment — Terms &amp; Conditions</h2>
         {TC_CONTENT.map((sec,i)=><div key={i} className="tc-section">
           <h3 className="tc-h3">{sec.h}</h3>
-          {sec.body.split('\n\n').map((p,j)=><p key={j} className="tc-para">{p}</p>)}
+          {window.SSTerms.render(React, sec.body, {pClass:'tc-para'})}
         </div>)}
         {!scrolled && <div className="tc-scroll-hint">↓ Scroll to the bottom to enable acceptance</div>}
       </div>

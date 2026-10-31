@@ -589,13 +589,11 @@ function IntakeForm() {
   }, /*#__PURE__*/React.createElement("h1", null, TC_COMPANY), /*#__PURE__*/React.createElement("h2", null, "Swimming Lesson Enrolment — Terms & Conditions"), (() => {
     const b = branches.find(x => x.id === branchId);
     const raw = b && b.terms_content && b.terms_content.trim() ? b.terms_content : defaultTermsText();
-    const txt = raw.replace(/\\n/g, '\n');
-    return txt.split('\n\n').map((para, pi) => /*#__PURE__*/React.createElement("p", {
-      key: pi,
-      style: {
-        whiteSpace: 'pre-wrap'
-      }
-    }, para));
+    // Numbering is the markup: see terms-render.js, loaded by both
+    // this page and the admin so the two cannot drift.
+    return window.SSTerms.render(React, raw, {
+      h2Class: 'tc-doc-title'
+    });
   })()), /*#__PURE__*/React.createElement("label", {
     className: `check-row ${tcAccepted ? 'is-on' : ''}`
   }, /*#__PURE__*/React.createElement("input", {

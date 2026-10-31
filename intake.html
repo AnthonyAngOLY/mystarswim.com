@@ -102,7 +102,8 @@
     .tc-doc h1{font-size:16px;font-weight:800;color:var(--text);margin:0 0 4px}
     .tc-doc h2{font-size:13px;font-weight:600;color:var(--text-3);margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border-2)}
     .tc-doc h3{font-size:13px;font-weight:800;color:var(--text);margin:14px 0 4px}
-    .tc-doc p{margin:0 0 8px;white-space:pre-line}
+    .tc-doc h2.tc-doc-title{font-size:14px;font-weight:800;color:var(--text);letter-spacing:.3px;margin:16px 0 10px;padding:0;border:0}
+    .tc-doc p{margin:0 0 8px;white-space:pre-wrap}
 
     .submit-btn{width:100%;padding:18px;background:var(--primary);color:#fff;border:none;border-radius:14px;font-size:16px;font-weight:800;cursor:pointer;transition:.15s ease;box-shadow:0 6px 20px rgba(109,91,208,.32);letter-spacing:.2px}
     .submit-btn:hover:not(:disabled){background:#5C4BBF;box-shadow:0 8px 28px rgba(109,91,208,.38);transform:translateY(-1px)}
@@ -141,6 +142,7 @@
 <body>
   <div id="root"></div>
   <!-- intake.compiled.js is pre-built from intake.js — edit intake.js then re-run Babel compile -->
+  <script src="./terms-render.js"></script>
   <script src="./intake.compiled.js"></script>
 </body>
 </html>

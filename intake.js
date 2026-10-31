@@ -345,8 +345,9 @@ function IntakeForm(){
         {(() => {
           const b = branches.find(x => x.id === branchId);
           const raw = (b && b.terms_content && b.terms_content.trim()) ? b.terms_content : defaultTermsText();
-          const txt = raw.replace(/\\n/g, '\n');
-          return txt.split('\n\n').map((para, pi) => <p key={pi} style={{whiteSpace:'pre-wrap'}}>{para}</p>);
+          // Numbering is the markup: see terms-render.js, loaded by both
+          // this page and the admin so the two cannot drift.
+          return window.SSTerms.render(React, raw, {h2Class:'tc-doc-title'});
         })()}
       </div>}
       <label className={`check-row ${tcAccepted?'is-on':''}`}>

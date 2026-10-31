@@ -17895,9 +17895,15 @@ function TermsAdminView({
   }, "📄 Terms & Conditions"), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
-      marginBottom: 14
+      marginBottom: 10
     }
   }, "Each branch has its own Terms & Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default."), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 14,
+      lineHeight: 1.8
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Formatting"), " — leave a blank line between paragraphs. Then, on its own line,", ' ', /*#__PURE__*/React.createElement("code", null, "1. A Heading"), " becomes a section title and A LINE IN CAPITALS becomes the document title. A clause that starts ", /*#__PURE__*/React.createElement("code", null, "5.2"), " has its number set in bold, and", ' ', /*#__PURE__*/React.createElement("code", null, "5.2 Short Title."), " bolds the title with it. Use", ' ', /*#__PURE__*/React.createElement("code", null, "**double asterisks**"), " to bold anything else."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 12,
@@ -18003,13 +18009,11 @@ function TermsAdminView({
     className: "tc-h1"
   }, TC_COMPANY), /*#__PURE__*/React.createElement("h2", {
     className: "tc-h2"
-  }, "Swimming Lesson Enrolment — Terms & Conditions"), (text || '').split('\n\n').map((para, i) => /*#__PURE__*/React.createElement("p", {
-    key: i,
-    className: "tc-para",
-    style: {
-      whiteSpace: 'pre-wrap'
-    }
-  }, para))))));
+  }, "Swimming Lesson Enrolment — Terms & Conditions"), window.SSTerms.render(React, text, {
+    pClass: 'tc-para',
+    h3Class: 'tc-h3',
+    h2Class: 'tc-doc-title'
+  })))));
 }
 function TCView({
   students,
@@ -18196,10 +18200,9 @@ ${TC_COMPANY} Administration`);
     className: "tc-section"
   }, /*#__PURE__*/React.createElement("h3", {
     className: "tc-h3"
-  }, sec.h), sec.body.split('\n\n').map((p, j) => /*#__PURE__*/React.createElement("p", {
-    key: j,
-    className: "tc-para"
-  }, p)))), !scrolled && /*#__PURE__*/React.createElement("div", {
+  }, sec.h), window.SSTerms.render(React, sec.body, {
+    pClass: 'tc-para'
+  }))), !scrolled && /*#__PURE__*/React.createElement("div", {
     className: "tc-scroll-hint"
   }, "↓ Scroll to the bottom to enable acceptance"))), done ? /*#__PURE__*/React.createElement("div", {
     className: "card tc-success"
