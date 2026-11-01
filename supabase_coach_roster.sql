@@ -195,7 +195,10 @@ returns table (
   marked_by       text,
   -- Whether it was this coach. The note pad is offered on exactly this,
   -- because it is exactly what can_note_on_student will accept.
-  marked_by_me    boolean
+  marked_by_me    boolean,
+  -- A term programme is marked like a school register — everyone here,
+  -- then name the absentees — rather than swimmer by swimmer.
+  is_training         boolean
 )
 language plpgsql stable security definer set search_path = public
 as $$
@@ -311,7 +314,8 @@ begin
          wss.remark::text,
          bal.remaining_balance,
          mk.full_name::text,
-         (wss.marked_by_crew_id is not null and wss.marked_by_crew_id = v_me)
+         (wss.marked_by_crew_id is not null and wss.marked_by_crew_id = v_me),
+         lesson_type_is_training(ws2.lesson_type_id)
     from overlapping o
     left join weekly_session_students wss on wss.session_id = o.session_id
     left join weekly_sessions ws2         on ws2.id = o.session_id
@@ -365,6 +369,7 @@ declare
   v_moved     int := 0;
   v_bal       numeric;
   v_who       text;
+  v_training      boolean;
 begin
   if p_state not in ('pending', 'attended', 'absent') then
     return jsonb_build_object('ok', false, 'error', 'Not a state this can be set to.');
@@ -421,7 +426,12 @@ begin
   -- swimmer in the water who has not paid is the same fact either way,
   -- and the person marking them is the one placed to say something.
   select * into st from class_policy_settings where id;
-  if v_old = 'pending' and p_state in ('attended', 'absent')
+  -- A term programme buys the course, not the sessions. Reading a
+  -- balance that was never meant to exist is what turned a twenty-child
+  -- school class into twenty "no credits left" prompts a week.
+  v_training := lesson_type_is_training(v_lt);
+  if not v_training
+     and v_old = 'pending' and p_state in ('attended', 'absent')
      and v_sid is not null and v_lt is not null then
     select coalesce(b.remaining_balance, 0) into v_before
       from student_credit_balances b
@@ -448,8 +458,10 @@ begin
     end if;
   end if;
 
-  -- attended and absent both consume; pending does not.
+  -- attended and absent both consume; pending does not. A term
+  -- programme consumes nothing either way: the mark is the whole record.
   v_delta := case
+    when v_training then 0
     when v_old = 'pending' and p_state in ('attended','absent') then -1
     when v_old in ('attended','absent') and p_state = 'pending'  then  1
     else 0 end;
@@ -526,6 +538,7 @@ begin
                             -- behaves differently. Matches the ledger row.
                             'unpaid', (v_delta < 0 and coalesce(v_before, 1) <= 0),
                             'balance', v_bal,
+                            'training_mode', v_training,
                             'marked_by', case when p_state = 'pending' then null else v_who end);
 end $$;
 

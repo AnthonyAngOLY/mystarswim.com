@@ -164,6 +164,18 @@ begin
       'error', 'Class replacements are switched off in Settings.');
   end if;
 
+  -- A training programme runs on whether or not any one swimmer is in
+  -- it, so there is nothing to give back. This is not a setting somebody
+  -- has to remember for SJKC: it follows from the kind of programme,
+  -- which is the same fact that makes it true in the terms they signed.
+  if exists (select 1 from weekly_sessions ws
+              where ws.id = p_session_id
+                and lesson_type_is_training(ws.lesson_type_id)) then
+    return jsonb_build_object('ok', false, 'training', true,
+      'error', 'This is a training programme. A missed session is an '
+               || 'absence — it is not replaced and nothing is deducted.');
+  end if;
+
   select ws.lesson_type_id,
          to_char((ws.week_start_date + (ws.weekday - 1))::date, 'Dy DD Mon')
            || ' ' || to_char((ws.start_minute * interval '1 minute'), 'HH24:MI'),
@@ -323,10 +335,15 @@ begin
        and s.is_active is not false
   ),
   cls as (
+    -- Lessons only. A swimmer who also trains twice a week would
+    -- otherwise have their replacement rate measured against a
+    -- denominator full of classes that cannot be replaced, which makes
+    -- every rate look reassuring and the limit never bite.
     select wss.student_id, count(*)::int as n,
            min((ws.week_start_date + (ws.weekday - 1))::date) as first_class
       from weekly_session_students wss
       join weekly_sessions ws on ws.id = wss.session_id
+     where not lesson_type_is_training(ws.lesson_type_id)
      group by wss.student_id
   ),
   rep as (
@@ -334,7 +351,9 @@ begin
     -- history before this file is included.
     select wss.student_id, count(*)::int as n
       from weekly_session_students wss
+      join weekly_sessions ws on ws.id = wss.session_id
      where coalesce(wss.is_replacement, false)
+       and not lesson_type_is_training(ws.lesson_type_id)
      group by wss.student_id
   ),
   em as (
@@ -408,6 +427,9 @@ language sql stable security definer set search_path = public as $$
       from student_credit_balances b
      where b.remaining_balance < 0
   )
+  -- Training programmes never spend a credit, so they can never be in
+  -- arrears for one. Without this every SJKC child appears here owing
+  -- money they have already paid in full.
   select s.id, s.name::text,
          coalesce(nullif(btrim(pa.display_name), ''), '—')::text,
          coalesce(parent_signin_phone(pa), '')::text,
@@ -424,6 +446,7 @@ language sql stable security definer set search_path = public as $$
     left join scheduler_lesson_types lt on lt.id = u.lesson_type_id
    where is_website_login()
      and (u.n is not null or n.student_id is not null)
+     and not lesson_type_is_training(u.lesson_type_id)
    order by coalesce(u.n, 0) desc, coalesce(n.remaining_balance, 0), s.name;
 $$;
 
