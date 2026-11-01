@@ -146,7 +146,7 @@ grant execute on function session_capacity(uuid) to authenticated;
 -- ─── 5. What is there now ───────────────────────────────────────────────
 select 'lesson types' as thing, count(*)::text as n from scheduler_lesson_types
 union all
-select 'of those, paid by the term',
+select 'of those, training programmes',
        count(*)::text from scheduler_lesson_types where programme_type = 'training'
 union all
 select 'of those, with a ceiling set',
