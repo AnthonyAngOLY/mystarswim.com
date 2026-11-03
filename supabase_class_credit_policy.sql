@@ -362,24 +362,24 @@ begin
      where r.is_emergency and not r.is_void and r.status <> 'cancelled'
      group by r.student_id
   )
-  select m.id,
+  select m.id::uuid,
          m.name::text,
          coalesce(nullif(btrim(pa.display_name), ''), '—')::text,
-         coalesce(m.created_at::date, c.first_class),
-         coalesce(c.n, 0),
-         coalesce(rp.n, 0),
-         case when coalesce(c.n, 0) > 0
-              then round(coalesce(rp.n, 0)::numeric / c.n, 3) else 0 end,
-         coalesce(e.n, 0),
-         case when coalesce(c.n, 0) > 0
-              then round(coalesce(e.n, 0)::numeric / c.n, 3) else 0 end,
-         v_from,
-         (coalesce(c.n, 0) >= coalesce(st.emergency_min_classes, 8)),
+         coalesce(m.created_at::date, c.first_class)::date,
+         coalesce(c.n, 0)::int,
+         coalesce(rp.n, 0)::int,
+         (case when coalesce(c.n, 0) > 0
+               then round(coalesce(rp.n, 0)::numeric / c.n, 3) else 0 end)::numeric,
+         coalesce(e.n, 0)::int,
+         (case when coalesce(c.n, 0) > 0
+               then round(coalesce(e.n, 0)::numeric / c.n, 3) else 0 end)::numeric,
+         v_from::date,
+         (coalesce(c.n, 0) >= coalesce(st.emergency_min_classes, 8))::boolean,
          (coalesce(c.n, 0) >= coalesce(st.emergency_min_classes, 8)
           and coalesce(c.n, 0) > 0
           and (coalesce(e.n, 0)::numeric / nullif(c.n, 0))
-              >= coalesce(st.emergency_rate_limit, 0.25)),
-         e.last_at
+              >= coalesce(st.emergency_rate_limit, 0.25))::boolean,
+         e.last_at::timestamptz
     from mine m
     left join parent_accounts pa on pa.id = m.account_id
     left join cls c  on c.student_id  = m.id
@@ -430,13 +430,19 @@ language sql stable security definer set search_path = public as $$
   -- Training programmes never spend a credit, so they can never be in
   -- arrears for one. Without this every SJKC child appears here owing
   -- money they have already paid in full.
-  select s.id, s.name::text,
+  -- Cast to the declared type, every one. remaining_balance is integer
+  -- in this database and the column here is numeric, which a
+  -- returns-table function refuses at call time with "structure of query
+  -- does not match function result type" — the error that took the
+  -- coach's Classes screen down.
+  select s.id::uuid,
+         s.name::text,
          coalesce(nullif(btrim(pa.display_name), ''), '—')::text,
          coalesce(parent_signin_phone(pa), '')::text,
          coalesce(lt.name, 'Class')::text,
-         coalesce(n.remaining_balance, b2.remaining_balance, 0),
-         coalesce(u.n, 0),
-         u.last_on
+         coalesce(n.remaining_balance, b2.remaining_balance, 0)::numeric,
+         coalesce(u.n, 0)::int,
+         u.last_on::date
     from students s
     left join parent_accounts pa on pa.id = s.account_id
     full join unpaid u on u.student_id = s.id

@@ -109,8 +109,13 @@ $$;
 create or replace function my_credits()
 returns table (student_id uuid, child text, lesson text, remaining numeric)
 language sql stable security definer set search_path = public as $$
-  select s.id, s.name::text, coalesce(lt.name, 'Class')::text,
-         coalesce(b.remaining_balance, 0)
+  -- Cast every column to the type declared above. remaining_balance is
+  -- integer in this database, and a returns-table function will not
+  -- coerce it to the numeric declared here: it raises "structure of
+  -- query does not match function result type" at call time, which is
+  -- to say on the parent's phone rather than when the file is run.
+  select s.id::uuid, s.name::text, coalesce(lt.name, 'Class')::text,
+         coalesce(b.remaining_balance, 0)::numeric
     from students s
     join student_credit_balances b on b.student_id = s.id
     left join scheduler_lesson_types lt on lt.id = b.lesson_type_id
@@ -127,11 +132,11 @@ returns table (
   status text, total numeric, paid numeric, outstanding numeric
 )
 language sql stable security definer set search_path = public as $$
-  select i.id, i.invoice_number::text, i.issue_date, i.due_date,
+  select i.id::uuid, i.invoice_number::text, i.issue_date::date, i.due_date::date,
          i.status::text,
-         coalesce(i.total_amount, 0),
-         coalesce(i.amount_paid, 0),
-         coalesce(i.total_amount, 0) - coalesce(i.amount_paid, 0)
+         coalesce(i.total_amount, 0)::numeric,
+         coalesce(i.amount_paid, 0)::numeric,
+         (coalesce(i.total_amount, 0) - coalesce(i.amount_paid, 0))::numeric
     from invoices i
    where i.account_id = my_parent_account_id()
      and my_parent_account_id() is not null
@@ -143,7 +148,7 @@ $$;
 create or replace function my_invoice_lines(p_invoice uuid)
 returns table (description text, student_names text, amount numeric)
 language sql stable security definer set search_path = public as $$
-  select l.description::text, l.student_names::text, coalesce(l.amount, 0)
+  select l.description::text, l.student_names::text, coalesce(l.amount, 0)::numeric
     from invoice_lines l
     join invoices i on i.id = l.invoice_id
    where l.invoice_id = p_invoice
@@ -163,8 +168,8 @@ returns table (
   method text, kind text, invoice_number text
 )
 language sql stable security definer set search_path = public as $$
-  select pm.id, pm.receipt_number::text, pm.payment_date,
-         coalesce(pm.amount, 0), coalesce(pm.payment_method, '')::text,
+  select pm.id::uuid, pm.receipt_number::text, pm.payment_date::date,
+         coalesce(pm.amount, 0)::numeric, coalesce(pm.payment_method, '')::text,
          coalesce(pm.kind, 'payment')::text, i.invoice_number::text
     from payments pm
     join invoices i on i.id = pm.invoice_id

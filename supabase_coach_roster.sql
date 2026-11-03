@@ -299,23 +299,38 @@ begin
      where (v_me is not null and sc.crew_id = v_me)
         or (v_inst is not null and sc.id = v_inst)
   )
-  select o.session_id, o.session_date, o.start_time, o.end_time,
-         o.pool_name, o.lesson_type,
+  -- Every expression is cast to the column it fills. A returns-table
+  -- function compares the query's types against the declared ones and
+  -- raises "structure of query does not match function result type" if
+  -- any one differs — at call time, not at create time, so the file
+  -- installs cleanly and the coach's phone is where it shows up.
+  --
+  -- The scheduler's tables predate this repo and nothing here declares
+  -- their types, so inferring them was never safe. Casting removes the
+  -- question rather than answering it.
+  select o.session_id::uuid,
+         o.session_date::date,
+         o.start_time::time,
+         o.end_time::time,
+         o.pool_name::text,
+         o.lesson_type::text,
          coalesce((select string_agg(sc2.name, ', ' order by sc2.name)
                      from session_instructors si2
                      join scheduler_instructors sc2 on sc2.id = si2.instructor_id
                     where si2.session_id = o.session_id), '—')::text,
-         (o.session_id in (select sid from mine)),
-         o.is_cancelled,
-         wss.id, wss.student_id, wss.student_name::text,
-         coalesce(wss.is_replacement, false),
+         (o.session_id in (select sid from mine))::boolean,
+         o.is_cancelled::boolean,
+         wss.id::uuid,
+         wss.student_id::uuid,
+         wss.student_name::text,
+         coalesce(wss.is_replacement, false)::boolean,
          wss.replacement_from::text,
          coalesce(wss.attendance_status, 'pending')::text,
          wss.remark::text,
-         bal.remaining_balance,
+         bal.remaining_balance::numeric,
          mk.full_name::text,
-         (wss.marked_by_crew_id is not null and wss.marked_by_crew_id = v_me),
-         lesson_type_is_training(ws2.lesson_type_id)
+         (wss.marked_by_crew_id is not null and wss.marked_by_crew_id = v_me)::boolean,
+         lesson_type_is_training(ws2.lesson_type_id)::boolean
     from overlapping o
     left join weekly_session_students wss on wss.session_id = o.session_id
     left join weekly_sessions ws2         on ws2.id = o.session_id
