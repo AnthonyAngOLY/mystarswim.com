@@ -5770,7 +5770,21 @@ function SummaryView({ summary, pools }){
 // ============================================================================
 
 function billingText(mode, count){ if(count === null || count === undefined || count === '') return ''; return `${count} ${mode === 'credit' ? 'credits' : 'monthly'}`; }
-function BillingControl({ mode, count, onMode, onCount }){
+// For a training programme the unit is the month, so there is no choice
+// of billing to offer: a package is however many months it covers, and
+// the one-month package and the four-month package are the same shape.
+// Showing Monthly-or-Credit there would be asking a question with one
+// answer, and then selling "16 credits" for a class that spends none.
+function BillingControl({ mode, count, onMode, onCount, training }){
+  if(training) return <div className="field" style={{margin:0,maxWidth:240}}>
+    <label>Months covered</label>
+    <div className="suffix-input">
+      <input className="input" type="number" min="1" value={count}
+             onChange={(e)=>onCount(e.target.value)} placeholder="1" />
+      <span className="suffix-tag">months</span>
+    </div>
+    <div className="hint" style={{marginTop:4}}>One month, or a whole term. A credit is a month here — the fee buys the month however many times the pool is open.</div>
+  </div>;
   return <div style={{display:'flex',alignItems:'flex-end',gap:12,flexWrap:'wrap'}}>
     <div className="field" style={{margin:0}}>
       <label>Billing</label>
@@ -5789,7 +5803,7 @@ function BillingControl({ mode, count, onMode, onCount }){
   </div>;
 }
 
-function PackageEditor({ row, onSave, onCancel }){
+function PackageEditor({ row, onSave, onCancel, training }){
   const [name, setName] = useState(row.name || '');
   const [pax, setPax] = useState(row.pax == null ? '' : String(row.pax));
   const [amount, setAmount] = useState(row.amount == null ? '' : String(row.amount));
@@ -5803,7 +5817,7 @@ function PackageEditor({ row, onSave, onCancel }){
       <div className="field" style={{margin:0}}><label>{isGroup ? 'Required pax' : 'Pax'}</label><input className="input" type="number" min="1" value={pax} onChange={(e)=>setPax(e.target.value)} /></div>
       <div className="field" style={{margin:0}}><label>{isGroup ? 'Bundle total (RM)' : 'Amount (RM)'}</label><input className="input" type="number" min="0" step="0.01" value={amount} onChange={(e)=>setAmount(e.target.value)} /></div>
     </div>
-    <div style={{marginTop:10}}><BillingControl mode={mode} count={count} onMode={setMode} onCount={setCount} /></div>
+    <div style={{marginTop:10}}><BillingControl mode={mode} count={count} onMode={setMode} onCount={setCount} training={training} /></div>
     <label className="gb-check" style={{marginTop:10}}><input type="checkbox" checked={isGroup} onChange={e=>setIsGroup(e.target.checked)} /> Family unit (single payer for the required pax)</label>
     {isGroup ? <div className="field" style={{marginTop:8,maxWidth:280}}><label>Standard rate per pax if under-enrolled (RM)</label><input className="input" type="number" min="0" step="0.01" value={fallback} onChange={e=>setFallback(e.target.value)} placeholder="200" /></div> : null}
     <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:10}}>
@@ -6495,7 +6509,7 @@ function LessonTypePackages({ lessonType, packages, editPkgId, setEditPkgId, add
     <div className="lt-packages-list">
       {packages.length ? packages.map((r, i) => editPkgId === r.id
         ? <div key={r.id} className="row-item" style={{display:'block'}}>
-            <PackageEditor row={r} onCancel={()=>setEditPkgId(null)} onSave={(patch)=>{ patchOption('packages', r.id, patch); setEditPkgId(null); }} />
+            <PackageEditor row={r} training={lessonType.programme_type === 'training'} onCancel={()=>setEditPkgId(null)} onSave={(patch)=>{ patchOption('packages', r.id, patch); setEditPkgId(null); }} />
           </div>
         : <div key={r.id} className="row-item">
             <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
@@ -6523,7 +6537,8 @@ function LessonTypePackages({ lessonType, packages, editPkgId, setEditPkgId, add
         <div className="field" style={{margin:0}}><label>Amount (RM)</label><input className="input" type="number" min="0" step="0.01" value={amount} onChange={(e)=>setAmount(e.target.value)} /></div>
       </div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',gap:12,marginTop:10,flexWrap:'wrap'}}>
-        <BillingControl mode={mode} count={count} onMode={setMode} onCount={setCount} />
+        <BillingControl mode={mode} count={count} onMode={setMode} onCount={setCount}
+                        training={lessonType.programme_type === 'training'} />
         <button className="btn btn-primary small" onClick={()=>{ const v = name.trim(); if(!v) return; addOption('package', { lessonTypeId:lessonType.id, name:v, pax, amount, billingMode:mode, billingCount:count, isGroup, fallbackPerPax:fallback }); reset(); }}>Add Package</button>
       </div>
       <div style={{display:'flex',alignItems:'flex-end',gap:14,marginTop:8,flexWrap:'wrap'}}>
@@ -7263,6 +7278,105 @@ function IntakeShareModal({ onClose }){
 // the ledger rather than the balance, so it is right whether or not the
 // centre lets a balance go below nil — with negatives off the balance
 // says nothing and the ledger still knows.
+// ── Reports › Training months ────────────────────────────────────────────
+// For a training programme a credit is a month, so being behind is
+// counted in months and not in classes. Nothing decrements: months pass
+// on their own and the subtraction is done when somebody looks.
+//
+// No money here on purpose. What a month costs depends on the package
+// the family took, and that is the invoice's business — a second
+// opinion on it would be a second record of one truth.
+function TrainingMonthsReport(){
+  const [rows,setRows]=useState(null);
+  const [err,setErr]=useState('');
+  const [busy,setBusy]=useState('');
+
+  async function load(){
+    // rest, not rpcCall: this function returns a set, and rpcCall takes
+    // the first row of an array because it is built for the ones that
+    // answer with a single object.
+    try{ const r=await rest('rpc/training_outstanding',{ method:'POST', body:'{}' });
+         setRows(Array.isArray(r)?r:[]); setErr(''); }
+    catch(e){ setErr(e.message); setRows([]); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function record(r){
+    const ans = prompt(`How many months is ${r.child} paying for?\n\n`
+      + `${r.months_outstanding} outstanding`
+      + (r.paid_through ? ` · paid through ${adminFmtDate(r.paid_through)}` : ' · nothing paid yet'),
+      String(r.months_outstanding));
+    if(ans == null) return;
+    const months = Number(ans);
+    if(!Number.isFinite(months) || months === 0) return;
+    setBusy(r.student_id);
+    try{
+      // rpcCall throws on ok:false, which the catch below turns into the
+      // message the function wrote.
+      await rpcCall('add_training_months', {
+        p_student_id: r.student_id, p_lesson_type_id: r.lesson_type_id || null,
+        p_months: months, p_notes: null
+      });
+      await load();
+    } catch(e){ alert(e.message); } finally { setBusy(''); }
+  }
+
+  if(rows===null) return <div className="card"><div className="small subtle">Loading…</div></div>;
+
+  const totalMonths = rows.reduce((a,r)=>a+Number(r.months_outstanding||0),0);
+
+  return <div>
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800}}>🏅 Training months</div>
+          <div className="small subtle" style={{marginTop:4}}>
+            Swimmers on a squad or school programme who have been in the water longer than
+            they have paid for. A credit here is a month, not a class — a missed session is
+            an absence and changes nothing.
+          </div>
+        </div>
+        <button className="btn btn-ghost small" onClick={load}>↻ Refresh</button>
+      </div>
+      {!!rows.length && <div className="note" style={{marginTop:12,fontSize:13,
+          background:'var(--amber-bg)',border:'1px solid var(--amber-bd)',color:'#B45309'}}>
+        {rows.length} swimmer{rows.length===1?'':'s'} behind, {totalMonths} month{totalMonths===1?'':'s'} in all.
+        The amount depends on the package each family took — raise it on their invoice.
+      </div>}
+    </div>
+
+    {err && <div className="note err" style={{marginBottom:10}}>{err}</div>}
+
+    <div className="card">
+      {!rows.length
+        ? <div className="empty" style={{padding:26}}>Nobody is behind. Every swimmer on a training programme has paid for the months that have passed.</div>
+        : <table>
+            <thead><tr>
+              <th>Swimmer</th><th>Parent</th><th>Programme</th>
+              <th className="num">Months paid</th>
+              <th className="num">Behind by</th>
+              <th>Paid through</th><th></th>
+            </tr></thead>
+            <tbody>{rows.map(r=><tr key={r.student_id + ':' + (r.programme||'')}>
+              <td style={{fontWeight:700}}>{r.child}</td>
+              <td className="small subtle">{r.parent}{r.parent_phone
+                ? <div><a href={`https://wa.me/${String(r.parent_phone).replace(/[^0-9]/g,'')}`}
+                          target="_blank" rel="noreferrer">{r.parent_phone}</a></div> : null}</td>
+              <td className="small subtle">{r.programme}</td>
+              <td className="num">{r.months_paid}</td>
+              <td className="num" style={{fontWeight:800,color:'#DC2626'}}>{r.months_outstanding}</td>
+              <td className="small subtle">{r.paid_through
+                ? adminFmtDate(r.paid_through)
+                : <span style={{color:'#DC2626'}}>nothing paid</span>}</td>
+              <td><button className="btn btn-ghost small" disabled={busy===r.student_id}
+                          onClick={()=>record(r)}>
+                {busy===r.student_id ? 'Saving…' : '+ Record months'}</button></td>
+            </tr>)}</tbody>
+          </table>}
+    </div>
+  </div>;
+}
+
 function UnpaidClassesReport(){
   const [rows,setRows]=useState(null);
   const [st,setSt]=useState(null);
@@ -9500,7 +9614,7 @@ function ReportsView({ invoices, pmts, pendingCredits, students, sessions, credi
   }, [sessions, today]);
 
   // ── Tab routing ─────────────────────────────────────────────────────────
-  const tabs = [['dashboard','📊 Dashboard'],['retention','🔁 Retention & Churn'],['unpaid','💳 Unpaid classes']];
+  const tabs = [['dashboard','📊 Dashboard'],['retention','🔁 Retention & Churn'],['unpaid','💳 Unpaid classes'],['trainmonths','🏅 Training months']];
 
   return <>
     <div className="card" style={{marginBottom:12}}>
@@ -9524,6 +9638,7 @@ function ReportsView({ invoices, pmts, pendingCredits, students, sessions, credi
     />}
 
     {tab === 'unpaid' && <UnpaidClassesReport/>}
+    {tab === 'trainmonths' && <TrainingMonthsReport/>}
     {tab === 'retention' && <RetentionReport
       students={scopedStudents} pmts={scopedPmts}
       lastAttendedByStu={lastAttendedByStu} sessions={sessions}
