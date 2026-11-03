@@ -583,7 +583,14 @@ function computeGridBounds(operatingHours) {
 function sessionCapacity(session, lessonType) {
   const ratio = Number(lessonType && lessonType.students_per_instructor || 0);
   const instCount = Math.max(0, (session.instructors || []).length);
-  const max = ratio > 0 ? ratio * Math.max(1, instCount) : 0;
+  // Three levels, narrowest first — the same order session_capacity()
+  // applies in the database, so this screen and any report agree.
+  //   this session's own roll, when the scheduler set one
+  //   the lesson type's ceiling, for a squad whose size varies
+  //   ratio times coaches, which is how a lesson has always been sized
+  const sessionCap = Number(session.maxStudents || 0);
+  const typeCap = Number(lessonType && lessonType.max_students || 0);
+  const max = sessionCap > 0 ? sessionCap : typeCap > 0 ? typeCap : ratio > 0 ? ratio * Math.max(1, instCount) : 0;
   const current = (session.students || []).length;
   let status = 'unknown';
   if (max > 0) {
@@ -1881,6 +1888,7 @@ function App({
         familyGroupId: r.family_group_id || null,
         legacyInstructor: r.instructor || '',
         markedFull: r.marked_full === true,
+        maxStudents: r.max_students ?? null,
         rescheduledFromDay: r.rescheduled_from_day != null ? Number(r.rescheduled_from_day) - 1 : null,
         rescheduledFromStartMinute: r.rescheduled_from_start_minute != null ? Number(r.rescheduled_from_start_minute) : null,
         cancelledAt: r.cancelled_at || null,
@@ -8058,7 +8066,9 @@ function AgendaCard({
     className: missingInst ? 'inst-orphan' : ''
   }, instName || 'Unassigned'), missingInst ? /*#__PURE__*/React.createElement("span", {
     className: "inst-warn-chip"
-  }, "Needs instructor") : null), block.students.length ? /*#__PURE__*/React.createElement("div", {
+  }, "Needs instructor") : null), block.students.length > 12 ? /*#__PURE__*/React.createElement("div", {
+    className: "wa-card-students wa-card-many"
+  }, block.students.length, " swimmers", block.students.filter(s => s.isReplacement).length ? ' · ' + block.students.filter(s => s.isReplacement).length + ' R' : '') : block.students.length ? /*#__PURE__*/React.createElement("div", {
     className: "wa-card-students"
   }, block.students.map((s, i) => {
     const isTrial = !!(s.studentId && trialSet && trialSet.has(s.studentId));
@@ -11178,6 +11188,8 @@ function LessonTypeEditor({
     default_duration_minutes: row.default_duration_minutes ?? '',
     billing_model: row.billing_model || 'monthly',
     class_type: row.class_type || 'group',
+    programme_type: row.programme_type || 'lessons',
+    max_students: row.max_students ?? '',
     monthly_fee: row.monthly_fee ?? '',
     lessons_per_month: row.lessons_per_month ?? '',
     credit_count: row.credit_count ?? '',
@@ -11291,6 +11303,39 @@ function LessonTypeEditor({
     }
   }, draft.class_type === 'personal' ? 'Private lesson — enables credit tracking and per-week reschedule' : 'Group lesson — enables drop-in replacement for absent swimmers')), /*#__PURE__*/React.createElement("div", {
     className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Programme"), /*#__PURE__*/React.createElement("div", {
+    className: "gender-toggle",
+    style: {
+      marginTop: 2
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `gender-opt ${draft.programme_type === 'lessons' ? 'active' : ''}`,
+    onClick: () => setF('programme_type', 'lessons')
+  }, "🏊 Lessons"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `gender-opt ${draft.programme_type === 'training' ? 'active' : ''}`,
+    onClick: () => setF('programme_type', 'training')
+  }, "🏅 Training")), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 4
+    }
+  }, draft.programme_type === 'training' ? 'Squad or school programme — the class runs on regardless. Attendance is recorded, no credit is spent, and a missed session is an absence with no replacement.' : 'Learn-to-swim — attendance spends a credit, and a missed class may be replaced under the usual policy.')), draft.programme_type === 'training' && /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Class ceiling"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    value: draft.max_students,
+    onChange: e => setF('max_students', e.target.value),
+    placeholder: "40"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 4
+    }
+  }, "The most this programme may ever hold. A session can set a smaller roll of its own, never a larger one. Blank falls back to students per instructor times the number of coaches.")), /*#__PURE__*/React.createElement("div", {
+    className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Coach in pool"), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -11375,6 +11420,8 @@ function LessonTypeEditor({
         default_duration_minutes: clean(draft.default_duration_minutes),
         billing_model: draft.billing_model,
         class_type: draft.class_type || 'group',
+        programme_type: draft.programme_type || 'lessons',
+        max_students: draft.programme_type === 'training' ? clean(draft.max_students) : null,
         monthly_fee: clean(draft.monthly_fee),
         lessons_per_month: clean(draft.lessons_per_month),
         credit_count: clean(draft.credit_count),

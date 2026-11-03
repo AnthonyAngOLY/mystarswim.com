@@ -322,7 +322,16 @@ function computeGridBounds(operatingHours){
 function sessionCapacity(session, lessonType){
   const ratio = Number((lessonType && lessonType.students_per_instructor) || 0);
   const instCount = Math.max(0, (session.instructors || []).length);
-  const max = ratio > 0 ? ratio * Math.max(1, instCount) : 0;
+  // Three levels, narrowest first — the same order session_capacity()
+  // applies in the database, so this screen and any report agree.
+  //   this session's own roll, when the scheduler set one
+  //   the lesson type's ceiling, for a squad whose size varies
+  //   ratio times coaches, which is how a lesson has always been sized
+  const sessionCap = Number(session.maxStudents || 0);
+  const typeCap    = Number((lessonType && lessonType.max_students) || 0);
+  const max = sessionCap > 0 ? sessionCap
+            : typeCap > 0    ? typeCap
+            : ratio > 0      ? ratio * Math.max(1, instCount) : 0;
   const current = (session.students || []).length;
   let status = 'unknown';
   if(max > 0){
@@ -1168,6 +1177,7 @@ function App({ currentUser, onLogout }){
         familyGroupId: r.family_group_id || null,
         legacyInstructor: r.instructor || '',
         markedFull: r.marked_full === true,
+        maxStudents: r.max_students ?? null,
         rescheduledFromDay: r.rescheduled_from_day != null ? Number(r.rescheduled_from_day) - 1 : null,
         rescheduledFromStartMinute: r.rescheduled_from_start_minute != null ? Number(r.rescheduled_from_start_minute) : null,
         cancelledAt: r.cancelled_at || null,
@@ -5331,7 +5341,16 @@ function AgendaCard({ block, colorsFor, lessonTypeByName, poolById, showPoolBadg
     </div>
     <div className="wa-card-line">{showPoolBadge && pool ? <span className="event-pool-pill">{pool.name}</span> : null}{compactRange(block.startMinute, block.durationMinutes)}{isRescheduled ? <span className="reschedule-tag" title={`Rescheduled — was ${DAYS_S[block.rescheduledFromDay]} ${minuteToTime(block.rescheduledFromStartMinute)}`}>⇄</span> : null}</div>
     <div className={`wa-card-line wa-card-inst ${missingInst?'inst-missing':''}`}>{missingInst ? <span className="warn-tri" title="Instructor was removed — pick a new one in the modal">⚠</span> : null}<span className={missingInst?'inst-orphan':''}>{instName || 'Unassigned'}</span>{missingInst ? <span className="inst-warn-chip">Needs instructor</span> : null}</div>
-    {block.students.length
+    {/* A squad roll will not fit a calendar cell. Above a dozen the
+        names stop being a list anybody reads and start being a wall, so
+        the cell says how many and the modal keeps the names. */}
+    {block.students.length > 12
+      ? <div className="wa-card-students wa-card-many">
+          {block.students.length} swimmers
+          {block.students.filter(s => s.isReplacement).length
+            ? ' · ' + block.students.filter(s => s.isReplacement).length + ' R' : ''}
+        </div>
+      : block.students.length
       ? <div className="wa-card-students">{block.students.map((s,i) => {
           const isTrial = !!(s.studentId && trialSet && trialSet.has(s.studentId));
           const isRepl = s.isReplacement;
@@ -6525,6 +6544,8 @@ function LessonTypeEditor({ row, pools, onSave }){
     default_duration_minutes: row.default_duration_minutes ?? '',
     billing_model: row.billing_model || 'monthly',
     class_type: row.class_type || 'group',
+    programme_type: row.programme_type || 'lessons',
+    max_students: row.max_students ?? '',
     monthly_fee: row.monthly_fee ?? '',
     lessons_per_month: row.lessons_per_month ?? '',
     credit_count: row.credit_count ?? '',
@@ -6553,6 +6574,25 @@ function LessonTypeEditor({ row, pools, onSave }){
         </div>
         <div className="hint" style={{marginTop:4}}>{draft.class_type==='personal'?'Private lesson — enables credit tracking and per-week reschedule':'Group lesson — enables drop-in replacement for absent swimmers'}</div>
       </div>
+      {/* A third axis, and not the same as billing_model or class_type:
+          those say how the fee is charged and whether it is one-to-one.
+          This says whether attendance spends anything at all. */}
+      <div className="field"><label>Programme</label>
+        <div className="gender-toggle" style={{marginTop:2}}>
+          <button type="button" className={`gender-opt ${draft.programme_type==='lessons'?'active':''}`}
+                  onClick={()=>setF('programme_type','lessons')}>🏊 Lessons</button>
+          <button type="button" className={`gender-opt ${draft.programme_type==='training'?'active':''}`}
+                  onClick={()=>setF('programme_type','training')}>🏅 Training</button>
+        </div>
+        <div className="hint" style={{marginTop:4}}>{draft.programme_type==='training'
+          ? 'Squad or school programme — the class runs on regardless. Attendance is recorded, no credit is spent, and a missed session is an absence with no replacement.'
+          : 'Learn-to-swim — attendance spends a credit, and a missed class may be replaced under the usual policy.'}</div>
+      </div>
+      {draft.programme_type==='training' && <div className="field"><label>Class ceiling</label>
+        <input className="input" type="number" value={draft.max_students}
+               onChange={(e)=>setF('max_students', e.target.value)} placeholder="40" />
+        <div className="hint" style={{marginTop:4}}>The most this programme may ever hold. A session can set a smaller roll of its own, never a larger one. Blank falls back to students per instructor times the number of coaches.</div>
+      </div>}
       <div className="field"><label>Coach in pool</label><div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 0'}}><input type="checkbox" checked={draft.coach_in_pool} onChange={(e)=>setF('coach_in_pool', e.target.checked)} /><span className="small subtle">Uncheck for on-deck coaching (Strokelab Elite)</span></div></div>
       {draft.billing_model === 'monthly' ? <>
         <div className="field"><label>Monthly fee</label><input className="input" type="number" step="0.01" value={draft.monthly_fee} onChange={(e)=>setF('monthly_fee', e.target.value)} /></div>
@@ -6575,6 +6615,8 @@ function LessonTypeEditor({ row, pools, onSave }){
           default_duration_minutes: clean(draft.default_duration_minutes),
           billing_model: draft.billing_model,
           class_type: draft.class_type || 'group',
+          programme_type: draft.programme_type || 'lessons',
+          max_students: draft.programme_type==='training' ? clean(draft.max_students) : null,
           monthly_fee: clean(draft.monthly_fee),
           lessons_per_month: clean(draft.lessons_per_month),
           credit_count: clean(draft.credit_count),

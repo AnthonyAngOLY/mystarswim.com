@@ -1064,7 +1064,8 @@
           id: r.session_id, date: r.session_date,
           start: r.start_time, end: r.end_time,
           pool: r.pool_name, lesson: r.lesson_type, coaches: r.coach_names,
-          mine: !!r.is_mine, off: !!r.is_cancelled, students: []
+          mine: !!r.is_mine, off: !!r.is_cancelled,
+          training: !!r.is_training, students: []
         };
         out.push(c);
       }
@@ -1213,6 +1214,17 @@
     }).join('<div class="cls-line"></div>') : '<p class="empty">Nobody in this class.</p>';
 
     var foot = '';
+    // Twenty children is forty taps, and that is not how a register is
+    // taken. A school register starts from everybody being here and
+    // names the ones who are not. Offered on training programmes only:
+    // for a class of four it would be a worse way round.
+    var unmarked = c.students.filter(function (r) {
+      return (r.attendance_status || 'pending') === 'pending';
+    }).length;
+    if (marking && !closed && c.training && unmarked > 1) {
+      foot += '<div class="cls-foot"><button class="btn" data-allhere="' + esc(c.id) + '"'
+        + ' style="width:100%">Mark all ' + unmarked + ' here, then flag who is away</button></div>';
+    }
     if (owed.length) {
       foot += '<div class="owed">' + esc(owed.join(', '))
         + (owed.length === 1 ? ' has ' : ' have ')
@@ -1386,6 +1398,40 @@
           renderClasses();
         }).catch(function (e) {
           clsBusy = null; renderClasses(); alert(e.message);
+        });
+      });
+    });
+
+    // Mark everybody still unmarked as here, one after another so the
+    // server applies its own rules to each — a training class spends no
+    // credit, so none of these can raise the no-credit question, but
+    // going through mark_attendance keeps one rule in one place.
+    Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-allhere]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-allhere');
+        var todo = clsRows.filter(function (r) {
+          return r.session_id === id && r.row_id
+              && (r.attendance_status || 'pending') === 'pending';
+        });
+        if (!todo.length) return;
+        if (!window.confirm('Mark all ' + todo.length + ' swimmers here?\n\n'
+              + 'Then tap Away for anyone who did not turn up.')) return;
+        b.disabled = true; b.textContent = 'Marking…';
+        var failed = 0;
+        todo.reduce(function (chain, r) {
+          return chain.then(function () {
+            return rpc('mark_attendance', { p_row_id: r.row_id, p_state: 'attended', p_confirm: true })
+              .then(function (res) {
+                if (res && res.ok === false) { failed++; return; }
+                r.attendance_status = 'attended';
+                r.marked_by = res.marked_by || null;
+                r.marked_by_me = !!res.marked_by;
+              })
+              .catch(function () { failed++; });
+          });
+        }, Promise.resolve()).then(function () {
+          renderClasses();
+          if (failed) alert(failed + ' of ' + todo.length + ' could not be marked. Try those by hand.');
         });
       });
     });
