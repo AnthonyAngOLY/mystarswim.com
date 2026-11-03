@@ -11174,6 +11174,215 @@ function LessonTypePackages({
   })) : null)));
 }
 
+// ── The stated terms of a programme that runs longer than a month ────────
+// Only shown where it is needed. A monthly programme has no rows here and
+// should not: making somebody create twelve a year to say the months are
+// the months is a way of losing track of which month it is.
+//
+// The end date is offered rather than asked for. A four-month term from
+// 1 November ends on the last day of February, and a person typing that
+// out by hand gets it wrong in a leap year.
+function ProgrammeTermsPanel({
+  lessonTypeId,
+  months
+}) {
+  const [rows, setRows] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [from, setFrom] = useState('');
+  const [label, setLabel] = useState('');
+  const [fee, setFee] = useState('');
+  const [err, setErr] = useState('');
+  async function load() {
+    try {
+      const r = await selectRows('programme_terms', '*', `&lesson_type_id=eq.${encodeURIComponent(lessonTypeId)}&is_void=is.false&order=starts_on.desc`);
+      setRows(r || []);
+      setErr('');
+    } catch (e) {
+      setErr(e.message);
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [lessonTypeId]); // eslint-disable-line
+
+  function endOf(startStr) {
+    if (!startStr) return '';
+    const d = new Date(startStr + 'T00:00:00');
+    // Last day of the month that is (months - 1) after the start month.
+    const e = new Date(d.getFullYear(), d.getMonth() + Number(months || 1), 0);
+    const p = n => String(n).padStart(2, '0');
+    return `${e.getFullYear()}-${p(e.getMonth() + 1)}-${p(e.getDate())}`;
+  }
+  function nameFor(startStr) {
+    if (!startStr) return '';
+    const fmt = s => new Date(s + 'T00:00:00').toLocaleDateString('en-GB', {
+      month: 'short',
+      year: 'numeric'
+    });
+    return `${fmt(startStr)} – ${fmt(endOf(startStr))}`;
+  }
+  const to = endOf(from);
+  async function add() {
+    const l = label.trim() || nameFor(from);
+    if (!from || !l) {
+      setErr('A start date is needed.');
+      return;
+    }
+    try {
+      await insertRows('programme_terms', [{
+        lesson_type_id: lessonTypeId,
+        label: l,
+        starts_on: from,
+        ends_on: to,
+        fee: fee === '' ? null : Number(fee)
+      }]);
+      setAdding(false);
+      setFrom('');
+      setLabel('');
+      setFee('');
+      setErr('');
+      await load();
+    } catch (e) {
+      setErr(e.message);
+    } // the overlap guard speaks through this
+  }
+  async function voidTerm(t) {
+    if (!confirm(`Void "${t.label}"?\n\nIt stays on record — invoices point at it — but it no longer counts as a term.`)) return;
+    try {
+      await patchRows('programme_terms', {
+        id: t.id
+      }, {
+        is_void: true,
+        voided_at: new Date().toISOString()
+      });
+      await load();
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 12,
+      background: 'var(--surface-2)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "Terms ", /*#__PURE__*/React.createElement("span", {
+    className: "small subtle",
+    style: {
+      fontWeight: 400
+    }
+  }, "· ", months, " months each")), !adding && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setAdding(true)
+  }, "+ Add a term")), err && /*#__PURE__*/React.createElement("div", {
+    className: "note err",
+    style: {
+      marginBottom: 8,
+      fontSize: 13
+    }
+  }, err), adding && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'grid',
+      gap: 8,
+      gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
+      marginBottom: 10,
+      alignItems: 'end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Starts"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: from,
+    onChange: e => setFrom(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Ends"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: to,
+    disabled: true,
+    placeholder: "from the term length"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Name"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: label,
+    onChange: e => setLabel(e.target.value),
+    placeholder: nameFor(from) || 'Nov 2026 – Feb 2027'
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Fee (RM)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    step: "0.01",
+    value: fee,
+    onChange: e => setFee(e.target.value),
+    placeholder: "the type's term fee"
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => {
+      setAdding(false);
+      setErr('');
+    }
+  }, "Cancel"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    onClick: add,
+    disabled: !from
+  }, "Add"))), rows === null ? /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…") : !rows.length ? /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "No terms yet. A swimmer cannot be billed for a term that has not been stated.") : /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Term"), /*#__PURE__*/React.createElement("th", null, "Starts"), /*#__PURE__*/React.createElement("th", null, "Ends"), /*#__PURE__*/React.createElement("th", {
+    className: "num"
+  }, "Fee"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, rows.map(t => /*#__PURE__*/React.createElement("tr", {
+    key: t.id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 700
+    }
+  }, t.label), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, adminFmtDate(t.starts_on)), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, adminFmtDate(t.ends_on)), /*#__PURE__*/React.createElement("td", {
+    className: "num"
+  }, t.fee == null ? /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, "type default") : adminFmtRM(t.fee)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => voidTerm(t)
+  }, "Void")))))));
+}
+
 // M2: inline editor for the new lesson-type fields. Saves on Apply.
 function LessonTypeEditor({
   row,
@@ -11190,6 +11399,8 @@ function LessonTypeEditor({
     class_type: row.class_type || 'group',
     programme_type: row.programme_type || 'lessons',
     max_students: row.max_students ?? '',
+    term_months: row.term_months ?? '',
+    term_fee: row.term_fee ?? '',
     monthly_fee: row.monthly_fee ?? '',
     lessons_per_month: row.lessons_per_month ?? '',
     credit_count: row.credit_count ?? '',
@@ -11323,6 +11534,35 @@ function LessonTypeEditor({
     }
   }, draft.programme_type === 'training' ? 'Squad or school programme — the class runs on regardless. Attendance is recorded, no credit is spent, and a missed session is an absence with no replacement.' : 'Learn-to-swim — attendance spends a credit, and a missed class may be replaced under the usual policy.')), draft.programme_type === 'training' && /*#__PURE__*/React.createElement("div", {
     className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Term length (months)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: "1",
+    max: "24",
+    value: draft.term_months,
+    onChange: e => setF('term_months', e.target.value),
+    placeholder: "1"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 4
+    }
+  }, Number(draft.term_months || 1) > 1 ? 'Longer than a month, so each term needs its own dates below.' : 'One month. The term is the calendar month and rolls on — nothing to declare.')), draft.programme_type === 'training' && /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Term fee (RM)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    step: "0.01",
+    value: draft.term_fee,
+    onChange: e => setF('term_fee', e.target.value),
+    placeholder: "480"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "hint",
+    style: {
+      marginTop: 4
+    }
+  }, "What one whole term costs. Paid at the start, whenever in the term a swimmer joins.")), draft.programme_type === 'training' && /*#__PURE__*/React.createElement("div", {
+    className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Class ceiling"), /*#__PURE__*/React.createElement("input", {
     className: "input",
     type: "number",
@@ -11402,7 +11642,10 @@ function LessonTypeEditor({
     type: "color",
     value: draft.text_color,
     onChange: e => setF('text_color', e.target.value)
-  }))), /*#__PURE__*/React.createElement("div", {
+  }))), draft.programme_type === 'training' && Number(draft.term_months || 1) > 1 && /*#__PURE__*/React.createElement(ProgrammeTermsPanel, {
+    lessonTypeId: row.id,
+    months: Number(draft.term_months)
+  }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'flex-end',
@@ -11422,6 +11665,8 @@ function LessonTypeEditor({
         class_type: draft.class_type || 'group',
         programme_type: draft.programme_type || 'lessons',
         max_students: draft.programme_type === 'training' ? clean(draft.max_students) : null,
+        term_months: draft.programme_type === 'training' ? clean(draft.term_months) : null,
+        term_fee: draft.programme_type === 'training' ? clean(draft.term_fee) : null,
         monthly_fee: clean(draft.monthly_fee),
         lessons_per_month: clean(draft.lessons_per_month),
         credit_count: clean(draft.credit_count),
