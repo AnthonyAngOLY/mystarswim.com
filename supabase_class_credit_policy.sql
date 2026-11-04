@@ -462,62 +462,99 @@ comment on function credit_defaulters() is
   'allowed.';
 
 
--- ─── 6b. The office's way in ────────────────────────────────────────────
--- The scheduler marks attendance from the Session modal, which works a
--- student at a time and has no weekly_session_students row id to hand,
--- so mark_attendance does not fit. Rather than write the credit rule a
--- second time in the browser — which is how an office screen and a
--- poolside screen end up disagreeing about the same class — the rule
--- stays here and both call into it.
-create or replace function adjust_credit(
-  p_student_id uuid, p_lesson_type_id uuid, p_delta int,
-  p_confirm boolean default false)
+-- ─── 6a. The credit rule, written once ──────────────────────────────────
+-- Two screens move credits: the coach's, through mark_attendance, and
+-- the office's, through adjust_credit. They are separate functions
+-- because they are reached differently — the coach has a class row in
+-- hand, the office has a swimmer and a lesson type — but what happens to
+-- the balance must not be a second opinion. It was: two bodies applying
+-- the same four rules, which is a divergence waiting for the day
+-- somebody edits one.
+--
+-- So the four rules live here and both call in:
+--   · a swimmer with nothing left is a question before a deduction
+--   · a training programme spends nothing at all
+--   · the ledger is written before the balance, because the ledger is
+--     the record and the balance is a cache of it
+--   · whether a balance may go below nil is the centre's rule, and when
+--     it may not, the ledger must not claim a credit moved either
+--
+-- Writes nothing when it returns needs_confirm, so a caller can ask and
+-- then act without having half-committed in between.
+create or replace function credit_move(
+  p_student_id     uuid,
+  p_lesson_type_id uuid,
+  p_delta          integer,
+  p_confirm        boolean default false,
+  p_note           text    default null)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
-  st class_policy_settings; v_before numeric; v_child text; v_moved int; v_bal numeric;
+  st       class_policy_settings;
+  v_before numeric;
+  v_child  text;
+  v_moved  int;
+  v_bal    numeric;
+  v_unpaid boolean;
 begin
-  if not can_write_office() then
-    return jsonb_build_object('ok', false, 'error', 'Not yours to change.');
-  end if;
-  if p_delta = 0 or p_student_id is null or p_lesson_type_id is null then
+  if p_student_id is null or p_lesson_type_id is null or coalesce(p_delta, 0) = 0 then
     return jsonb_build_object('ok', true, 'credit_moved', 0);
   end if;
+
+  -- A training programme buys the month, not the session. Nothing to
+  -- read, nothing to move, nothing to ask.
+  if lesson_type_is_training(p_lesson_type_id) then
+    return jsonb_build_object('ok', true, 'credit_moved', 0, 'training', true);
+  end if;
+
   select * into st from class_policy_settings where id;
 
-  select coalesce(remaining_balance, 0) into v_before
-    from student_credit_balances
-   where student_id = p_student_id and lesson_type_id = p_lesson_type_id;
+  select coalesce(b.remaining_balance, 0) into v_before
+    from student_credit_balances b
+   where b.student_id = p_student_id and b.lesson_type_id = p_lesson_type_id;
   v_before := coalesce(v_before, 0);
 
+  -- Asked whether or not a balance may go below nil: a swimmer in the
+  -- water who has not paid is the same fact either way, and the person
+  -- doing the marking is the one placed to say something.
   if p_delta < 0 and v_before <= 0 and not coalesce(p_confirm, false) then
     select name into v_child from students where id = p_student_id;
-    return jsonb_build_object('ok', false, 'needs_confirm', true,
-      'balance', v_before, 'child', coalesce(v_child, 'This swimmer'),
+    return jsonb_build_object(
+      'ok', false, 'needs_confirm', true,
+      'balance', v_before,
+      'child', coalesce(v_child, 'This swimmer'),
       'allow_negative', coalesce(st.allow_negative_credits, true),
       'error', coalesce(v_child, 'This swimmer')
         || (case when v_before = 0 then ' has no credits left.'
                  else ' is already ' || abs(v_before) || ' class'
                       || (case when abs(v_before) = 1 then '' else 'es' end)
                       || ' in arrears.' end)
-        || ' Billing or a renewal is needed.');
+        || ' Billing or a renewal is needed.'
+        || (case when coalesce(st.allow_negative_credits, true)
+                 then ' Marking them records the class as unpaid.'
+                 else ' Marking them records the class as unpaid; the balance stays at nil.' end));
   end if;
 
-  v_moved := case when p_delta < 0 and v_before <= 0
-                       and not coalesce(st.allow_negative_credits, true)
+  v_unpaid := (p_delta < 0 and v_before <= 0);
+
+  -- With negatives switched off the balance holds at nil, so the ledger
+  -- must not claim a credit moved: two records of one event that
+  -- disagree is how nobody can say what a swimmer owes.
+  v_moved := case when v_unpaid and not coalesce(st.allow_negative_credits, true)
                   then 0 else p_delta end;
 
   insert into credit_purchases
     (student_id, lesson_type_id, purchase_date, credits_added, source, notes)
   values
     (p_student_id, p_lesson_type_id,
-     (now() at time zone 'Asia/Kuala_Lumpur')::date, v_moved,
-     case when p_delta < 0 and v_before <= 0 then 'attendance_unpaid' else 'attendance' end,
-     case when p_delta < 0 then 'Marked from the office' else 'Credit returned' end);
+     (now() at time zone 'Asia/Kuala_Lumpur')::date,
+     v_moved,
+     case when v_unpaid then 'attendance_unpaid' else 'attendance' end,
+     coalesce(nullif(btrim(coalesce(p_note, '')), ''),
+              case when p_delta < 0 then 'Credit taken' else 'Credit returned' end));
 
-  -- The row is created if it is missing. adjustCredit in the browser
-  -- used to give up silently when a swimmer had no balance row at all,
-  -- so the very first class never cost anything.
+  -- Created if missing. The browser's old version gave up silently on a
+  -- swimmer with no balance row, so their very first class cost nothing.
   insert into student_credit_balances
     (student_id, lesson_type_id, initial_balance, remaining_balance)
   values (p_student_id, p_lesson_type_id, 0, v_moved)
@@ -531,8 +568,40 @@ begin
   select remaining_balance into v_bal from student_credit_balances
    where student_id = p_student_id and lesson_type_id = p_lesson_type_id;
 
-  return jsonb_build_object('ok', true, 'credit_moved', v_moved, 'balance', v_bal,
-                            'unpaid', (p_delta < 0 and v_before <= 0));
+  return jsonb_build_object('ok', true, 'credit_moved', v_moved,
+                            'balance', v_bal, 'unpaid', v_unpaid);
+end $$;
+
+comment on function credit_move(uuid, uuid, integer, boolean, text) is
+  'The only place a class credit moves. mark_attendance and '
+  'adjust_credit both call it so the coach''s screen and the office''s '
+  'cannot hold different opinions about the same balance.';
+
+revoke all on function credit_move(uuid, uuid, integer, boolean, text) from public, anon;
+grant execute on function credit_move(uuid, uuid, integer, boolean, text) to authenticated;
+
+
+-- ─── 6b. The office's way in ────────────────────────────────────────────
+-- The scheduler marks attendance from the Session modal, which works a
+-- student at a time and has no weekly_session_students row id to hand,
+-- so mark_attendance does not fit. Rather than write the credit rule a
+-- second time in the browser — which is how an office screen and a
+-- poolside screen end up disagreeing about the same class — the rule
+-- stays here and both call into it.
+create or replace function adjust_credit(
+  p_student_id uuid, p_lesson_type_id uuid, p_delta int,
+  p_confirm boolean default false)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not can_write_office() then
+    return jsonb_build_object('ok', false, 'error', 'Not yours to change.');
+  end if;
+  -- Everything else is credit_move's, which is the point: this function
+  -- is a door, not a second opinion.
+  return credit_move(p_student_id, p_lesson_type_id, p_delta, p_confirm,
+                     case when p_delta < 0 then 'Marked from the office'
+                          else 'Credit returned from the office' end);
 end $$;
 
 comment on function adjust_credit(uuid, uuid, int, boolean) is

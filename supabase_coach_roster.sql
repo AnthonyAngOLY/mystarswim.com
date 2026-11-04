@@ -369,8 +369,7 @@ language plpgsql security definer set search_path = public
 as $$
 declare
   st          class_policy_settings;
-  v_before    numeric;
-  v_child     text;
+  v_credit    jsonb;
   v_me        uuid;
   v_office    boolean;
   v_old       text;
@@ -436,103 +435,42 @@ begin
     return jsonb_build_object('ok', true, 'state', p_state, 'credit_moved', 0);
   end if;
 
-  -- ── The no-credit question ──
-  -- Asked whether or not the centre allows a balance below nil: a
-  -- swimmer in the water who has not paid is the same fact either way,
-  -- and the person marking them is the one placed to say something.
-  select * into st from class_policy_settings where id;
-  -- A term programme buys the course, not the sessions. Reading a
-  -- balance that was never meant to exist is what turned a twenty-child
-  -- school class into twenty "no credits left" prompts a week.
-  v_training := lesson_type_is_training(v_lt);
-  if not v_training
-     and v_old = 'pending' and p_state in ('attended', 'absent')
-     and v_sid is not null and v_lt is not null then
-    select coalesce(b.remaining_balance, 0) into v_before
-      from student_credit_balances b
-     where b.student_id = v_sid and b.lesson_type_id = v_lt;
-    v_before := coalesce(v_before, 0);
-
-    if v_before <= 0 and not coalesce(p_confirm, false) then
-      select wss.student_name into v_child
-        from weekly_session_students wss where wss.id = p_row_id;
-      return jsonb_build_object(
-        'ok', false, 'needs_confirm', true,
-        'balance', v_before,
-        'child', coalesce(v_child, 'This swimmer'),
-        'allow_negative', coalesce(st.allow_negative_credits, true),
-        'error', coalesce(v_child, 'This swimmer')
-          || (case when v_before = 0 then ' has no credits left.'
-                   else ' is already ' || abs(v_before) || ' class'
-                        || (case when abs(v_before) = 1 then '' else 'es' end)
-                        || ' in arrears.' end)
-          || ' Billing or a renewal is needed.'
-          || (case when coalesce(st.allow_negative_credits, true)
-                   then ' Marking them records the class as unpaid.'
-                   else ' Marking them records the class as unpaid; the balance stays at nil.' end));
-    end if;
-  end if;
-
-  -- attended and absent both consume; pending does not. A term
+  -- ── The credit, if there is one to move ──
+  -- attended and absent both consume; pending does not. A training
   -- programme consumes nothing either way: the mark is the whole record.
+  select * into st from class_policy_settings where id;
+  v_training := lesson_type_is_training(v_lt);
+
   v_delta := case
     when v_training then 0
     when v_old = 'pending' and p_state in ('attended','absent') then -1
     when v_old in ('attended','absent') and p_state = 'pending'  then  1
     else 0 end;
 
+  -- credit_move holds the rule — whether to ask first, whether a
+  -- balance may go below nil, what the ledger says. The office reaches
+  -- the same function through adjust_credit, so the poolside screen and
+  -- the office screen cannot disagree about one swimmer's balance.
+  --
+  -- It writes nothing when it answers needs_confirm, so the attendance
+  -- is not set either: the swimmer stays unmarked until somebody says
+  -- yes, rather than being marked against a question still open.
+  if v_delta <> 0 and v_sid is not null and v_lt is not null then
+    v_credit := credit_move(v_sid, v_lt, v_delta, p_confirm,
+                  case when v_delta < 0 then 'Marked ' || p_state
+                       else 'Un-marked, was ' || v_old end);
+    if coalesce((v_credit ->> 'needs_confirm')::boolean, false) then
+      return v_credit;
+    end if;
+    v_moved := coalesce((v_credit ->> 'credit_moved')::int, 0);
+    v_bal   := nullif(v_credit ->> 'balance', '')::numeric;
+  end if;
+
   update weekly_session_students
      set attendance_status = p_state,
          marked_by_crew_id = v_me,          -- null when the office marked it
          marked_at = now()
    where id = p_row_id;
-
-  if v_delta <> 0 and v_sid is not null and v_lt is not null then
-    -- The ledger first, because it is the record. The balance is a cache
-    -- of it, and a cache that moves without the record behind it is how
-    -- nobody can say why a swimmer is short a class.
-    --
-    -- A class taken with nothing in hand is written as attendance_unpaid
-    -- rather than attendance, so the defaulters report can find it
-    -- whichever way the negative-balance rule is set.
-    insert into credit_purchases
-      (student_id, lesson_type_id, purchase_date, credits_added, source, notes)
-    values
-      (v_sid, v_lt, v_date,
-       -- With negatives switched off the balance does not move, so the
-       -- ledger must not claim it did, or the two drift apart and
-       -- nobody can say which is right.
-       case when v_delta < 0 and coalesce(v_before, 1) <= 0
-                 and not coalesce(st.allow_negative_credits, true)
-            then 0 else v_delta end,
-       case when v_delta < 0 and coalesce(v_before, 1) <= 0
-            then 'attendance_unpaid' else 'attendance' end,
-       case when v_delta < 0 then 'Marked ' || p_state else 'Un-marked, was ' || v_old end);
-
-    -- Whether a balance may go below nil is the centre's rule. Allowed,
-    -- it reads −1 and the office sees a class owed. Not allowed, it
-    -- stops at nil and the unpaid class is counted in the ledger
-    -- instead — the debt is recorded either way, only differently.
-    insert into student_credit_balances
-      (student_id, lesson_type_id, initial_balance, remaining_balance)
-    values (v_sid, v_lt, 0,
-            case when v_delta < 0 and not coalesce(st.allow_negative_credits, true)
-                 then 0 else v_delta end)
-    on conflict (student_id, lesson_type_id) do update
-      set remaining_balance =
-            case when not coalesce(st.allow_negative_credits, true)
-                 then greatest(0, student_credit_balances.remaining_balance + v_delta)
-                 else student_credit_balances.remaining_balance + v_delta end,
-          updated_at = now();
-
-    select remaining_balance into v_bal
-      from student_credit_balances
-     where student_id = v_sid and lesson_type_id = v_lt;
-
-    v_moved := case when v_delta < 0 and coalesce(v_before, 1) <= 0
-                         and not coalesce(st.allow_negative_credits, true)
-                    then 0 else v_delta end;
-  end if;
 
   -- The phone patches its row rather than refetching the week after
   -- every tap, so the name has to come back with the answer or a squad
@@ -551,7 +489,7 @@ begin
                             -- way the negative rule is set: the class was
                             -- unpaid either way, and only the balance
                             -- behaves differently. Matches the ledger row.
-                            'unpaid', (v_delta < 0 and coalesce(v_before, 1) <= 0),
+                            'unpaid', coalesce((v_credit ->> 'unpaid')::boolean, false),
                             'balance', v_bal,
                             'training_mode', v_training,
                             'marked_by', case when p_state = 'pending' then null else v_who end);

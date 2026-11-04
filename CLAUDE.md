@@ -70,6 +70,38 @@ point, and the training opening balance reported only its closing check.
 Both times the output looked like a smaller answer rather than a partial
 one.
 
+## After any file that creates a table
+
+Row security is the only thing between the anon key — which is printed
+in every page we serve — and this database. A table created without it
+is readable and writable by anyone who views source. `roster_weeks` sat
+like that for a week.
+
+So: whenever a file creates a table, hand over
+`supabase_rls_guard.sql` with it and say it is the second half of the
+job, not optional. Its last query names anything open, anything locked
+with no policy, and gives the statement to fix it.
+
+`supabase_rls_guard.sql` also tries to install an event trigger that
+locks new tables on creation. Where the project allows it that makes
+forgetting impossible; where it does not, the file says so and the check
+is the control.
+
+## Database functions are a published contract
+
+An installed PWA runs whatever build it last cached, for as long as
+nobody refreshes it. `mark_attendance` went from two arguments to three
+and survived only because the third had a default.
+
+So: never remove or reorder a parameter on a function a phone calls, and
+never change what it returns in a way an old build cannot read. Add, with
+a default. When that is genuinely impossible, ship the new client, then
+raise the floor with `require_client_build`, and say in the hand-off that
+the two go in that order — raising it first locks out every phone.
+
+`BUILD` in `attendance/app.js` and `attendance/sw.js` must match. A test
+asserts it.
+
 ## Records
 
 Void, do not delete. Attendance, leave and voucher history is the point

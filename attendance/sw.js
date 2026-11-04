@@ -3,7 +3,10 @@
 // Caches the shell only. Attendance data and punches are NEVER cached: a
 // stale roster or a replayed punch is worse than an error message, and a
 // punch must reach the server to get a server timestamp.
-var CACHE = 'ssb-attendance-v15';
+// Must match BUILD in app.js — the database checks that number, and
+// this names the cache that would otherwise keep an old build alive.
+var BUILD = 15;
+var CACHE = 'ssb-attendance-v' + BUILD;
 var SHELL = [
   './', './index.html', './app.js', './config.js', './manifest.json',
   './logo.png', './icon-192.png', './icon-512.png'

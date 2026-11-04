@@ -35254,9 +35254,12 @@ function ProgrammeCategoriesView({
 // ── Application login gate ──────────────────────────────────────────────────
 const AUTH_KEY = 'ssb.auth';
 const AUTH_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7-day session
-// Admin & Procurement system (separate Netlify site, separate Supabase project,
-// same app_users source of truth via the scheduler's Supabase).
-const ADMIN_SYSTEM_URL = 'https://system.mystarswim.com/';
+// Admin & Procurement used to be a separate Netlify site on its own
+// Supabase project, reached through a link from here. It is not any
+// more: the site is gone, and the vouchers, payees and companies live in
+// this database behind the System side of this same app. The constant
+// that pointed at it was left behind, referenced by nothing, and read
+// from the outside like a second platform nobody had decided about.
 // Role rules:
 //   sysadmin       — full access to BOTH apps.
 //   schedule_admin — scheduler only (this app). Was 'admin' before.

@@ -13,6 +13,17 @@
 (function () {
   'use strict';
 
+  // ── Which build this is ────────────────────────────────────────────────
+  // Must match BUILD in sw.js, which names the cache. A test asserts it,
+  // because two numbers that have to agree and are typed in two files
+  // will not agree for long.
+  //
+  // This is the number the database checks. An installed PWA can run a
+  // build from three weeks ago for as long as nobody refreshes it, and
+  // nothing makes it refresh — so when a function it calls changes shape,
+  // the database has to be able to say so.
+  var BUILD = 15;
+
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
   var EMAIL_DOMAIN = 'staff.mystarswim.internal';
@@ -243,9 +254,78 @@
 
   // ── Boot ───────────────────────────────────────────────────────────────
   function boot() {
+    // Before the session is even looked at. Signing in is itself a call
+    // against the deployed database, so a build too old to be trusted
+    // with marking is too old to be trusted with logging in — and a
+    // coach who gets through the login screen and then hits the gate has
+    // been let further in than they should have been.
+    checkBuild();
     session = loadSession();
     if (!session || !session.access_token) { show($('loginScreen')); prefillLogin(); return; }
     loadProfile().catch(function () { signOut(); });
+  }
+
+  // Asks the database whether this build still works against what is
+  // deployed. Fails open, deliberately and in every direction: no signal
+  // at the pool is the normal case, and a coach locked out of attendance
+  // by a check that could not run would be worse than the fault it
+  // guards against. It blocks only on a clear, successful refusal.
+  function checkBuild() {
+    rpc('client_gate', { p_app: 'attendance', p_build: BUILD })
+      .then(function (r) {
+        if (r && r.ok === false) blockForUpdate(r);
+      })
+      .catch(function () { /* offline, or the gate is not installed yet */ });
+  }
+
+  // A stale service worker will serve the stale bundle however many times
+  // the page is reloaded, so updating means tearing the cache down first.
+  function blockForUpdate(r) {
+    if ($('buildGate')) return;
+    var d = document.createElement('div');
+    d.id = 'buildGate';
+    d.setAttribute('style',
+      'position:fixed;inset:0;z-index:99999;background:#0B2B45;color:#fff;'
+      + 'display:flex;flex-direction:column;align-items:center;justify-content:center;'
+      + 'gap:16px;padding:28px;text-align:center;font-size:16px;line-height:1.6');
+    d.innerHTML =
+      '<div style="font-size:40px">\u21bb</div>'
+      + '<div style="font-size:19px;font-weight:700">' + esc(r.message || 'This app has been updated.') + '</div>'
+      + '<div style="opacity:.75;max-width:30em">This phone is running an older version '
+      + 'that no longer matches the office system. Updating takes a few seconds and '
+      + 'nothing you have marked is lost.</div>'
+      + '<button id="buildGateBtn" style="margin-top:6px;padding:14px 26px;font-size:17px;'
+      + 'font-weight:700;border:0;border-radius:12px;background:#38BDF8;color:#06293F">'
+      + 'Update now</button>'
+      + '<div style="opacity:.5;font-size:12px">this build ' + BUILD
+      + ' \u00b7 needs ' + esc(String(r.min_build || '')) + '</div>';
+    document.body.appendChild(d);
+    $('buildGateBtn').addEventListener('click', function () {
+      var btn = $('buildGateBtn');
+      btn.disabled = true; btn.textContent = 'Updating\u2026';
+      updateNow();
+    });
+  }
+
+  function updateNow() {
+    var done = function () { location.reload(true); };
+    var jobs = [];
+    try {
+      if (window.caches && caches.keys) {
+        jobs.push(caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        }));
+      }
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+        jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (reg) { return reg.unregister(); }));
+        }));
+      }
+    } catch (e) { /* nothing here is worth failing the reload for */ }
+    // Reload regardless, and do not wait forever for a cache API that is
+    // misbehaving: a reload with a torn-down worker is the point.
+    Promise.race([Promise.all(jobs), new Promise(function (r) { setTimeout(r, 2500); })])
+      .then(done, done);
   }
 
   // Nothing back from get_my_profile means two quite different people: a
