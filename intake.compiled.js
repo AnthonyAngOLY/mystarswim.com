@@ -142,6 +142,21 @@ const TC_CONTENT = [{
 function defaultTermsText() {
   return TC_CONTENT.map(s => `${s.h}\n${s.body}`).join('\n\n').replace(/\\n/g, '\n');
 }
+
+// The six questions, as the hardcopy asks them. One list: the form, the
+// validation and the submission all read it, so a seventh question
+// cannot appear in one place and not the others.
+const HEALTH_Q = [['supervision', 'Has a doctor ever advised that your child should only do physical activity under medical supervision — for example a heart condition or high blood pressure?'], ['chestPain', 'Has your child had chest pain, dizziness, fainting or loss of balance, especially when not physically active?'], ['boneJoint', 'Does your child have any bone, joint or physical condition that could be made worse by exercise?'], ['medication', 'Is your child taking any medication for their heart, blood pressure, or another long-term condition?'], ['learning', 'Does your child have a learning difficulty or a behavioural condition — ADHD or autism, for example — or need extra support to follow instructions?'], ['other', 'Is there any other reason your child may not be able to swim safely?']];
+const BLANK_HEALTH = {
+  supervision: null,
+  chestPain: null,
+  boneJoint: null,
+  medication: null,
+  learning: null,
+  other: null,
+  details: ''
+};
+const anyYes = h => HEALTH_Q.some(([k]) => h && h[k] === true);
 function IntakeForm() {
   // Parent / guardian (shared across all children registered in this submission)
   const [gName, setGName] = useState('');
@@ -155,7 +170,10 @@ function IntakeForm() {
     name: '',
     dob: '',
     gender: null,
-    lessonTypeId: ''
+    lessonTypeId: '',
+    health: {
+      ...BLANK_HEALTH
+    }
   }]);
   // Programmes at the chosen branch. Read through public_lesson_types,
   // which returns a name and an id and nothing else: this page holds the
@@ -275,8 +293,20 @@ function IntakeForm() {
       name: '',
       dob: '',
       gender: null,
-      lessonTypeId: ''
+      lessonTypeId: '',
+      health: {
+        ...BLANK_HEALTH
+      }
     }]);
+  }
+  function setHealthAt(i, key, val) {
+    setChildren(cs => cs.map((c, j) => j === i ? {
+      ...c,
+      health: {
+        ...(c.health || BLANK_HEALTH),
+        [key]: val
+      }
+    } : c));
   }
   function removeChild(i) {
     setChildren(cs => cs.length > 1 ? cs.filter((_, j) => j !== i) : cs);
@@ -293,6 +323,13 @@ function IntakeForm() {
       // Only where there is something to choose. A branch with no
       // programmes set up yet should not be an unanswerable question.
       if (programmes.length && !c.lessonTypeId) return `Please choose a programme for swimmer ${i + 1}.`;
+      const h = c.health || BLANK_HEALTH;
+      // Unanswered is not the same as no, and must not be allowed to
+      // pass for it. This is the whole reason the section exists.
+      for (const [k, q] of HEALTH_Q) {
+        if (h[k] !== true && h[k] !== false) return `Please answer every health question for ${c.name.trim() || `swimmer ${i + 1}`}.`;
+      }
+      if (anyYes(h) && !String(h.details || '').trim()) return `You answered yes for ${c.name.trim() || `swimmer ${i + 1}`} — please tell us briefly what we should know.`;
     }
     if (!sameAsGuardian) {
       if (!eName.trim()) return 'Please enter an emergency contact name (or check "Same as Parent/Guardian").';
@@ -359,7 +396,11 @@ function IntakeForm() {
             name: c.name.trim(),
             dob: c.dob || null,
             gender: c.gender,
-            lessonTypeId: c.lessonTypeId || null
+            lessonTypeId: c.lessonTypeId || null,
+            health: {
+              ...(c.health || BLANK_HEALTH),
+              details: String((c.health || {}).details || '').trim()
+            }
           }))
         })
       });
@@ -391,7 +432,10 @@ function IntakeForm() {
       name: '',
       dob: '',
       gender: null,
-      lessonTypeId: ''
+      lessonTypeId: '',
+      health: {
+        ...BLANK_HEALTH
+      }
     }]);
     setSameAsGuardian(false);
     setEName('');
@@ -600,7 +644,42 @@ function IntakeForm() {
     type: "button",
     className: `gender-opt ${c.gender === 'male' ? 'active' : ''}`,
     onClick: () => setChildAt(i, 'gender', c.gender === 'male' ? null : 'male')
-  }, "♂ M")))))), /*#__PURE__*/React.createElement("button", {
+  }, "♂ M")))), /*#__PURE__*/React.createElement("div", {
+    className: "health-block"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "health-title"
+  }, "Health & safety — ", c.name.trim() || `swimmer ${i + 1}`), /*#__PURE__*/React.createElement("div", {
+    className: "health-note"
+  }, "Please answer all six. If anything is yes we will talk to you before the first lesson — it does not usually mean your child cannot swim with us."), HEALTH_Q.map(([k, q]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    className: `health-q ${(c.health || {})[k] === true ? 'is-yes' : ''}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "health-q-text"
+  }, q), /*#__PURE__*/React.createElement("div", {
+    className: "gender-toggle health-yn"
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `gender-opt ${(c.health || {})[k] === false ? 'active' : ''}`,
+    onClick: () => setHealthAt(i, k, false)
+  }, "No"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `gender-opt ${(c.health || {})[k] === true ? 'active' : ''}`,
+    onClick: () => setHealthAt(i, k, true)
+  }, "Yes")))), anyYes(c.health) && /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginTop: 10,
+      marginBottom: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "What should we know?", /*#__PURE__*/React.createElement("span", {
+    className: "req"
+  }, "*")), /*#__PURE__*/React.createElement("textarea", {
+    className: "input health-details",
+    rows: 3,
+    value: (c.health || {}).details || '',
+    onChange: e => setHealthAt(i, 'details', e.target.value),
+    placeholder: "A sentence is enough — the condition, and anything the instructor should do differently."
+  }))))), /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "add-child-btn",
     onClick: addChild

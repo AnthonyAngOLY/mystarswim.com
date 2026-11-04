@@ -144,6 +144,11 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
       .locator('input').first().fill('Mira Lee');
     await page.locator('input[type="date"]').first().fill('2017-04-02');
     await page.locator('button:has-text("\u2640 F")').first().click();
+    // Every health question answered No, so the only thing left to
+    // object to is the programme.
+    for (const q of await page.locator('.health-q').all()) {
+      await q.locator('button:has-text("No")').click();
+    }
     await page.locator('.check-row').first().click();            // same as guardian
     await page.locator('.field', { hasText: 'Digital Signature' })
       .locator('input').first().fill('Lee Oy Yin');
@@ -171,6 +176,90 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
     const kid = sent[0].children && sent[0].children[0];
     if (!kid || kid.lessonTypeId !== 'lt-lts')
       throw new Error('the programme did not travel: ' + JSON.stringify(kid));
+  });
+
+  await step('every swimmer is asked the six health questions', async () => {
+    // The step before this one submitted, so the page is showing the
+    // thank-you screen rather than the form. Start again.
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('.card', { timeout: 10000 });
+    await pickBranch('br-ssgt');
+    const qs = await page.locator('.health-q').count();
+    if (qs !== 6) throw new Error('expected 6 questions for one swimmer, saw ' + qs);
+    const t = await page.locator('.health-block').textContent();
+    if (!/ADHD or autism/.test(t)) throw new Error('the learning question is missing');
+    if (!/under medical supervision/.test(t)) throw new Error('the supervision question is missing');
+  });
+
+  await step('and a second swimmer gets their own six', async () => {
+    await page.locator('button:has-text("Add Another Swimmer")').click();
+    await page.waitForTimeout(400);
+    const qs = await page.locator('.health-q').count();
+    if (qs !== 12) throw new Error('expected 12 across two swimmers, saw ' + qs);
+    // Answering one child's must not answer the other's.
+    const first = page.locator('.health-block').first();
+    await first.locator('.health-q').first().locator('button:has-text("No")').click();
+    await page.waitForTimeout(250);
+    const second = page.locator('.health-block').nth(1);
+    const onSecond = await second.locator('.gender-opt.active').count();
+    if (onSecond) throw new Error('answering for one child answered for the other');
+  });
+
+  await step('a yes asks what we should know, a no does not', async () => {
+    const block = page.locator('.health-block').first();
+    if (await block.locator('textarea').count())
+      throw new Error('it is asking for details with nothing answered yes');
+    await block.locator('.health-q').nth(4).locator('button:has-text("Yes")').click();
+    await page.waitForTimeout(400);
+    if (!await block.locator('textarea').count())
+      throw new Error('said yes and was never asked what about');
+    await block.locator('.health-q').nth(4).locator('button:has-text("No")').click();
+    await page.waitForTimeout(400);
+    if (await block.locator('textarea').count())
+      throw new Error('the details box stayed after the yes was taken back');
+  });
+
+  await step('unanswered is not treated as no', async () => {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('.card', { timeout: 10000 });
+    await pickBranch('br-ssgt');
+    await page.locator('.field', { hasText: 'Full Name' }).first().locator('input').fill('Lee Oy Yin');
+    await page.locator('.field', { hasText: 'Email' }).first().locator('input').fill('p@example.com');
+    await page.locator('.field', { hasText: 'Phone' }).first().locator('input').fill('0123456789');
+    await page.locator('.field', { hasText: 'Full Name' }).nth(1).locator('input').fill('Mira Lee');
+    await page.locator('input[type="date"]').first().fill('2017-04-02');
+    await page.locator('button:has-text("\u2640 F")').first().click();
+    await page.locator('select').nth(1).selectOption('lt-lts');
+    // Five of six answered. The sixth is simply left alone.
+    const qs = await page.locator('.health-q').all();
+    for (let i = 0; i < 5; i++) await qs[i].locator('button:has-text("No")').click();
+    await page.locator('.check-row').first().click();
+    await page.locator('.field', { hasText: 'Digital Signature' }).locator('input').fill('Lee Oy Yin');
+    await page.locator('.check-row').last().click();
+    await page.waitForTimeout(300);
+    await page.locator('button:has-text("Submit Registration")').click();
+    await page.waitForTimeout(800);
+    const body = await page.locator('body').textContent();
+    if (!/answer every health question/i.test(body))
+      throw new Error('a half-answered declaration went through');
+  });
+
+  await step('the answers travel with the submission', async () => {
+    await page.request.get(BASE + '/__reset');
+    await page.locator('.health-q').last().locator('button:has-text("Yes")').click();
+    await page.waitForTimeout(400);
+    await page.locator('textarea').first().fill('Mild asthma — inhaler in her bag.');
+    await page.waitForTimeout(200);
+    page.once('dialog', d => d.accept());
+    await page.locator('button:has-text("Submit Registration")').click();
+    await page.waitForTimeout(1500);
+    const sent = await (await page.request.get(BASE + '/__submissions')).json();
+    if (!sent.length) throw new Error('nothing reached the server');
+    const h = sent[0].children[0].health;
+    if (!h) throw new Error('no health block in the submission');
+    if (h.other !== true) throw new Error('the yes did not travel: ' + JSON.stringify(h));
+    if (h.supervision !== false) throw new Error('a no did not travel as false: ' + JSON.stringify(h));
+    if (!/asthma/i.test(h.details || '')) throw new Error('the details did not travel');
   });
 
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });

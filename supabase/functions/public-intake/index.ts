@@ -203,6 +203,49 @@ Deno.serve(async (req: Request): Promise<Response> => {
         signed_via: "intake",
         user_agent: ua,
       };
+      // ── What the parent told us about this child ──
+      // Written beside the acceptance, under the same acceptance id, so
+      // the answers and the agreement they were given under can be read
+      // together. Not upserted: a declaration is what was said on a
+      // date, and a parent telling us something new next term does not
+      // change what they told us today.
+      //
+      // Re-read here rather than trusted: a browser can send anything,
+      // and this is the field a safeguarding question would be asked of.
+      const h = (c && typeof c.health === "object" && c.health) ? c.health : null;
+      if (h) {
+        const yn = (v: unknown) => (v === true ? true : v === false ? false : null);
+        const ans = {
+          q_supervision: yn(h.supervision),
+          q_chest_pain:  yn(h.chestPain),
+          q_bone_joint:  yn(h.boneJoint),
+          q_medication:  yn(h.medication),
+          q_learning:    yn(h.learning),
+          q_other:       yn(h.other),
+        };
+        const anyYes = Object.values(ans).some((v) => v === true);
+        const details = s(h.details, 2000) || null;
+        // The form asks for details whenever an answer is yes, and the
+        // table refuses the row without them. Refusing the whole
+        // registration here would strand a family at the last step over
+        // a field they can still be asked for, so the declaration is
+        // recorded as unanswered and the office is told.
+        if (anyYes && !details) {
+          console.warn("health declaration for", name, "had a yes with no details; not recorded");
+        } else {
+          const { error: hErr } = await db
+            .from("student_health_declarations")
+            .insert({
+              student_id: ins.id,
+              acceptance_id: acceptanceId,
+              declared_by: guardianName,
+              ...ans,
+              details,
+            });
+          if (hErr) console.warn("health declaration failed for", name, hErr.message);
+        }
+      }
+
       let { error: tcErr } = await db
         .from("tc_acceptances").upsert(row, { onConflict: "student_id" });
       if (tcErr) {
