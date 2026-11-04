@@ -190,6 +190,16 @@ revoke all on function assign_account_no(uuid)       from public, anon;
 revoke all on function find_account(text, text)      from public, anon;
 grant execute on function assign_account_no(uuid)    to authenticated;
 grant execute on function find_account(text, text)   to authenticated;
+-- public-intake calls this with the service role, which is how a public
+-- form reaches a function the public key cannot. Guarded because the
+-- role exists on Supabase and not on a plain Postgres.
+do $$
+begin
+  execute 'grant execute on function find_account(text, text) to service_role';
+  execute 'grant execute on function assign_account_no(uuid) to service_role';
+exception when undefined_object then
+  raise notice 'no service_role here; nothing to grant';
+end $$;
 
 
 -- ─── 5. Everybody who is already here ───────────────────────────────────

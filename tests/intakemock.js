@@ -56,6 +56,11 @@ const STATE = {
     { id: 'lt-lts',   name: 'Learn to Swim', branch: 'br-ssgt' },
     { id: 'lt-p1',    name: 'Personal 1',    branch: 'br-ssgt' }
   ],
+  // An existing family, for the returning-parent route.
+  accounts: [
+    { account_no: 'LEE-2394', phones: ['+60123456001', '+60198887777'],
+      display_name: 'Lee Oy Yin', children: ['Aaryan', 'Mira'] }
+  ],
   // What public-intake received, so a test can assert on the submission
   // rather than on the screen that produced it.
   submissions: []
@@ -138,6 +143,19 @@ http.createServer(async (req, res) => {
 
   if (p === '/functions/v1/public-intake') {
     const b = JSON.parse((await body(req)) || '{}');
+
+    // find_account, as the database implements it: the number AND a
+    // phone on the account, with one sentence for both failures.
+    if (b.action === 'lookup') {
+      const tail = x => String(x || '').replace(/[^0-9]/g, '').slice(-9);
+      const a = STATE.accounts.find(x =>
+        x.account_no === String(b.accountNo || '').toUpperCase() &&
+        x.phones.some(ph => tail(ph) === tail(b.accountPhone)));
+      if (!a) return json(res, 200, { ok: false,
+        error: 'That account number and phone number do not go together.' });
+      return json(res, 200, { ok: true, displayName: a.display_name,
+        accountNo: a.account_no, children: a.children });
+    }
     STATE.submissions.push(b);
     return json(res, 200, {
       ok: true,

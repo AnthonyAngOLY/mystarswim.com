@@ -70,6 +70,34 @@ Deno.serve(async (req: Request): Promise<Response> => {
   try {
     const body = await req.json().catch(() => null);
     if (!body) return json({ error: "Nothing to register." }, 400);
+    // ── Looking a family up, before any of the rest applies ──
+    // The form asks this before the parent has typed anything else, so
+    // it answers and returns before any field is required. It sat below
+    // the guardian-name check at first, which meant a lookup came back
+    // asking for a name the parent had not been asked for yet.
+    //
+    // It gives back a name and the children already on the account, and
+    // never the account id. Enough for a parent to recognise their own
+    // family; nothing anybody else can use.
+    if (s(body.action, 20) === "lookup") {
+      const { data: found, error: fErr } = await db.rpc("find_account", {
+        p_account_no: s(body.accountNo, 20).toUpperCase(),
+        p_phone: s(body.accountPhone, 40),
+      });
+      if (fErr) {
+        return json({ ok: false, error: "Could not check that just now. Carry on as a new family and we will join them up." });
+      }
+      if (!found || found.ok !== true) {
+        return json({ ok: false, error: (found && found.error) || "That account number and phone number do not go together." });
+      }
+      return json({
+        ok: true,
+        displayName: found.display_name ?? null,
+        accountNo: found.account_no ?? null,
+        children: found.children ?? [],
+      });
+    }
+
 
     const guardianName = s(body.guardianName, 120);
     const guardianPhone = s(body.guardianPhone, 120);
@@ -100,8 +128,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
       phone = null; // the phone migration has not run; fall through to a new account
     }
 
-    let accountId: string | null = null;
-    if (phone) {
+    // ── A parent who has registered before ──
+    // They quote their account number and a phone already on the
+    // account. find_account refuses on either alone and says the same
+    // sentence for both failures, so this is not a way to walk the list
+    // of families.
+    //
+    // The account id is deliberately never sent to the browser and never
+    // read back from it. The form returns the number and the phone on
+    // submit, and this resolves them again — a client-supplied id would
+    // let anybody attach a child to any family they could guess.
+    let claimed: string | null = null;
+    const accountNo = s(body.accountNo, 20).toUpperCase() || null;
+    const accountPhone = s(body.accountPhone, 40) || null;
+    if (accountNo && accountPhone) {
+      const { data: found } = await db.rpc("find_account", {
+        p_account_no: accountNo, p_phone: accountPhone,
+      });
+      if (found && found.ok === true) claimed = found.account_id as string;
+    }
+
+    let accountId: string | null = claimed;
+    if (!accountId && phone) {
       const { data: hit } = await db
         .from("parent_accounts")
         .select("id")

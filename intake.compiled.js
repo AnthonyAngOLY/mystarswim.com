@@ -180,6 +180,53 @@ function IntakeForm() {
   // anon key, and scheduler_lesson_types carries fees and ratios.
   const [programmes, setProgrammes] = useState([]);
 
+  // ── A parent who has been here before ──
+  // They quote their account number and a phone already on the account.
+  // Nothing about the account comes back but the family name and the
+  // children already on it — not the account id, which the server
+  // resolves again on submit. A client-supplied id would let anybody
+  // attach a child to any family whose number they could guess.
+  const [returning, setReturning] = useState(null); // null | true | false
+  const [acctNo, setAcctNo] = useState('');
+  const [acctPhone, setAcctPhone] = useState('');
+  const [acctBusy, setAcctBusy] = useState(false);
+  const [acctErr, setAcctErr] = useState('');
+  const [found, setFound] = useState(null);
+  async function lookUpAccount() {
+    setAcctErr('');
+    setAcctBusy(true);
+    try {
+      const res = await fetch(`${cfg.supabaseUrl}/functions/v1/public-intake`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: cfg.supabaseAnonKey,
+          Authorization: `Bearer ${cfg.supabaseAnonKey}`
+        },
+        body: JSON.stringify({
+          action: 'lookup',
+          accountNo: acctNo.trim(),
+          accountPhone: acctPhone.trim()
+        })
+      });
+      const out = await res.json().catch(() => null);
+      if (out && out.ok === true) {
+        setFound(out);
+        // Their name is on the account; save them typing it again.
+        if (out.displayName && !gName.trim()) setGName(out.displayName);
+        if (!gPhone.trim()) setGPhone(acctPhone.trim());
+      } else {
+        setFound(null);
+        setAcctErr(out && out.error || 'Could not check that just now.');
+      }
+    } catch (e) {
+      setFound(null);
+      setAcctErr('Could not check that just now. Carry on as a new family and we will join them up.');
+    } finally {
+      setAcctBusy(false);
+    }
+  }
+
   // Branch picker — list pulled from DB. Defaults to SSGT (HQ) on first load.
   const [branches, setBranches] = useState([]);
   // The document this parent will sign, assembled by the database:
@@ -380,6 +427,10 @@ function IntakeForm() {
           Authorization: `Bearer ${cfg.supabaseAnonKey}`
         },
         body: JSON.stringify({
+          // Sent back so the server can resolve the account again. It
+          // never trusts an id from here.
+          accountNo: found ? acctNo.trim() : null,
+          accountPhone: found ? acctPhone.trim() : null,
           guardianName: gName.trim(),
           guardianEmail: gEmail.trim(),
           guardianPhone: gPhone.trim(),
@@ -490,6 +541,95 @@ function IntakeForm() {
   }, TC_COMPANY, " · Welcome — please fill in your details below")), err ? /*#__PURE__*/React.createElement("div", {
     className: "err-banner"
   }, "⚠ ", err) : null, /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "section-title"
+  }, "Have you registered with us before?"), /*#__PURE__*/React.createElement("div", {
+    className: "gender-toggle",
+    style: {
+      maxWidth: 280
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `gender-opt ${returning === false ? 'active' : ''}`,
+    onClick: () => {
+      setReturning(false);
+      setFound(null);
+      setAcctErr('');
+    }
+  }, "No, we are new"), /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: `gender-opt ${returning === true ? 'active' : ''}`,
+    onClick: () => setReturning(true)
+  }, "Yes")), returning === true && !found && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "health-note",
+    style: {
+      marginBottom: 10
+    }
+  }, "Your account number is on your receipts — it looks like ", /*#__PURE__*/React.createElement("strong", null, "TAN-7391"), ". We also need a phone number already on the account, so we know it is you."), /*#__PURE__*/React.createElement("div", {
+    className: "field-row"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginBottom: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Account number"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: acctNo,
+    placeholder: "TAN-7391",
+    onChange: e => setAcctNo(e.target.value.toUpperCase())
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginBottom: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Phone on the account"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "tel",
+    value: acctPhone,
+    placeholder: "012-345 6789",
+    onChange: e => setAcctPhone(e.target.value)
+  }))), acctErr ? /*#__PURE__*/React.createElement("div", {
+    className: "err-banner",
+    style: {
+      marginTop: 10
+    }
+  }, "⚠ ", acctErr) : null, /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "add-child-btn",
+    style: {
+      marginTop: 10
+    },
+    disabled: acctBusy || !acctNo.trim() || !acctPhone.trim(),
+    onClick: lookUpAccount
+  }, acctBusy ? 'Checking…' : 'Find my account')), found && /*#__PURE__*/React.createElement("div", {
+    className: "note-found",
+    style: {
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "✓ Found ", found.displayName || 'your account'), /*#__PURE__*/React.createElement("div", {
+    className: "health-note",
+    style: {
+      marginTop: 4,
+      marginBottom: 0
+    }
+  }, found.children && found.children.length ? 'Already with us: ' + found.children.join(', ') + '. The swimmers you add below join the same account.' : 'The swimmers you add below join this account.', ' ', "Not you? ", /*#__PURE__*/React.createElement("button", {
+    type: "button",
+    className: "linkish",
+    onClick: () => {
+      setFound(null);
+      setAcctNo('');
+      setAcctPhone('');
+    }
+  }, "Start again")))), /*#__PURE__*/React.createElement("div", {
     className: "card"
   }, /*#__PURE__*/React.createElement("div", {
     className: "section-title"

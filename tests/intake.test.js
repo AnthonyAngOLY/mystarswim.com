@@ -262,6 +262,77 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
     if (!/asthma/i.test(h.details || '')) throw new Error('the details did not travel');
   });
 
+  await step('the form asks whether they have been here before', async () => {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('.card', { timeout: 10000 });
+    const t = await page.locator('body').textContent();
+    if (!/registered with us before/i.test(t)) throw new Error('it never asks');
+    // And does not nag a new family with it.
+    await page.locator('button:has-text("No, we are new")').click();
+    await page.waitForTimeout(300);
+    if (await page.locator('input[placeholder="TAN-7391"]').count())
+      throw new Error('a new family is being asked for an account number');
+  });
+
+  await step('a wrong number and phone are refused, in one sentence', async () => {
+    await page.locator('button:has-text("Yes")').first().click();
+    await page.waitForTimeout(300);
+    await page.locator('input[placeholder="TAN-7391"]').fill('ZZZ-0000');
+    await page.locator('input[placeholder="012-345 6789"]').fill('0123456001');
+    await page.locator('button:has-text("Find my account")').click();
+    await page.waitForTimeout(900);
+    const t = await page.locator('.err-banner').first().textContent();
+    if (!/do not go together/i.test(t)) throw new Error('unexpected message: ' + t);
+    // The same sentence for a right number with the wrong phone, so it
+    // cannot be used to tell which of the two was wrong.
+    await page.locator('input[placeholder="TAN-7391"]').fill('LEE-2394');
+    await page.locator('input[placeholder="012-345 6789"]').fill('0119999999');
+    await page.locator('button:has-text("Find my account")').click();
+    await page.waitForTimeout(900);
+    const t2 = await page.locator('.err-banner').first().textContent();
+    if (t2 !== t) throw new Error('two different sentences: ' + t + ' / ' + t2);
+  });
+
+  await step('the right pair finds the family and names the children', async () => {
+    await page.locator('input[placeholder="012-345 6789"]').fill('019-888 7777');
+    await page.locator('button:has-text("Find my account")').click();
+    await page.waitForTimeout(1000);
+    const t = await page.locator('.note-found').textContent();
+    if (!/Lee Oy Yin/.test(t)) throw new Error('did not name the family: ' + t);
+    if (!/Aaryan/.test(t) || !/Mira/.test(t)) throw new Error('did not list the children: ' + t);
+  });
+
+  await step('and it fills the parent name rather than asking again', async () => {
+    const v = await page.locator('.field', { hasText: 'Full Name' }).first()
+      .locator('input').inputValue();
+    if (v !== 'Lee Oy Yin') throw new Error('name not carried over: ' + JSON.stringify(v));
+  });
+
+  await step('the number and phone travel on submit, never an account id', async () => {
+    await page.request.get(BASE + '/__reset');
+    await pickBranch('br-ssgt');
+    await page.locator('.field', { hasText: 'Email' }).first().locator('input').fill('p@example.com');
+    await page.locator('.field', { hasText: 'Full Name' }).nth(1).locator('input').fill('Wei Lee');
+    await page.locator('input[type="date"]').first().fill('2018-02-02');
+    await page.locator('button:has-text("\u2642 M")').first().click();
+    await page.locator('select').nth(1).selectOption('lt-lts');
+    for (const q of await page.locator('.health-q').all())
+      await q.locator('button:has-text("No")').click();
+    await page.locator('.check-row').first().click();
+    await page.locator('.field', { hasText: 'Digital Signature' }).locator('input').fill('Lee Oy Yin');
+    await page.locator('.check-row').last().click();
+    await page.waitForTimeout(300);
+    page.once('dialog', d => d.accept());
+    await page.locator('button:has-text("Submit Registration")').click();
+    await page.waitForTimeout(1500);
+    const sent = await (await page.request.get(BASE + '/__submissions')).json();
+    if (!sent.length) throw new Error('nothing reached the server');
+    if (sent[0].accountNo !== 'LEE-2394') throw new Error('the account number did not travel');
+    if (!sent[0].accountPhone) throw new Error('the verifying phone did not travel');
+    if ('accountId' in sent[0] || 'account_id' in sent[0])
+      throw new Error('the browser is sending an account id, which the server must never trust');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');
