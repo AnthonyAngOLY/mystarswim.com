@@ -94,16 +94,30 @@ begin
          or (v_inst is not null and sc.id = v_inst)))
   then return true; end if;
 
-  -- Or they have marked this swimmer's attendance themselves. Since
-  -- coach_can_mark_session let an unnamed coach mark a class running in
-  -- water they are rostered to, a squad session with three coaches and
-  -- one name leaves two who plainly teach the child and could not write
-  -- a word to the parent about it.
+  -- Or they were rostered to the water while a class this swimmer is in
+  -- was running. That is the same test coach_can_mark_session applies,
+  -- and it has to be: a coach who may mark a child's attendance and
+  -- cannot write a line to their parent about it is in an odd position,
+  -- and it is the one three coaches sharing a squad session were in.
   --
-  -- Having marked them is the proof, and a narrow one: it says this
-  -- coach stood in front of this swimmer and recorded it. Being merely
-  -- rostered to a busy pool is not enough, or a coach at Botani could
-  -- write to the parents of six classes they have never taught.
+  -- Not limited to today. A coach should be able to write up a term, and
+  -- the swimmer was taught by them whenever that shift was.
+  if v_me is not null and exists (
+    select 1
+      from weekly_session_students wss
+      join weekly_sessions ws on ws.id = wss.session_id
+      join pools p  on p.id = ws.pool_id
+      join shifts sh on sh.location_id = p.location_id
+     where wss.student_id = p_student
+       and sh.crew_id = v_me
+       and not sh.is_void
+       and sh.shift_date = (ws.week_start_date + (ws.weekday - 1))::date
+       and (ws.start_minute * interval '1 minute')::time >= sh.start_time
+       and (ws.start_minute * interval '1 minute')::time <  sh.end_time)
+  then return true; end if;
+
+  -- Or they have marked this swimmer themselves, which is proof of the
+  -- same thing where the shift has since been voided or edited.
   return v_me is not null and exists (
     select 1 from weekly_session_students wss
      where wss.student_id = p_student
@@ -191,11 +205,12 @@ begin
     if v_me is null or n.author_crew_id is distinct from v_me then
       return jsonb_build_object('ok', false, 'error', 'That is not your note.');
     end if;
-    if (n.created_at at time zone 'Asia/Kuala_Lumpur')::date
-       <> (now() at time zone 'Asia/Kuala_Lumpur')::date then
-      return jsonb_build_object('ok', false,
-        'error', 'That note was written on another day. The parent has it — ask the office.');
-    end if;
+    -- No window. A coach may correct or extend their own note whenever
+    -- they come back to it: progress is written up over a term, not in
+    -- the ten minutes after a lesson, and a note somebody cannot finish
+    -- is a note they will not start. The parent sees the current text
+    -- and edited_at says it was changed, which is the honest record.
+    null;
   end if;
 
   update student_progress_notes
@@ -249,8 +264,12 @@ begin
   return query
     select n.id, n.body, n.author_name, n.created_at, n.edited_at,
            (v_me is not null and n.author_crew_id = v_me),
-           ((n.created_at at time zone 'Asia/Kuala_Lumpur')::date
-            = (now() at time zone 'Asia/Kuala_Lumpur')::date)
+           -- Was "written today", which is what the edit window used to
+           -- turn on. There is no window now, so it always says yes: a
+           -- cached phone that hides its edit button on this would
+           -- otherwise keep hiding it, and the column cannot be dropped
+           -- while phones still read it.
+           true
       from student_progress_notes n
      where n.student_id = p_student and not n.is_void
      order by n.created_at desc

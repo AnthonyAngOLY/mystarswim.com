@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 15;
+  var BUILD = 16;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1104,27 +1104,18 @@
   // ── Classes ────────────────────────────────────────────────────────────
   // Who is in the water, and marking them off. A day strip rather than a
   // second screen: a coach looks ahead a day or two, not at a calendar.
-  var clsWeek = null, clsDay = null, clsRows = [], clsOthers = false, clsBusy = null;
-  // The week an automatic widening has already been tried for, so it
-  // happens once rather than looping against a genuinely empty week.
-  var clsAutoWeek = null;
+  var clsWeek = null, clsDay = null, clsRows = [], clsBusy = null;
 
   function loadClasses() {
     if (!clsWeek) { clsWeek = mondayOf(todayKL()); clsDay = todayKL(); }
     if (clsDay < clsWeek || clsDay > addDaysISO(clsWeek, 6)) clsDay = clsWeek;
     $('clsBody').innerHTML = '<p class="empty">Loading…</p>';
     return rpc('get_my_session_roster', {
-      p_from: clsWeek, p_to: addDaysISO(clsWeek, 6), p_include_others: clsOthers
+      // The server no longer narrows on this; it is sent because older
+      // builds do and the parameter has to stay. Everything in the water
+      // they are rostered to comes back.
+      p_from: clsWeek, p_to: addDaysISO(clsWeek, 6), p_include_others: true
     }).then(function (rows) {
-      // Nothing names them, but something may still be in their water.
-      // The squad case is exactly this: one name on the timetable, three
-      // coaches on the poolside, and two of them told there is nothing
-      // on today. Widen once per week rather than make them find a
-      // button to see the session they are standing in front of.
-      if (!clsOthers && !(rows || []).length && clsAutoWeek !== clsWeek) {
-        clsAutoWeek = clsWeek; clsOthers = true;
-        return loadClasses();
-      }
       clsRows = rows || [];
       renderClasses();
     }).catch(function (e) {
@@ -1203,39 +1194,28 @@
       try { sel.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) {}
     }
 
-    // An empty tab reads as a broken one, so it says which of the two it is.
-    var anyMine = clsRows.some(function (r) { return r.is_mine; });
-    if (!anyMine && !clsOthers) {
-      $('clsBody').innerHTML = '<p class="empty">No classes assigned to you this week.<br>'
-        + 'Any class in a pool you are rostered to is still yours to mark.</p>'
-        + clsOthersBtn();
-      wireClsOthers();
+    // An empty tab reads as a broken one, so it says why it is empty.
+    if (!clsRows.length) {
+      $('clsBody').innerHTML = '<p class="empty">Nothing in your water this week.<br>'
+        + 'You see every class at a pool you are rostered to, for the hours you '
+        + 'are rostered. If this looks wrong, the roster is where to look.</p>';
       return;
     }
 
     var list = clsSessions(clsDay);
-    // Theirs first: the cover cards are a reference, not the job.
+    // By the clock. They are all equally this coach's now, so sorting
+    // the timetable's choice to the top would say otherwise — and two
+    // classes at three o'clock want to be next to each other.
     list.sort(function (a, b) {
       if (a.start !== b.start) return String(a.start).localeCompare(String(b.start));
-      return (a.mine === b.mine) ? 0 : (a.mine ? -1 : 1);
+      return String(a.pool || '').localeCompare(String(b.pool || ''));
     });
 
     var html = list.length ? list.map(function (c) { return clsCard(c, today); }).join('')
       : '<p class="empty">Nothing on ' + esc(prettyDate(clsDay)) + '.</p>';
 
-    $('clsBody').innerHTML = html + clsOthersBtn();
-    wireClsOthers();
+    $('clsBody').innerHTML = html;
     wireClsCards(today);
-  }
-
-  function clsOthersBtn() {
-    return '<button class="btn ghost" id="clsOthersBtn" style="width:100%;margin-top:6px">'
-      + (clsOthers ? 'Only classes assigned to me' : 'Show every class at this pool')
-      + '</button>';
-  }
-  function wireClsOthers() {
-    var b = $('clsOthersBtn');
-    if (b) b.addEventListener('click', function () { clsOthers = !clsOthers; loadClasses(); });
   }
 
   function clsCard(c, today) {
@@ -1249,8 +1229,10 @@
     var head = '<div class="cls-head">'
       + '<div class="cls-what">' + esc(prettyTime(c.start)) + ' – ' + esc(prettyTime(c.end))
       +   '<div class="cls-sub">' + esc(c.lesson) + ' · ' + esc(c.pool)
-      +     (c.mine ? '' : '<br>' + esc(c.coaches)) + '</div></div>'
-      + '<span class="pill">' + (c.off ? 'Did not happen' : (c.mine ? 'Yours' : 'Same pool')) + '</span>'
+      // Who the timetable named, always. It is a reference for who was
+      // meant to take it, not a statement about who may.
+      +     (c.coaches ? '<br>on the timetable: ' + esc(c.coaches) : '') + '</div></div>'
+      + (c.off ? '<span class="pill">Did not happen</span>' : '')
       + '</div>';
 
     var owed = [];
@@ -1273,9 +1255,9 @@
         // No "has notes already" badge: that would mean the roster
         // function returning a count, and two files defining it. The
         // history is one tap away inside the pad.
-        // Offered where the server will accept it: named on the class,
-        // or this coach has marked this swimmer themselves.
-        + ((c.mine || r.marked_by_me)
+        // Every swimmer on this screen is in water this coach is
+        // rostered to, which is exactly what can_note_on_student accepts.
+        + (marking
             ? '<button class="notebtn" data-note="' + esc(r.student_id) + '"'
               + ' data-nm="' + esc(r.student_name || '') + '"'
               + ' title="Write a note for the parent">\u270e</button>'
@@ -1323,11 +1305,7 @@
       foot += '<div class="cls-foot"><button class="linkish" data-off="' + esc(c.id) + '">'
         + (c.off ? 'It did happen after all' : 'This class did not happen') + '</button></div>';
     }
-    if (!c.mine) {
-      foot += '<div class="cls-sub" style="margin-top:8px">'
-        + 'Not assigned to you on the timetable. You are rostered to this pool '
-        + 'at this hour, so it is yours to mark.</div>';
-    }
+
 
     return '<div class="cls' + (c.mine ? '' : ' notmine') + (c.off ? ' off' : '') + '">'
       + head + '<div class="cls-line"></div>' + body + foot + '</div>';

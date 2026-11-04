@@ -167,6 +167,8 @@ drop function if exists get_my_session_roster(date, date, boolean);
 create or replace function get_my_session_roster(
   p_from date,
   p_to   date,
+  -- Kept for the contract's sake: phones in the wild still send it.
+  -- It no longer narrows anything — see the note above the ORDER BY.
   p_include_others boolean default false
 )
 returns table (
@@ -337,16 +339,23 @@ begin
     left join student_credit_balances bal on bal.student_id = wss.student_id
                                          and bal.lesson_type_id = ws2.lesson_type_id
     left join admin_employees mk          on mk.id = wss.marked_by_crew_id
-   where p_include_others
-      or o.session_id in (select sid from mine)
+   -- No filter. Every class running in water this coach is rostered to,
+   -- at an hour they are rostered for, is theirs to take. Who the
+   -- timetable named is kept as is_mine and is a reference, not a
+   -- permission: the scheduler cannot know in advance which of three
+   -- coaches at SSGT will take which group.
+   --
+   -- p_include_others is kept because older phones still send it, and a
+   -- parameter a cached client passes must not vanish. It no longer
+   -- decides anything.
    order by o.session_date, o.start_time, o.pool_name,
             coalesce(wss.is_replacement, false), wss.student_name;
 end $$;
 
 comment on function get_my_session_roster(date, date, boolean) is
-  'The classes a coach is assigned to inside their rostered shifts, and '
-  'the swimmers in them. With p_include_others, every class in the same '
-  'water during the same hours — for cover.';
+  'Every class running in water this coach is rostered to, at an hour '
+  'they are rostered for, and the swimmers in them. The instructor the '
+  'timetable names comes back as is_mine and is a reference only.';
 
 
 -- ═══ 2. Marking one swimmer ═════════════════════════════════════════════
