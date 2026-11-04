@@ -159,7 +159,41 @@ function IntakeForm() {
 
   // Branch picker — list pulled from DB. Defaults to SSGT (HQ) on first load.
   const [branches, setBranches] = useState([]);
+  // The document this parent will sign, assembled by the database:
+  // the branch's own terms or the shared default, plus the clauses of
+  // any programme their children are joining.
+  //
+  // Fetched rather than built here. It used to be built here, from a
+  // copy of the default wording that lived in this file — and a second
+  // copy lived in the admin bundle. They drifted, the admin copy grew a
+  // fees clause and this one did not, and for weeks parents signed an
+  // agreement the office was not reading.
+  const [termsText, setTermsText] = useState(null);
   const [branchId, setBranchId] = useState('');
+
+  // Reassembled whenever the branch changes. The programme array is
+  // empty because this form does not yet ask which programme a child is
+  // joining — when it does, those ids go here and their clauses appear
+  // beneath the branch terms with no further change.
+  React.useEffect(() => {
+    let dropped = false;
+    if (!branchId) {
+      setTermsText(null);
+      return;
+    }
+    rest('rpc/terms_for', {
+      method: 'POST',
+      body: JSON.stringify({
+        p_branch_id: branchId,
+        p_lesson_type_ids: []
+      })
+    }).then(t => {
+      if (!dropped && typeof t === 'string' && t.trim()) setTermsText(t);
+    }).catch(() => {/* the copy in this file stands in */});
+    return () => {
+      dropped = true;
+    };
+  }, [branchId]);
   React.useEffect(() => {
     (async () => {
       try {
@@ -587,10 +621,14 @@ function IntakeForm() {
     className: "tc-doc",
     tabIndex: 0
   }, /*#__PURE__*/React.createElement("h1", null, TC_COMPANY), /*#__PURE__*/React.createElement("h2", null, "Swimming Lesson Enrolment — Terms & Conditions"), (() => {
-    const b = branches.find(x => x.id === branchId);
-    const raw = b && b.terms_content && b.terms_content.trim() ? b.terms_content : defaultTermsText();
     // Numbering is the markup: see terms-render.js, loaded by both
     // this page and the admin so the two cannot drift.
+    //
+    // Until the database answers, and if it never does, the copy
+    // in this file still shows. A parent must never be asked to
+    // accept a blank box because a request failed.
+    const b = branches.find(x => x.id === branchId);
+    const raw = termsText || (b && b.terms_content && b.terms_content.trim() ? b.terms_content : defaultTermsText());
     return window.SSTerms.render(React, raw, {
       h2Class: 'tc-doc-title'
     });
