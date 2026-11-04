@@ -1196,9 +1196,13 @@
 
     // An empty tab reads as a broken one, so it says why it is empty.
     if (!clsRows.length) {
-      $('clsBody').innerHTML = '<p class="empty">Nothing in your water this week.<br>'
-        + 'You see every class at a pool you are rostered to, for the hours you '
-        + 'are rostered. If this looks wrong, the roster is where to look.</p>';
+      // Not a fault, and it should not read as one. A coach can be
+      // rostered to a pool with nothing timetabled in it — cover,
+      // setting up, a quiet hour — and they still check in and out.
+      $('clsBody').innerHTML = '<p class="empty">No classes in your water this week.<br>'
+        + 'That is not a problem. You still check in and out as usual — '
+        + 'classes appear here when the timetable has some in a pool you '
+        + 'are rostered to.</p>';
       return;
     }
 
