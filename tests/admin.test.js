@@ -81,13 +81,27 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       { id: 'br-sjkc', name: 'SJKC BSB', code: 'SJKCBSB', is_active: true,
         terms_content: 'SJKC BANDAR SERI BOTANI\n\n1. General\nThis branch stands alone.' }
     ];
+    // Programmes, as scheduler_lesson_types rows reach the screen.
+    const TYPES = [
+      { id: 'lt-squad', name: 'ASC Squad', branch_id: 'br-sjkc', is_active: true, sort_order: 1,
+        terms_content: 'A missed session is an absence. It is not replaced.' },
+      { id: 'lt-lts', name: 'Learn to Swim', branch_id: 'br-ssgt', is_active: true, sort_order: 1,
+        terms_content: null },
+      { id: 'lt-p1', name: 'Personal 1', branch_id: 'br-ssgt', is_active: true, sort_order: 2,
+        terms_content: 'Sessions are arranged directly with the instructor.' },
+      { id: 'lt-old', name: 'Retired Programme', branch_id: 'br-ssgt', is_active: false, sort_order: 3,
+        terms_content: 'Wording nobody can reach.' }
+    ];
+    window.__saved = [];
     window.__render = (q) => root.render(React.createElement(TermsAdminView, {
       branches: BRANCHES,
       currentBranchId: q.branchId || 'br-ssgt',
+      lessonTypes: TYPES,
       defaultTerms: q.defaultTerms,
       fromDb: q.fromDb,
       onReload: () => { window.__reloads++; },
-      onSave: () => Promise.resolve()
+      onSave: () => Promise.resolve(),
+      onSaveProgramme: (id, body) => { window.__saved.push([id, body]); return Promise.resolve(); }
     }));
     window.__render(p);
   }, props);
@@ -148,6 +162,88 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     const v = await editor().inputValue();
     if (!/This branch stands alone/.test(v)) throw new Error('branch terms lost: ' + v.slice(0, 120));
     if (/lives in the database/.test(v)) throw new Error('the default overwrote the branch terms');
+  });
+
+  // ── Programme clauses ──────────────────────────────────────────────
+  // The column these edit was reachable only through the SQL editor
+  // until now, which is the whole point of the tab.
+  const tab = (name) => page.locator('#t-host button', { hasText: name }).first().click();
+
+  await step('the programme tab lists the branch\'s own programmes', async () => {
+    // Through the dropdown, for the same reason as above: currentBranchId
+    // only seeds the initial state.
+    await page.locator('#t-host select').first().selectOption('br-ssgt');
+    await page.waitForTimeout(300);
+    await tab('Programme clauses');
+    await page.waitForTimeout(300);
+    const t = await page.locator('#t-host').textContent();
+    if (!/Learn to Swim/.test(t) || !/Personal 1/.test(t)) throw new Error('branch programmes missing');
+    if (/ASC Squad/.test(t)) throw new Error("another branch's programme is listed");
+  });
+
+  await step('a hidden programme is not offered, because nobody can reach it', async () => {
+    const t = await page.locator('#t-host').textContent();
+    if (/Retired Programme/.test(t)) throw new Error('an inactive programme is listed');
+  });
+
+  await step('picking a programme shows its clauses and nothing else', async () => {
+    await page.locator('#t-host button', { hasText: 'Personal 1' }).first().click();
+    await page.waitForTimeout(300);
+    const v = await editor().inputValue();
+    if (!/arranged directly with the instructor/.test(v)) throw new Error('clauses not loaded: ' + v.slice(0, 120));
+    if (/lives in the database/.test(v)) throw new Error('the branch terms are in the programme box');
+  });
+
+  await step('the preview is the whole document, branch terms and clauses together', async () => {
+    const t = await page.locator('#t-host .tc-doc-scroll').last().textContent();
+    if (!/lives in the database/.test(t)) throw new Error('branch terms missing from the preview');
+    if (!/Personal 1 — additional terms/.test(t)) throw new Error('the programme heading terms_for adds is missing');
+    if (!/arranged directly with the instructor/.test(t)) throw new Error('clauses missing from the preview');
+    if (t.indexOf('lives in the database') > t.indexOf('arranged directly'))
+      throw new Error('the clauses are above the branch terms, not under them');
+    const heads = await page.locator('#t-host .tc-doc-scroll h3').allTextContents();
+    if (!heads.some(h => /Personal 1 . additional terms/.test(h)))
+      throw new Error('the programme heading is set as body text: ' + JSON.stringify(heads.slice(0, 4)));
+  });
+
+  await step('a programme with no clauses opens empty, not on the last one', async () => {
+    await page.locator('#t-host button', { hasText: 'Learn to Swim' }).first().click();
+    await page.waitForTimeout(300);
+    const v = await editor().inputValue();
+    if (v.trim()) throw new Error('showing another programme\'s clauses: ' + v.slice(0, 120));
+  });
+
+  // Saved against the programme that is open, which is deliberately not
+  // the first in the list: saving against whichever came first would have
+  // passed every assertion here if this used Learn to Swim.
+  await step('saving sends the clauses against the programme that is open', async () => {
+    await page.locator('#t-host button', { hasText: 'Personal 1' }).first().click();
+    await page.waitForTimeout(300);
+    await editor().fill('1. Sessions\nOnce a week through the school term.');
+    await page.waitForTimeout(200);
+    await page.locator('#t-host button', { hasText: 'Save clauses' }).click();
+    await page.waitForTimeout(400);
+    const saved = await page.evaluate(() => window.__saved);
+    if (!saved.length) throw new Error('nothing was saved');
+    if (saved[saved.length - 1][0] !== 'lt-p1') throw new Error('saved against ' + saved[saved.length - 1][0]);
+    if (!/through the school term/.test(saved[saved.length - 1][1])) throw new Error('the text did not travel');
+  });
+
+  await step('removing clauses sends blank, which the database stores as none', async () => {
+    page.once('dialog', d => d.accept());
+    await page.locator('#t-host button', { hasText: 'Remove clauses' }).click();
+    await page.waitForTimeout(400);
+    const saved = await page.evaluate(() => window.__saved);
+    const last = saved[saved.length - 1];
+    if (last[0] !== 'lt-p1') throw new Error('removed from ' + last[0]);
+    if (String(last[1]).trim()) throw new Error('not a blank: ' + JSON.stringify(last[1]));
+  });
+
+  await step('switching back to the branch tab still shows the branch terms', async () => {
+    await tab('Branch terms');
+    await page.waitForTimeout(300);
+    const v = await editor().inputValue();
+    if (!/lives in the database/.test(v)) throw new Error('branch editor lost its document: ' + v.slice(0, 120));
   });
 
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });

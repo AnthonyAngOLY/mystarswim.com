@@ -117,6 +117,18 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
     if (!/not replaced/.test(t)) throw new Error('the programme clauses are not there: ' + t.slice(0, 200));
   });
 
+  // terms_for separates that heading from the first clause with a single
+  // newline, which is not a paragraph break, so it used to be set as body
+  // text — the one line saying which programme the clauses below belong
+  // to, reading like part of them.
+  await step('the programme heading is a heading, not another paragraph', async () => {
+    const heads = await page.locator('.tc-doc h3').allTextContents();
+    if (!heads.some(h => /ASC Squad . additional terms/.test(h)))
+      throw new Error('set as body text: ' + JSON.stringify(heads.slice(0, 4)));
+    const first = await page.locator('.tc-doc h3', { hasText: 'additional terms' }).first().textContent();
+    if (/not replaced/.test(first)) throw new Error('the first clause was swallowed into the heading');
+  });
+
   await step('changing branch clears a pick that does not belong to it', async () => {
     await pickBranch('br-ssgt');
     const v = await page.locator('select').nth(1).inputValue();

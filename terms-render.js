@@ -56,6 +56,17 @@
     return true;
   }
 
+  // terms_for joins each programme's clauses on under a heading of its
+  // own — "ASC Squad \u2014 additional terms" — and separates that heading
+  // from the first clause with a single newline. One newline is not a
+  // paragraph break, so the heading arrived glued to the clause beneath
+  // it and was set as body text: the one line saying which programme the
+  // next three clauses belong to read like part of them.
+  //
+  // Split here rather than in the database, because every document
+  // already stored is joined that way and this brings those right too.
+  var PROG_HEAD = /\u2014 additional terms$/;
+
   function isTitleLine(s) {
     // Capitals and punctuation only, and enough letters to mean it.
     return /[A-Z]/.test(s) && !/[a-z]/.test(s) &&
@@ -70,6 +81,7 @@
     var first = lines[0].trim();
 
     if (lines.length === 1 && HEADING.test(first)) return { type: 'h3', text: first };
+    if (lines.length === 1 && PROG_HEAD.test(first)) return { type: 'h3', text: first };
     if (lines.length === 1 && isTitleLine(first) && !/^\d/.test(first))
       return { type: 'h2', text: first };
 
@@ -107,6 +119,19 @@
       .split(/\n{2,}/)
       .map(function (p) { return p.replace(/\s+$/, ''); })
       .filter(function (p) { return p.trim() !== ''; })
+      .reduce(function (acc, p) {
+        // A programme heading takes the rest of its paragraph with it;
+        // put the rest back as a paragraph of its own.
+        var nl = p.indexOf('\n');
+        if (nl > 0 && PROG_HEAD.test(p.slice(0, nl).trim())) {
+          acc.push(p.slice(0, nl).trim());
+          var rest = p.slice(nl + 1);
+          if (rest.trim() !== '') acc.push(rest);
+          return acc;
+        }
+        acc.push(p);
+        return acc;
+      }, [])
       .map(classify);
   }
 

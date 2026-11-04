@@ -3222,6 +3222,18 @@ function App({ currentUser, onLogout }){
     } catch(err){ handleErr(err); alert(err.message || 'Failed to save terms'); }
   }
 
+  // Save one programme's extra clauses. These do not replace the branch's
+  // terms; terms_for appends them under it, once per programme however
+  // many children are joining it. Empty/blank → NULL, which is what
+  // terms_for treats as "this programme adds nothing".
+  async function saveProgrammeTerms(lessonTypeId, content){
+    try{
+      const val = (content && content.trim()) ? content : null;
+      await patchRows('scheduler_lesson_types', { id: lessonTypeId }, { terms_content: val });
+      await loadOptions();
+    } catch(err){ handleErr(err); alert(err.message || 'Failed to save programme clauses'); }
+  }
+
   // Delete a lesson type but keep its classes. Sessions are decoupled
   // (lesson_type_id → null) while their lesson_type text name is preserved, so
   // re-creating a type with the same name relinks them automatically.
@@ -4946,10 +4958,12 @@ function App({ currentUser, onLogout }){
           {adminSection==='terms' && <TermsAdminView
             branches={options.branches||[]}
             currentBranchId={currentBranchId}
+            lessonTypes={options.lessonTypes||[]}
             defaultTerms={defaultTerms}
             fromDb={defaultTermsFromDb}
             onReload={loadDefaultTerms}
             onSave={saveBranchTerms}
+            onSaveProgramme={saveProgrammeTerms}
           />}
           {adminSection==='billingTerms' && <BillingTermsAdminView
             terms={billingTerms}
@@ -10553,14 +10567,22 @@ function defaultTermsText(){ return TC_CONTENT.map(s => `${s.h}\n${s.body}`).joi
 
 // Settings › Terms — edit each branch's Terms & Conditions (one free-text blob).
 // Empty/blank stores NULL and the branch falls back to the default wording.
-function TermsAdminView({ branches, currentBranchId, defaultTerms, fromDb, onReload, onSave }){
+function TermsAdminView({ branches, currentBranchId, lessonTypes, defaultTerms, fromDb, onReload, onSave, onSaveProgramme }){
   const active = (branches||[]).filter(b => b.is_active !== false);
   const initialBranch = (currentBranchId && currentBranchId !== 'all') ? currentBranchId : (active[0]?.id || '');
   const [branchId, setBranchId] = useState(initialBranch);
   const [text, setText] = useState('');
   const [usingDefault, setUsingDefault] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState('branch');
   const branch = (branches||[]).find(b => b.id === branchId) || null;
+
+  // What a parent at this branch is shown before any programme is added:
+  // the branch's own terms, or the shared default where it has none. The
+  // saved copy, not what is sitting unsaved in the editor — the
+  // programme preview has to show the document as it really stands.
+  const storedBranchDoc = (branch && branch.terms_content && branch.terms_content.trim())
+    ? branch.terms_content : defaultTerms;
 
   // Read the shared default from the database each time this screen is
   // opened, rather than trusting whatever the page loaded with. It is the
@@ -10586,7 +10608,9 @@ function TermsAdminView({ branches, currentBranchId, defaultTerms, fromDb, onRel
   return <>
     <div className="card" style={{marginBottom:12}}>
       <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>📄 Terms &amp; Conditions</div>
-      <div className="small subtle" style={{marginBottom:10}}>Each branch has its own Terms &amp; Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default.</div>
+      <div className="small subtle" style={{marginBottom:10}}>{tab==='branch'
+        ? "Each branch has its own Terms & Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default."
+        : "A programme does not replace the branch's terms — its clauses are added underneath them, for the parents of children joining that programme and nobody else. A parent enrolling two children on two programmes signs one document carrying both."}</div>
       {/* The bundled copy is a fallback, not the document. Saying so is the
           difference between reading last year's terms and knowing you are. */}
       {fromDb === false && <div className="small" style={{marginBottom:10,padding:'10px 12px',borderRadius:8,background:'#FEF3C7',color:'#92400E',border:'1px solid #FCD34D',lineHeight:1.6}}>
@@ -10609,11 +10633,17 @@ function TermsAdminView({ branches, currentBranchId, defaultTerms, fromDb, onRel
         <div className="field" style={{margin:0,minWidth:220}}><label>Branch</label>
           <select className="select" value={branchId} onChange={e=>setBranchId(e.target.value)}>{active.map(b => <option key={b.id} value={b.id}>{b.name}{b.code?` (${b.code})`:''}</option>)}</select>
         </div>
-        <span className="pill" style={usingDefault?{background:'#FEF3C7',color:'#92400E'}:{background:'#D1FAE5',color:'#065F46'}}>{usingDefault ? 'Using default wording' : 'Custom terms set'}</span>
+        {tab==='branch' && <span className="pill" style={usingDefault?{background:'#FEF3C7',color:'#92400E'}:{background:'#D1FAE5',color:'#065F46'}}>{usingDefault ? 'Using default wording' : 'Custom terms set'}</span>}
+        {/* One branch picker for both tabs: programmes belong to a branch,
+            so switching branch here switches which programmes are listed. */}
+        <div style={{display:'flex',gap:6,marginLeft:'auto'}}>
+          {[['branch','Branch terms'],['programme','Programme clauses']].map(([k,label]) =>
+            <button key={k} className={`btn small ${tab===k?'btn-primary':'btn-ghost'}`} onClick={()=>setTab(k)}>{label}</button>)}
+        </div>
       </div>
     </div>
 
-    <div className="settings-cols" style={{gridTemplateColumns:'1fr 1fr',gap:16}}>
+    {tab==='branch' && <div className="settings-cols" style={{gridTemplateColumns:'1fr 1fr',gap:16}}>
       <div className="card">
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
           <div style={{fontWeight:800}}>Editor</div>
@@ -10634,6 +10664,110 @@ function TermsAdminView({ branches, currentBranchId, defaultTerms, fromDb, onRel
           <h1 className="tc-h1">{TC_COMPANY}</h1>
           <h2 className="tc-h2">Swimming Lesson Enrolment — Terms &amp; Conditions</h2>
           {window.SSTerms.render(React, text, {pClass:'tc-para', h3Class:'tc-h3', h2Class:'tc-doc-title'})}
+        </div>
+      </div>
+    </div>}
+
+    {tab==='programme' && <ProgrammeClausesEditor
+      key={branchId}
+      branchId={branchId}
+      branchName={branch ? branch.name : ''}
+      lessonTypes={lessonTypes||[]}
+      branchDoc={storedBranchDoc}
+      onSave={onSaveProgramme}
+    />}
+  </>;
+}
+
+// Settings › Terms › Programme clauses — the extra wording that goes with
+// one programme and not the rest of the branch.
+//
+// This used to be a column you could only reach through the SQL editor.
+// ASC Squad's "a missed session is an absence, it is not replaced" was
+// put there by hand, and the only way to check what a programme said was
+// to select it out of the table.
+//
+// The preview assembles the document the way terms_for does — branch
+// terms, or the default, then the programme's clauses under their own
+// heading — because the question being asked here is never "what did I
+// type", it is "what will a parent sign".
+function ProgrammeClausesEditor({ branchId, branchName, lessonTypes, branchDoc, onSave }){
+  // Active only, matching public_lesson_types: a hidden programme is not
+  // offered on the intake form, so clauses on it would be wording nobody
+  // can reach.
+  const mine = (lessonTypes||[])
+    .filter(t => t.branch_id === branchId && t.is_active !== false)
+    .slice().sort((a,b) => (a.sort_order??999)-(b.sort_order??999) || String(a.name).localeCompare(String(b.name)));
+
+  const [ltId, setLtId] = useState(mine[0]?.id || '');
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const lt = mine.find(t => t.id === ltId) || null;
+  const stored = (lt && lt.terms_content) ? lt.terms_content : '';
+  const dirty = text !== stored;
+  const hasClauses = t => !!(t && t.terms_content && t.terms_content.trim());
+
+  React.useEffect(() => {
+    const t = mine.find(x => x.id === ltId);
+    setText((t && t.terms_content) ? t.terms_content : '');
+  }, [ltId, lessonTypes]); // eslint-disable-line
+
+  async function save(){ setBusy(true); try{ await onSave(ltId, text); } finally { setBusy(false); } }
+  async function clear(){
+    if(!confirm(`Remove the extra clauses from "${lt?lt.name:''}"? Parents joining it will sign the branch terms alone.`)) return;
+    setBusy(true); try{ await onSave(ltId, ''); } finally { setBusy(false); }
+  }
+
+  if(!mine.length) return <div className="card">
+    <div className="small subtle">No active programmes at {branchName||'this branch'} yet. Add one under Settings › Lesson Types, and its clauses can be written here.</div>
+  </div>;
+
+  // The heading terms_for puts above a programme's clauses, reproduced
+  // here so the preview is the document and not an approximation of it.
+  const assembled = (branchDoc||'').trim()
+    + (text.trim() ? `\n\n${lt?lt.name:''} — additional terms\n${text.trim()}` : '');
+
+  return <>
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+        {mine.map(t => <button key={t.id}
+          className={`btn small ${t.id===ltId?'btn-primary':'btn-ghost'}`}
+          onClick={()=>setLtId(t.id)}>
+          {t.name}
+          {/* A dot rather than a word: the list is for finding the one
+              programme that has something, at a glance. */}
+          <span style={{marginLeft:7,opacity:t.id===ltId?0.9:0.65}}>{hasClauses(t) ? '●' : '○'}</span>
+        </button>)}
+      </div>
+      <div className="small subtle" style={{marginTop:10}}>
+        <span style={{marginRight:4}}>●</span> has its own clauses ·
+        <span style={{margin:'0 4px 0 8px'}}>○</span> branch terms only
+      </div>
+    </div>
+
+    <div className="settings-cols" style={{gridTemplateColumns:'1fr 1fr',gap:16}}>
+      <div className="card">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+          <div style={{fontWeight:800}}>{lt?lt.name:''} — additional clauses</div>
+          <div className="small subtle">{(text||'').length} chars</div>
+        </div>
+        <div className="small subtle" style={{marginBottom:8}}>Only what is specific to this programme. Everything in the branch terms already applies.</div>
+        <textarea className="textarea" style={{minHeight:420,fontFamily:'inherit',lineHeight:1.5}} value={text} onChange={e=>setText(e.target.value)}
+          placeholder={'e.g.\n\n1. Sessions\nPractice runs once a week through the school term.\n\n2. Replacements\nA missed session is an absence. It is not replaced.'} />
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10,gap:8}}>
+          <button className="btn btn-ghost small" onClick={clear} disabled={busy || !stored.trim()}>Remove clauses</button>
+          <div style={{display:'flex',gap:8}}>
+            <button className="btn btn-ghost small" onClick={()=>setText(stored)} disabled={busy || !dirty}>Undo changes</button>
+            <button className="btn btn-primary" onClick={save} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save clauses'}</button>
+          </div>
+        </div>
+      </div>
+      <div className="card">
+        <div style={{fontWeight:800,marginBottom:8}}>Preview <span className="small subtle" style={{fontWeight:400}}>· the whole document a parent joining {lt?lt.name:''} signs</span></div>
+        <div className="tc-doc-scroll" style={{maxHeight:480}}>
+          <h1 className="tc-h1">{TC_COMPANY}</h1>
+          <h2 className="tc-h2">Swimming Lesson Enrolment — Terms &amp; Conditions</h2>
+          {window.SSTerms.render(React, assembled, {pClass:'tc-para', h3Class:'tc-h3', h2Class:'tc-doc-title'})}
         </div>
       </div>
     </div>
