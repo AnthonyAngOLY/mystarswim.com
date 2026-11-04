@@ -103,7 +103,11 @@ function IntakeForm(){
   const [gTIN,   setGTIN]   = useState('');
 
   // Children — array of { name, dob, gender }. Always at least one row.
-  const [children, setChildren] = useState([{ name:'', dob:'', gender:null }]);
+  const [children, setChildren] = useState([{ name:'', dob:'', gender:null, lessonTypeId:'' }]);
+  // Programmes at the chosen branch. Read through public_lesson_types,
+  // which returns a name and an id and nothing else: this page holds the
+  // anon key, and scheduler_lesson_types carries fees and ratios.
+  const [programmes, setProgrammes] = useState([]);
 
   // Branch picker — list pulled from DB. Defaults to SSGT (HQ) on first load.
   const [branches, setBranches] = useState([]);
@@ -119,21 +123,47 @@ function IntakeForm(){
   const [termsText, setTermsText] = useState(null);
   const [branchId, setBranchId] = useState('');
 
-  // Reassembled whenever the branch changes. The programme array is
-  // empty because this form does not yet ask which programme a child is
-  // joining — when it does, those ids go here and their clauses appear
-  // beneath the branch terms with no further change.
+  // Programmes follow the branch. A pick made before the branch changed
+  // is cleared rather than carried over: a Personal 1 at SSGT is not a
+  // programme at SJKC, and leaving it selected would attach a child to a
+  // programme that is not at the place they are enrolling.
+  React.useEffect(() => {
+    let dropped = false;
+    if (!branchId) { setProgrammes([]); return; }
+    rest('rpc/public_lesson_types', {
+      method: 'POST',
+      body: JSON.stringify({ p_branch_id: branchId })
+    }).then(rows => {
+      if (dropped) return;
+      const list = Array.isArray(rows) ? rows : [];
+      setProgrammes(list);
+      const ok = new Set(list.map(r => r.id));
+      setChildren(cs => cs.map(c => ok.has(c.lessonTypeId) ? c : { ...c, lessonTypeId:'' }));
+    }).catch(() => { if (!dropped) setProgrammes([]); });
+    return () => { dropped = true; };
+  }, [branchId]);
+
+  // The document this parent signs: the branch's terms, plus the clauses
+  // of every programme any of their children is joining. One signature
+  // covers all of them, which is why this is the union and not per child.
+  const pickedTypes = children
+    .map(c => c.lessonTypeId)
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort();
+  const pickedKey = pickedTypes.join(',');
+
   React.useEffect(() => {
     let dropped = false;
     if (!branchId) { setTermsText(null); return; }
     rest('rpc/terms_for', {
       method: 'POST',
-      body: JSON.stringify({ p_branch_id: branchId, p_lesson_type_ids: [] })
+      body: JSON.stringify({ p_branch_id: branchId, p_lesson_type_ids: pickedTypes })
     }).then(t => {
       if (!dropped && typeof t === 'string' && t.trim()) setTermsText(t);
     }).catch(() => { /* the copy in this file stands in */ });
     return () => { dropped = true; };
-  }, [branchId]);
+  }, [branchId, pickedKey]);
   React.useEffect(() => {
     (async () => {
       try{
@@ -169,7 +199,7 @@ function IntakeForm(){
   const [done, setDone] = useState(null); // { guardianName, children: [...] }
 
   function setChildAt(i, field, val){ setChildren(cs => cs.map((c,j) => j===i?{...c,[field]:val}:c)); }
-  function addChild(){ setChildren(cs => [...cs, { name:'', dob:'', gender:null }]); }
+  function addChild(){ setChildren(cs => [...cs, { name:'', dob:'', gender:null, lessonTypeId:'' }]); }
   function removeChild(i){ setChildren(cs => cs.length>1 ? cs.filter((_,j)=>j!==i) : cs); }
 
   function validate(){
@@ -181,6 +211,10 @@ function IntakeForm(){
       if(!c.name.trim()) return `Please enter swimmer ${i+1}'s full name.`;
       if(!c.dob) return `Please enter swimmer ${i+1}'s date of birth.`;
       if(!c.gender) return `Please pick swimmer ${i+1}'s gender.`;
+      // Only where there is something to choose. A branch with no
+      // programmes set up yet should not be an unanswerable question.
+      if(programmes.length && !c.lessonTypeId)
+        return `Please choose a programme for swimmer ${i+1}.`;
     }
     if(!sameAsGuardian){
       if(!eName.trim()) return 'Please enter an emergency contact name (or check "Same as Parent/Guardian").';
@@ -237,7 +271,8 @@ function IntakeForm(){
           referralCode: referralCode.trim() || null,
           signatureName: sigName.trim(),
           children: children.map(c => ({
-            name: c.name.trim(), dob: c.dob || null, gender: c.gender
+            name: c.name.trim(), dob: c.dob || null, gender: c.gender,
+            lessonTypeId: c.lessonTypeId || null
           }))
         })
       });
@@ -258,7 +293,7 @@ function IntakeForm(){
 
   function resetForm(){
     setGName(''); setGEmail(''); setGPhone('');
-    setChildren([{ name:'', dob:'', gender:null }]);
+    setChildren([{ name:'', dob:'', gender:null, lessonTypeId:'' }]);
     setSameAsGuardian(false); setEName(''); setEPhone(''); setERel('');
     setTcAccepted(false); setTcOpen(false); setReferralCode(''); setSigName('');
     setErr(''); setDone(null);
@@ -321,6 +356,15 @@ function IntakeForm(){
         <div className="field-row-3">
           <div className="field" style={{marginBottom:0}}><label>Date of Birth<span className="req">*</span></label><input className="input" type="date" value={c.dob} max={todayStr()} onChange={e=>setChildAt(i,'dob',e.target.value)} /></div>
           <div className="field" style={{marginBottom:0}}><label>Age</label><div className={`age-display ${c.dob?'':'is-empty'}`}>{ageDisplay(c.dob ? ageFromDob(c.dob) : null)}</div></div>
+          <div className="field" style={{marginBottom:0,gridColumn:'1 / -1'}}>
+            <label>Programme<span className="req">*</span></label>
+            <select className="select" value={c.lessonTypeId}
+                    onChange={e=>setChildAt(i,'lessonTypeId',e.target.value)}
+                    disabled={!programmes.length}>
+              <option value="">{programmes.length ? 'Choose a programme…' : 'Pick a branch first'}</option>
+              {programmes.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+            </select>
+          </div>
           <div className="field" style={{marginBottom:0}}>
             <label>Gender<span className="req">*</span></label>
             <div className="gender-toggle">

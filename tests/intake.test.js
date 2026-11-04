@@ -96,6 +96,83 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
     await page.unroute('**/rpc/terms_for');
   });
 
+  await step('each swimmer is asked which programme, filtered by branch', async () => {
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.waitForSelector('.card', { timeout: 10000 });
+    await pickBranch('br-ssgt');
+    const sel = page.locator('.swimmer-card select, .child select, select').nth(1);
+    const opts = await sel.locator('option').allTextContents();
+    if (!opts.some(o => /Learn to Swim/.test(o))) throw new Error('SSGT programmes missing: ' + JSON.stringify(opts));
+    if (opts.some(o => /ASC Squad/.test(o)))
+      throw new Error('an SJKC programme is offered at SSGT: ' + JSON.stringify(opts));
+  });
+
+  await step('choosing one brings its clauses into the terms', async () => {
+    await pickBranch('br-sjkc');
+    await page.locator('select').nth(1).selectOption('lt-squad');
+    await page.waitForTimeout(900);
+    await openTerms();
+    const t = await page.locator('.tc-doc').textContent();
+    if (!/ASC Squad/.test(t)) throw new Error('no programme heading in the terms');
+    if (!/not replaced/.test(t)) throw new Error('the programme clauses are not there: ' + t.slice(0, 200));
+  });
+
+  await step('changing branch clears a pick that does not belong to it', async () => {
+    await pickBranch('br-ssgt');
+    const v = await page.locator('select').nth(1).inputValue();
+    if (v === 'lt-squad') throw new Error('an SJKC programme survived the move to SSGT');
+    const t = await page.locator('.tc-doc').textContent();
+    if (/not replaced/.test(t)) throw new Error('its clauses are still in the terms');
+  });
+
+  await step('the form will not submit without a programme', async () => {
+    // Everything else filled, so the programme is the only thing left to
+    // object to. The first version of this clicked Submit on an empty
+    // form and got "please enter the parent name", which proves nothing
+    // about the check it was meant to be testing.
+    const byLabel = async (label, value) => {
+      await page.locator('.field', { hasText: label }).first()
+        .locator('input, select').first().fill(value);
+    };
+    await byLabel('Full Name', 'Lee Oy Yin');
+    await byLabel('Email', 'parent@example.com');
+    await byLabel('Phone', '0123456789');
+    // The guardian's field and the child's are both labelled Full Name,
+    // so the first one is the parent's. Filling that twice left the
+    // swimmer nameless and the form objected to that instead.
+    await page.locator('.field', { hasText: 'Full Name' }).nth(1)
+      .locator('input').first().fill('Mira Lee');
+    await page.locator('input[type="date"]').first().fill('2017-04-02');
+    await page.locator('button:has-text("\u2640 F")').first().click();
+    await page.locator('.check-row').first().click();            // same as guardian
+    await page.locator('.field', { hasText: 'Digital Signature' })
+      .locator('input').first().fill('Lee Oy Yin');
+    await page.locator('.check-row').last().click();             // accept the terms
+    await page.waitForTimeout(300);
+
+    page.once('dialog', d => d.accept());
+    await page.locator('button:has-text("Submit Registration")').click();
+    await page.waitForTimeout(900);
+    const body = await page.locator('body').textContent();
+    if (!/programme for swimmer/i.test(body))
+      throw new Error('submitted, or objected to something else, with no programme chosen');
+    const sent = await (await page.request.get(BASE + '/__submissions')).json();
+    if (sent.length) throw new Error('it went through anyway');
+  });
+
+  await step('and it carries the programme when one is chosen', async () => {
+    await page.locator('select').nth(1).selectOption('lt-lts');
+    await page.waitForTimeout(400);
+    page.once('dialog', d => d.accept());
+    await page.locator('button:has-text("Submit Registration")').click();
+    await page.waitForTimeout(1500);
+    const sent = await (await page.request.get(BASE + '/__submissions')).json();
+    if (!sent.length) throw new Error('nothing reached the server');
+    const kid = sent[0].children && sent[0].children[0];
+    if (!kid || kid.lessonTypeId !== 'lt-lts')
+      throw new Error('the programme did not travel: ' + JSON.stringify(kid));
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

@@ -147,6 +147,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     for (const c of children) {
       const name = s(c.name, 120);
       const dob = s(c.dob, 10) || null;
+      // Re-read and re-trimmed here like everything else: nothing the
+      // caller sends is trusted, including the programme they picked.
+      const ltId = s(c.lessonTypeId, 64) || null;
       const acceptanceId = "TC-" + crypto.randomUUID().replace(/-/g, "").slice(0, 7).toUpperCase();
 
       const { data: ins, error: insErr } = await db
@@ -169,7 +172,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
           emergency_relationship: s(body.emergencyRelationship, 60),
           emergency_same_as_guardian: sameAsGuardian,
           referral_code: s(body.referralCode, 40) || null,
-          lesson_type_ids: [],
+          // What the parent chose on the form. An array because the
+          // column is one, and because a swimmer may later be on more
+          // than one programme — this records the one they joined under.
+          lesson_type_ids: ltId ? [ltId] : [],
           // Written here rather than patched afterwards, which is what the
           // third of the form's three writes was for.
           tc_accepted_at: acceptedAt,

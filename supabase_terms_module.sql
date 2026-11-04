@@ -191,6 +191,32 @@ comment on function terms_for(uuid, uuid[]) is
   'branch replaces; a programme adds.';
 
 
+-- ─── 3b. The programmes a parent may pick from ──────────────────────────
+-- The intake form has to offer the programmes at the branch they chose,
+-- and it is a public page holding only the anon key — which cannot read
+-- scheduler_lesson_types, and should not be able to. Stage A closed that
+-- table deliberately: it carries fees, ratios and margins.
+--
+-- So this returns the two columns a parent needs to choose, for active
+-- programmes at one branch, and nothing else. No fee, no ratio, no
+-- capacity. A function is the narrow door where a policy would have had
+-- to be a wide one.
+create or replace function public_lesson_types(p_branch_id uuid)
+returns table (id uuid, name text)
+language sql stable security definer set search_path = public as $$
+  select lt.id::uuid, lt.name::text
+    from scheduler_lesson_types lt
+   where lt.is_active is not false
+     and (p_branch_id is null or lt.branch_id = p_branch_id)
+   order by coalesce(lt.sort_order, 999), lt.name;
+$$;
+
+comment on function public_lesson_types(uuid) is
+  'Programme names and ids for the public intake form. Deliberately not '
+  'a policy on scheduler_lesson_types, which holds fees and ratios the '
+  'anon key has no business reading.';
+
+
 -- ─── 4. Locks ───────────────────────────────────────────────────────────
 alter table terms_defaults enable row level security;
 drop policy if exists terms_defaults_read on terms_defaults;
@@ -206,6 +232,8 @@ revoke all on terms_defaults from anon;
 -- document a parent is about to agree to and nothing else.
 revoke all on function terms_for(uuid, uuid[]) from public;
 grant execute on function terms_for(uuid, uuid[]) to anon, authenticated;
+revoke all on function public_lesson_types(uuid) from public;
+grant execute on function public_lesson_types(uuid) to anon, authenticated;
 
 
 -- ─── 5. Where the terms stand ───────────────────────────────────────────

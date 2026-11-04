@@ -50,6 +50,12 @@ const STATE = {
     { id: 'br-sjkc', name: 'SJKC BSB', code: 'SJKCBSB', is_active: true, sort_order: 2,
       terms_content: BRANCH_TERMS }
   ],
+  // Programmes, branch-scoped, as public_lesson_types returns them.
+  lessonTypes: [
+    { id: 'lt-squad', name: 'ASC Squad',     branch: 'br-sjkc' },
+    { id: 'lt-lts',   name: 'Learn to Swim', branch: 'br-ssgt' },
+    { id: 'lt-p1',    name: 'Personal 1',    branch: 'br-ssgt' }
+  ],
   // What public-intake received, so a test can assert on the submission
   // rather than on the screen that produced it.
   submissions: []
@@ -115,6 +121,13 @@ http.createServer(async (req, res) => {
 
   if (p === '/rest/v1/branches') {
     return json(res, 200, STATE.branches.filter(b => b.is_active));
+  }
+
+  if (p === '/rest/v1/rpc/public_lesson_types') {
+    const b = JSON.parse((await body(req)) || '{}');
+    return json(res, 200, STATE.lessonTypes
+      .filter(t => !b.p_branch_id || t.branch === b.p_branch_id)
+      .map(t => ({ id: t.id, name: t.name })));
   }
 
   if (p === '/rest/v1/rpc/terms_for') {
