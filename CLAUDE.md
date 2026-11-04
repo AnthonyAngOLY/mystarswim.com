@@ -53,6 +53,23 @@ A clean rebuild shows only the lines you changed. If the diff is larger
 than your edit, the Babel settings are wrong — fix them rather than
 committing the noise.
 
+## One result per file
+
+The Supabase SQL editor shows the result of the **last statement only**.
+A file that ends in three `select`s reports one of them, and the other
+two are simply not there — which reads as the file having done less than
+it did.
+
+So a confirm block is one statement. Stack the parts with `union all`,
+or put them in a single query with a column saying which part each row
+belongs to, as `supabase_migration_check.sql` does.
+
+This has gone wrong twice: the migration check reported only its
+row-security list for two runs, hiding the file list that was the whole
+point, and the training opening balance reported only its closing check.
+Both times the output looked like a smaller answer rather than a partial
+one.
+
 ## Records
 
 Void, do not delete. Attendance, leave and voucher history is the point
