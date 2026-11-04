@@ -1935,6 +1935,32 @@ function App({
       setProgrammeCategories([]);
     }
   }
+  // The base Terms & Conditions, from the database. This bundle carried
+  // its own copy and so did intake.js; the admin copy grew a fees clause
+  // and the parents' copy did not, and for weeks the office read a
+  // document nobody had signed. One source now, and this reads it.
+  //
+  // Falling back to the bundled copy on a failure rather than showing
+  // nothing — but saying so, because a silent fallback is how the two
+  // drifted apart in the first place.
+  const [defaultTerms, setDefaultTerms] = useState(defaultTermsText());
+  // null until the read has been tried: false means it was tried and
+  // failed, and only that should raise the banner. Starting at false
+  // flashes 'this is not the real document' on every open.
+  const [defaultTermsFromDb, setDefaultTermsFromDb] = useState(null);
+  async function loadDefaultTerms() {
+    try {
+      const rows = await selectRows('terms_defaults', 'body', '&limit=1');
+      const body = rows && rows[0] && rows[0].body;
+      if (body && String(body).trim()) {
+        setDefaultTerms(body);
+        setDefaultTermsFromDb(true);
+        return;
+      }
+    } catch (_) {/* fall through */}
+    setDefaultTerms(defaultTermsText());
+    setDefaultTermsFromDb(false);
+  }
   async function loadBillingTerms() {
     try {
       const rows = await selectRows('billing_terms', '*', '&order=start_date.asc,sort_order.asc,name.asc').catch(() => []);
@@ -7380,7 +7406,9 @@ function App({
   }), adminSection === 'terms' && /*#__PURE__*/React.createElement(TermsAdminView, {
     branches: options.branches || [],
     currentBranchId: currentBranchId,
-    defaultTerms: defaultTermsText(),
+    defaultTerms: defaultTerms,
+    fromDb: defaultTermsFromDb,
+    onReload: loadDefaultTerms,
     onSave: saveBranchTerms
   }), adminSection === 'billingTerms' && /*#__PURE__*/React.createElement(BillingTermsAdminView, {
     terms: billingTerms,
@@ -18244,8 +18272,17 @@ function StudentsView({
 }
 
 // ============================================================================
-// TCView — Terms & Conditions page with swimmer selection & email acceptance
+// The Terms & Conditions the office edits, and the fallback behind them
 // ============================================================================
+// TCView, a T&C signing page for the office, used to live here. It was
+// defined and never rendered — a second hardcoded copy of the whole
+// agreement, in a screen nobody could reach. Removed rather than left to
+// be found later and believed.
+//
+// TC_CONTENT is what remains of it, and it is now only a fallback. The
+// document parents are shown comes from terms_defaults in the database;
+// this copy is what the screen falls back to if that read fails, and the
+// screen says so when it does.
 const TC_COMPANY = 'Star Swim Sdn Bhd';
 const TC_CONTENT = [{
   h: '1. Introduction',
@@ -18312,6 +18349,8 @@ function TermsAdminView({
   branches,
   currentBranchId,
   defaultTerms,
+  fromDb,
+  onReload,
   onSave
 }) {
   const active = (branches || []).filter(b => b.is_active !== false);
@@ -18321,12 +18360,20 @@ function TermsAdminView({
   const [usingDefault, setUsingDefault] = useState(true);
   const [busy, setBusy] = useState(false);
   const branch = (branches || []).find(b => b.id === branchId) || null;
+
+  // Read the shared default from the database each time this screen is
+  // opened, rather than trusting whatever the page loaded with. It is the
+  // document parents sign; a stale copy here is how the two drift apart.
+  React.useEffect(() => {
+    if (onReload) onReload();
+  }, []); // eslint-disable-line
+
   React.useEffect(() => {
     const b = (branches || []).find(x => x.id === branchId);
     const hasCustom = !!(b && b.terms_content && b.terms_content.trim());
     setText(hasCustom ? b.terms_content : defaultTerms);
     setUsingDefault(!hasCustom);
-  }, [branchId, branches]); // eslint-disable-line
+  }, [branchId, branches, defaultTerms]); // eslint-disable-line
 
   const dirty = (() => {
     const b = (branches || []).find(x => x.id === branchId);
@@ -18366,7 +18413,18 @@ function TermsAdminView({
     style: {
       marginBottom: 10
     }
-  }, "Each branch has its own Terms & Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default."), /*#__PURE__*/React.createElement("div", {
+  }, "Each branch has its own Terms & Conditions, shown to parents on that branch's intake form. Leave it on the default wording, or customise the full text for this branch. Blank resets it to the shared default."), fromDb === false && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 10,
+      padding: '10px 12px',
+      borderRadius: 8,
+      background: '#FEF3C7',
+      color: '#92400E',
+      border: '1px solid #FCD34D',
+      lineHeight: 1.6
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "This is not the shared default."), " The default Terms & Conditions could not be read from the database, so what is shown below is the copy built into this app. It may not be what parents are being shown. Run ", /*#__PURE__*/React.createElement("code", null, "supabase_terms_module.sql"), ", then reload this page."), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginBottom: 14,
@@ -18483,300 +18541,6 @@ function TermsAdminView({
     h3Class: 'tc-h3',
     h2Class: 'tc-doc-title'
   })))));
-}
-function TCView({
-  students,
-  lessonTypes,
-  lessonTypeById,
-  onSaveAcceptance
-}) {
-  const [studentId, setStudentId] = useState('');
-  const [agreed, setAgreed] = useState(false);
-  const [sigName, setSigName] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(null); // { acceptanceId, studentName, email }
-  const [scrolled, setScrolled] = useState(false);
-  const student = students.find(s => s.id === studentId) || null;
-  const lt = student?.lessonTypeIds?.[0] ? lessonTypeById(student.lessonTypeIds[0]) : null;
-  const alreadySigned = !!student?.tcAcceptedAt;
-  // Digital signature: the typed name must match the guardian name on file
-  // (falls back to the swimmer's own name for adult self-enrolment).
-  const onFileName = (student?.guardianName || student?.name || '').trim();
-  const sigMatches = !!sigName.trim() && sigName.trim().toLowerCase() === onFileName.toLowerCase();
-  function handleScroll(e) {
-    if (e.target.scrollTop + e.target.clientHeight >= e.target.scrollHeight - 40) setScrolled(true);
-  }
-  async function handleAccept() {
-    if (!student || !agreed || busy) return;
-    if (!sigMatches) {
-      alert(`To sign, type the guardian name exactly as on file: "${onFileName}".`);
-      return;
-    }
-    try {
-      setBusy(true);
-      const acceptanceId = await onSaveAcceptance({
-        studentId: student.id,
-        guardianName: student.guardianName || student.name,
-        guardianEmail: student.guardianEmail || null,
-        lessonTypeName: lt?.name || '—',
-        signatureName: sigName.trim(),
-        signedVia: 'app'
-      });
-      // Optional confirmation email — only when a guardian email is on file.
-      // A missing email no longer blocks signing (the typed signature is the
-      // binding record); we simply skip the mailto step.
-      if (!student.guardianEmail) {
-        setDone({
-          acceptanceId,
-          studentName: student.name,
-          email: null
-        });
-        setAgreed(false);
-        setScrolled(false);
-        setSigName('');
-        return;
-      }
-      const subj = encodeURIComponent(`Swimming Lesson Terms & Conditions — ${student.name} — ${TC_COMPANY}`);
-      const dateStr = new Date().toLocaleString('en-MY', {
-        dateStyle: 'long',
-        timeStyle: 'short'
-      });
-      const emailBody = encodeURIComponent(`Dear ${student.guardianName || student.name},
-
-This email confirms that the Terms and Conditions for ${TC_COMPANY} have been accepted for the following swimmer:
-
-  Swimmer Name : ${student.name}
-  Lesson Type  : ${lt?.name || 'Not specified'}
-  Accepted By  : ${student.guardianName || student.name}
-  Acceptance ID: ${acceptanceId}
-  Date & Time  : ${dateStr}
-
-This Acceptance ID is your unique reference. Please retain this email for your records.
-
-─────────────────────────────────────────────────────
-If you did NOT authorise this acceptance, or if you do not agree to the terms, please reply to this email immediately and we will resolve this with you. Failure to respond within 3 business days will be taken as confirmation of acceptance.
-─────────────────────────────────────────────────────
-
-Key Policy Highlights:
-• Cancellations must be made ≥24 hrs in advance or a Medical Certificate must be provided.
-• Absent without notice = class counted as provided; no replacement entitlement.
-• School-cancelled classes (weather, instructor) entitle you to a replacement lesson.
-• Group replacement: any active class of the same type with an available slot.
-• Personal class replacement: by mutual arrangement with your instructor.
-
-For the full Terms and Conditions, please contact us or request a copy from ${TC_COMPANY}.
-
-Thank you for choosing ${TC_COMPANY}. We look forward to seeing ${student.name} in the pool!
-
-Warm regards,
-${TC_COMPANY} Administration`);
-      window.open(`mailto:${encodeURIComponent(student.guardianEmail)}?subject=${subj}&body=${emailBody}`);
-      setDone({
-        acceptanceId,
-        studentName: student.name,
-        email: student.guardianEmail
-      });
-      setAgreed(false);
-      setScrolled(false);
-      setSigName('');
-    } catch (e) {
-      alert(e?.message || 'Failed to record acceptance');
-    } finally {
-      setBusy(false);
-    }
-  }
-  return /*#__PURE__*/React.createElement("div", {
-    style: {
-      maxWidth: 900,
-      margin: '0 auto'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 22,
-      fontWeight: 800,
-      marginBottom: 4
-    }
-  }, "Terms & Conditions"), /*#__PURE__*/React.createElement("div", {
-    className: "small subtle"
-  }, TC_COMPANY, " · Swimming Lesson Enrolment Agreement"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 14,
-      display: 'flex',
-      gap: 10,
-      alignItems: 'flex-end',
-      flexWrap: 'wrap'
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "field",
-    style: {
-      margin: 0,
-      flex: '1 1 240px'
-    }
-  }, /*#__PURE__*/React.createElement("label", null, "Select Swimmer"), /*#__PURE__*/React.createElement(StudentSelect, {
-    valueId: studentId || null,
-    fallbackLabel: null,
-    studentById: Object.fromEntries(students.map(s => [s.id, s])),
-    candidates: students.filter(s => !s.tcAcceptedAt).slice().sort((a, b) => a.name.localeCompare(b.name)),
-    onPick: stu => {
-      setStudentId(stu ? stu.id : '');
-      setAgreed(false);
-      setScrolled(false);
-      setSigName('');
-      setDone(null);
-    },
-    conflict: null
-  }), /*#__PURE__*/React.createElement("div", {
-    className: "hint",
-    style: {
-      marginTop: 4
-    }
-  }, "Only swimmers without a signed T&C are shown. Already-signed swimmers are filtered out.")), student && /*#__PURE__*/React.createElement("div", {
-    className: "tc-student-summary"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
-    className: "small subtle"
-  }, "Guardian:"), " ", /*#__PURE__*/React.createElement("strong", null, student.guardianName || '—')), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
-    className: "small subtle"
-  }, "Email:"), " ", /*#__PURE__*/React.createElement("strong", null, student.guardianEmail || /*#__PURE__*/React.createElement("span", {
-    className: "tc-warn"
-  }, "⚠ No email — add in Swimmers tab"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
-    className: "small subtle"
-  }, "Lesson Type:"), " ", /*#__PURE__*/React.createElement("strong", null, lt?.name || '—')))), alreadySigned && /*#__PURE__*/React.createElement("div", {
-    className: "tc-status-row tc-accepted",
-    style: {
-      marginTop: 12
-    }
-  }, "✅ T&C already accepted for ", student.name, " · ID: ", student.tcAcceptanceId, " · ", new Date(student.tcAcceptedAt).toLocaleDateString(undefined, {
-    dateStyle: 'long'
-  }))), /*#__PURE__*/React.createElement("div", {
-    className: "card",
-    style: {
-      marginBottom: 16
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "tc-doc-scroll",
-    onScroll: handleScroll
-  }, /*#__PURE__*/React.createElement("h1", {
-    className: "tc-h1"
-  }, TC_COMPANY), /*#__PURE__*/React.createElement("h2", {
-    className: "tc-h2"
-  }, "Swimming Lesson Enrolment — Terms & Conditions"), TC_CONTENT.map((sec, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    className: "tc-section"
-  }, /*#__PURE__*/React.createElement("h3", {
-    className: "tc-h3"
-  }, sec.h), window.SSTerms.render(React, sec.body, {
-    pClass: 'tc-para'
-  }))), !scrolled && /*#__PURE__*/React.createElement("div", {
-    className: "tc-scroll-hint"
-  }, "↓ Scroll to the bottom to enable acceptance"))), done ? /*#__PURE__*/React.createElement("div", {
-    className: "card tc-success"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 20,
-      fontWeight: 800,
-      marginBottom: 6
-    }
-  }, "✅ Accepted — ", done.studentName), /*#__PURE__*/React.createElement("div", {
-    className: "small"
-  }, "Acceptance ID: ", /*#__PURE__*/React.createElement("strong", null, done.acceptanceId)), done.email ? /*#__PURE__*/React.createElement("div", {
-    className: "small subtle",
-    style: {
-      marginTop: 4
-    }
-  }, "Your email client has been opened with a confirmation email pre-addressed to ", /*#__PURE__*/React.createElement("strong", null, done.email), ". Please review and click Send. The email instructs them to reply if they do not agree.") : /*#__PURE__*/React.createElement("div", {
-    className: "small subtle",
-    style: {
-      marginTop: 4
-    }
-  }, "Signature recorded. No guardian email is on file, so no confirmation email was sent — add one in the Swimmers tab if you'd like a copy emailed on the next signing."), /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-ghost small",
-    style: {
-      marginTop: 10
-    },
-    onClick: () => setDone(null)
-  }, "Sign another swimmer")) : /*#__PURE__*/React.createElement("div", {
-    className: "card"
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "gb-check",
-    style: {
-      fontSize: 14,
-      display: 'flex',
-      gap: 10,
-      alignItems: 'flex-start',
-      opacity: scrolled ? 1 : 0.4,
-      transition: 'opacity .2s',
-      cursor: scrolled ? 'pointer' : 'default'
-    }
-  }, /*#__PURE__*/React.createElement("input", {
-    type: "checkbox",
-    disabled: !scrolled || !student,
-    checked: agreed,
-    onChange: e => setAgreed(e.target.checked),
-    style: {
-      marginTop: 3,
-      flexShrink: 0
-    }
-  }), /*#__PURE__*/React.createElement("span", null, "I have read and fully understood the Terms & Conditions of ", TC_COMPANY, ". I agree to be bound by this Agreement on behalf of myself and/or the enrolled swimmer named above, and confirm all information provided is accurate.")), !scrolled && /*#__PURE__*/React.createElement("div", {
-    className: "small subtle",
-    style: {
-      marginTop: 6,
-      marginLeft: 28
-    }
-  }, "Please scroll through the full document above before accepting."), /*#__PURE__*/React.createElement("div", {
-    className: "field",
-    style: {
-      marginTop: 14,
-      opacity: scrolled && agreed && student ? 1 : 0.4,
-      transition: 'opacity .2s'
-    }
-  }, /*#__PURE__*/React.createElement("label", null, "Digital signature — type the guardian's full name to sign"), /*#__PURE__*/React.createElement("input", {
-    type: "text",
-    value: sigName,
-    disabled: !scrolled || !agreed || !student,
-    onChange: e => setSigName(e.target.value),
-    placeholder: student ? `Type "${onFileName}" to sign` : 'Select a swimmer first',
-    style: {
-      fontFamily: '"Segoe Script","Brush Script MT",cursive',
-      fontSize: 18
-    }
-  }), student && sigName.trim() && !sigMatches && /*#__PURE__*/React.createElement("div", {
-    className: "hint",
-    style: {
-      color: 'var(--red-tx)',
-      marginTop: 4
-    }
-  }, "⚠ Must match the guardian name on file: ", /*#__PURE__*/React.createElement("strong", null, onFileName)), student && sigMatches && /*#__PURE__*/React.createElement("div", {
-    className: "hint",
-    style: {
-      color: 'var(--green-tx)',
-      marginTop: 4
-    }
-  }, "✓ Signature matches — ready to accept.")), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'flex-end',
-      marginTop: 14
-    }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "btn btn-primary",
-    disabled: !agreed || !student || busy || !sigMatches,
-    onClick: handleAccept,
-    style: {
-      padding: '10px 24px',
-      fontSize: 15
-    }
-  }, busy ? 'Processing…' : '✍️ I Accept These Terms')), student && !student.guardianEmail && /*#__PURE__*/React.createElement("div", {
-    className: "hint",
-    style: {
-      marginTop: 6,
-      textAlign: 'right'
-    }
-  }, "No guardian email on file — signing still works; a confirmation email just won't be sent.")));
 }
 function SessionModal({
   modal,
