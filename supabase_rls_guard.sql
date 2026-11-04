@@ -32,6 +32,17 @@
 --  read it. That is the right way to fail — closed — but it will look
 --  like data disappearing. The check names those separately so they are
 --  not mistaken for either a problem or a job done.
+--
+--  EXCEPT WHERE IT IS FINISHED
+--  app_users is closed on purpose: it holds password hashes, and the
+--  only thing that should ever read it is an Edge Function holding the
+--  service role. Reporting it as unfinished every time would train
+--  whoever runs this to skim past the one column that matters.
+--
+--  So a table can say so itself. Put the words "closed by design" in its
+--  table comment and the check reports it as settled rather than
+--  outstanding. It is a sentence a person writes deliberately, which is
+--  the point: nothing falls into this category by accident.
 -- ════════════════════════════════════════════════════════════════════════
 
 
@@ -74,6 +85,14 @@ begin
 end $$;
 
 
+-- ─── 1b. The one table that is meant to have no policy ──────────────────
+comment on table app_users is
+  'Logins and password hashes. Row security is on with no policy and '
+  'that is closed by design: only an Edge Function holding the service '
+  'role may read this. Adding a policy would put password hashes within '
+  'reach of the key printed in every page we serve.';
+
+
 -- ─── 2. The standing check ──────────────────────────────────────────────
 -- One statement, because the SQL editor shows the last result only.
 --
@@ -85,13 +104,15 @@ end $$;
 --                              Safe, but the app will see nothing.
 --   locked                     as intended.
 select case
-         when not c.relrowsecurity then '>>> OPEN TO THE ANON KEY'
-         when p.n = 0              then 'locked, no policy'
+         when not c.relrowsecurity   then '>>> OPEN TO THE ANON KEY'
+         when p.n = 0 and d.closed   then ''
+         when p.n = 0                then 'locked, no policy'
          else ''
        end                                              as action,
        case
-         when not c.relrowsecurity then 'open'
-         when p.n = 0              then 'no policy'
+         when not c.relrowsecurity   then 'open'
+         when p.n = 0 and d.closed   then 'closed by design'
+         when p.n = 0                then 'no policy'
          else 'locked'
        end                                              as state,
        c.relname::text                                  as table_name,
@@ -99,6 +120,8 @@ select case
        case
          when not c.relrowsecurity
            then 'alter table ' || quote_ident(c.relname) || ' enable row level security;'
+         when p.n = 0 and d.closed
+           then 'service role only, and meant to be'
          when p.n = 0
            then 'needs a policy, or nothing but the service role can read it'
          else ''
@@ -108,8 +131,12 @@ select case
   left join lateral (
     select count(*)::int as n from pg_policy pol where pol.polrelid = c.oid
   ) p on true
+  left join lateral (
+    select coalesce(obj_description(c.oid, 'pg_class'), '')
+             ilike '%closed by design%' as closed
+  ) d on true
  where n.nspname = 'public'
    and c.relkind = 'r'
- order by c.relrowsecurity,          -- open ones first
-          (p.n = 0) desc,            -- then locked-but-empty
+ order by c.relrowsecurity,                    -- open ones first
+          (p.n = 0 and not d.closed) desc,     -- then genuinely unfinished
           c.relname;
