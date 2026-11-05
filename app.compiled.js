@@ -32564,7 +32564,7 @@ function MessagesView({
     setOpenId(openId === m.id ? null : m.id);
     if (m.status === 'new') onMarkRead(m.id);
   }
-  const tabs = [['in', '📥 Enquiries'], ['announce', '📣 Announcements'], ['remind', '⏰ Reminders']];
+  const tabs = [['in', '📥 Enquiries'], ['announce', '📣 Announcements'], ['remind', '⏰ Reminders'], ['auto', '🤖 Automatic'], ['owing', '💳 Outstanding']];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 860,
@@ -32581,7 +32581,7 @@ function MessagesView({
     key: k,
     className: `btn small ${tab === k ? 'btn-primary' : 'btn-ghost'}`,
     onClick: () => setTab(k)
-  }, label))), tab === 'announce' && /*#__PURE__*/React.createElement(ParentAnnouncements, null), tab === 'remind' && /*#__PURE__*/React.createElement(ParentReminders, null), tab === 'in' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, label))), tab === 'announce' && /*#__PURE__*/React.createElement(ParentAnnouncements, null), tab === 'remind' && /*#__PURE__*/React.createElement(ParentReminders, null), tab === 'auto' && /*#__PURE__*/React.createElement(ParentAutoMessages, null), tab === 'owing' && /*#__PURE__*/React.createElement(ParentOutstanding, null), tab === 'in' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -33024,6 +33024,409 @@ function ParentAnnouncements() {
 // The preview sits on the same screen as the settings and not behind a
 // button, because the question the office is really asking is "what will
 // this actually say", and a setting answers that only in the abstract.
+// ============================================================================
+// ParentAutoMessages — the four that send themselves
+// ============================================================================
+// Nothing here has a Send button, which is the point. Each of these is a
+// database trigger: the replacement note fires when a swimmer is placed
+// into a session, the thank-you when a receipt is written, the absence
+// note when a coach marks it. A message that waited for somebody to
+// remember is a message that would not go out on the day it mattered.
+//
+// So what this screen edits is the wording and the switch, and it shows
+// the placeholders each one can use — because a template with a typo in
+// a placeholder sends the typo, in braces, to a parent.
+// ============================================================================
+function ParentAutoMessages() {
+  const [st, setSt] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  async function load() {
+    try {
+      const r = await selectRows('parent_message_settings', '*', '&limit=1');
+      setSt(r?.[0] || null);
+      setDirty(false);
+    } catch (e) {
+      setErr(e.message);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []);
+  function up(k, v) {
+    setSt(x => ({
+      ...x,
+      [k]: v
+    }));
+    setDirty(true);
+    setMsg('');
+  }
+  async function save() {
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const keep = ['replacement_enabled', 'payment_enabled', 'absence_enabled', 'replacement_title', 'replacement_template', 'payment_title', 'payment_template', 'absence_title', 'absence_template', 'outstanding_title', 'outstanding_template'];
+      const patch = {};
+      keep.forEach(k => {
+        patch[k] = st[k];
+      });
+      patch.updated_at = new Date().toISOString();
+      await patchRows('parent_message_settings', {
+        id: true
+      }, patch);
+      setMsg('Saved. New messages use this wording from now on.');
+      setDirty(false);
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  }
+  if (!st) return /*#__PURE__*/React.createElement("div", {
+    className: "empty",
+    style: {
+      padding: 30
+    }
+  }, "Loading…");
+  const block = (key, icon, name, when, vars) => /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      fontWeight: 700
+    }
+  }, key + '_enabled' in st && /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: st[key + '_enabled'] !== false,
+    onChange: e => up(key + '_enabled', e.target.checked)
+  }), /*#__PURE__*/React.createElement("span", null, icon, " ", name)), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      margin: '4px 0 10px',
+      lineHeight: 1.6
+    }
+  }, when), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Subject"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: st[key + '_title'] || '',
+    onChange: e => up(key + '_title', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Message"), /*#__PURE__*/React.createElement("textarea", {
+    className: "input",
+    style: {
+      minHeight: 150,
+      fontFamily: 'inherit',
+      lineHeight: 1.6
+    },
+    value: st[key + '_template'] || '',
+    onChange: e => up(key + '_template', e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      lineHeight: 1.9
+    }
+  }, "Placeholders: ", vars.map((v, i) => /*#__PURE__*/React.createElement("span", {
+    key: v
+  }, i ? ', ' : '', /*#__PURE__*/React.createElement("code", null, '{' + v + '}'))), ". An unknown one is left in the message exactly as typed, so a mistake reads as a mistake rather than as a blank."));
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 20,
+      fontWeight: 800
+    }
+  }, "🤖 Automatic messages"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 14,
+      lineHeight: 1.6
+    }
+  }, "These send themselves the moment the thing happens — no button, no job to remember. Switch one off and it stops; the wording stays here for when you want it back."), err && /*#__PURE__*/React.createElement("div", {
+    className: "note err",
+    style: {
+      marginBottom: 10
+    }
+  }, err), msg && /*#__PURE__*/React.createElement("div", {
+    className: "note ok",
+    style: {
+      marginBottom: 10
+    }
+  }, msg), block('replacement', '🔁', 'Replacement session', 'Sent the moment a swimmer is placed into a replacement session, and again two days ' + 'before it — unless the booking was already inside the cut-off, in which case the first ' + 'message has already said everything the second would.', ['parent_name', 'child', 'lesson', 'day_time', 'centre_name']), block('payment', '🧾', 'Payment received', 'Sent when a receipt is written, whoever wrote it and from whichever screen. A refund ' + 'is not thanked for.', ['parent_name', 'amount', 'receipt_no', 'centre_name']), block('absence', '💭', 'Marked absent', 'Sent when a coach marks a swimmer absent. It is the record that we told them, which is ' + 'what makes a missed class the family’s to account for rather than ours.', ['parent_name', 'child', 'lesson', 'time', 'notice_hours', 'centre_name']), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'flex-end',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: load,
+    disabled: busy
+  }, "Undo changes"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: save,
+    disabled: busy || !dirty
+  }, busy ? 'Saving…' : 'Save wording')));
+}
+
+// ============================================================================
+// ParentOutstanding — the chase, which a person sends
+// ============================================================================
+// Deliberately not automatic. Chasing money is a decision about a
+// particular family at a particular moment, and the office makes it —
+// a family who paid at reception this morning should not be chased this
+// afternoon because a job ran.
+//
+// So: see who owes what, untick anybody who should not hear from us,
+// read the exact words, press send. What is on screen is what goes out.
+// ============================================================================
+function ParentOutstanding() {
+  const [rows, setRows] = useState(null);
+  const [picked, setPicked] = useState({});
+  const [minOwed, setMinOwed] = useState(0.01);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+  async function load() {
+    setErr('');
+    try {
+      const out = await rest('rpc/outstanding_accounts', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_min: Number(minOwed) || 0.01
+        })
+      });
+      const list = Array.isArray(out) ? out : [];
+      setRows(list);
+      const p = {};
+      list.forEach(r => {
+        p[r.account_id] = true;
+      });
+      setPicked(p);
+      if (!title) {
+        const st = await selectRows('parent_message_settings', '*', '&limit=1').catch(() => []);
+        if (st?.[0]) {
+          setTitle(st[0].outstanding_title || '');
+          setBody(st[0].outstanding_template || '');
+        }
+      }
+    } catch (e) {
+      setErr(e.message);
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line
+
+  const list = rows || [];
+  const chosen = list.filter(r => picked[r.account_id]);
+  const owed = chosen.reduce((a, r) => a + Number(r.owed || 0), 0);
+  const rm = v => `RM ${Number(v || 0).toFixed(2)}`;
+  async function send() {
+    if (!chosen.length) return;
+    if (!confirm(`Send this to ${chosen.length} account${chosen.length === 1 ? '' : 's'}?\n\n` + `A family who already had this message this month will not get a second one.`)) return;
+    setBusy(true);
+    setErr('');
+    setMsg('');
+    try {
+      const r = await rpcCall('send_outstanding_reminders', {
+        p_accounts: chosen.map(x => x.account_id),
+        p_title: title || null,
+        p_body: body || null
+      });
+      if (r && r.ok === false) {
+        setErr(r.error || 'That did not send.');
+      } else setMsg(`Sent ${r.sent} message${r.sent === 1 ? '' : 's'}` + (r.asked_for > r.sent ? ` — the other ${r.asked_for - r.sent} already had one this month.` : '.'));
+    } catch (e) {
+      setErr(e.message);
+    }
+    setBusy(false);
+  }
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 20,
+      fontWeight: 800
+    }
+  }, "💳 Outstanding balances"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 14,
+      lineHeight: 1.6
+    }
+  }, "Who owes what, right now, from the invoices. Nothing here sends on its own — read it, choose who hears from you, and press send. A family who already had this message this month will not get a second one."), err && /*#__PURE__*/React.createElement("div", {
+    className: "note err",
+    style: {
+      marginBottom: 10
+    }
+  }, err), msg && /*#__PURE__*/React.createElement("div", {
+    className: "note ok",
+    style: {
+      marginBottom: 10
+    }
+  }, msg), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'flex-end',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0,
+      minWidth: 160
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Owing at least"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: 0.01,
+    step: 10,
+    value: minOwed,
+    onChange: e => setMinOwed(e.target.value)
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: load
+  }, "Refresh the list"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginLeft: 'auto',
+      display: 'flex',
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => {
+      const p = {};
+      list.forEach(r => {
+        p[r.account_id] = true;
+      });
+      setPicked(p);
+    }
+  }, "Select all"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setPicked({})
+  }, "Select none")))), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 0,
+      marginBottom: 12,
+      maxHeight: 340,
+      overflow: 'auto'
+    }
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 36
+    }
+  }), /*#__PURE__*/React.createElement("th", null, "Account"), /*#__PURE__*/React.createElement("th", null, "Phone"), /*#__PURE__*/React.createElement("th", {
+    className: "n",
+    style: {
+      textAlign: 'right'
+    }
+  }, "Invoices"), /*#__PURE__*/React.createElement("th", {
+    className: "n",
+    style: {
+      textAlign: 'right'
+    }
+  }, "Owing"))), /*#__PURE__*/React.createElement("tbody", null, rows === null && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 5,
+    className: "empty"
+  }, "Loading…")), rows !== null && !list.length && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 5,
+    className: "empty"
+  }, "Nobody owes anything above that amount.")), list.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.account_id,
+    style: picked[r.account_id] ? undefined : {
+      opacity: .45
+    }
+  }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: !!picked[r.account_id],
+    onChange: e => setPicked(p => ({
+      ...p,
+      [r.account_id]: e.target.checked
+    }))
+  })), /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 600
+    }
+  }, r.parent_name), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, r.phone || '—'), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, r.invoices), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 700
+    }
+  }, rm(r.owed))))))), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 14,
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Subject"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: title,
+    onChange: e => setTitle(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Message"), /*#__PURE__*/React.createElement("textarea", {
+    className: "input",
+    style: {
+      minHeight: 170,
+      fontFamily: 'inherit',
+      lineHeight: 1.6
+    },
+    value: body,
+    onChange: e => setBody(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      lineHeight: 1.9
+    }
+  }, "Placeholders: ", /*#__PURE__*/React.createElement("code", null, '{parent_name}'), ", ", /*#__PURE__*/React.createElement("code", null, '{amount}'), ",", ' ', /*#__PURE__*/React.createElement("code", null, '{invoices}'), ", ", /*#__PURE__*/React.createElement("code", null, '{centre_name}'), ". Each family gets their own figure. Editing here changes this send only — the saved wording lives under Automatic messages.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, chosen.length, " of ", list.length, " selected · ", rm(owed), " between them"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: send,
+    disabled: busy || !chosen.length
+  }, busy ? 'Sending…' : `Send to ${chosen.length} account${chosen.length === 1 ? '' : 's'}`)));
+}
 function ParentReminders() {
   const [st, setSt] = useState(null);
   const [dirty, setDirty] = useState(false);
@@ -33081,7 +33484,11 @@ function ParentReminders() {
     setErr('');
     setMsg('');
     try {
-      const keep = ['reminders_enabled', 'lead_mode', 'send_at_time', 'hours_before', 'quiet_start', 'quiet_end', 'one_message_per_family', 'skip_cancelled', 'channel', 'reminder_title', 'reminder_template', 'reminder_line_template', 'centre_name'];
+      const keep = ['reminders_enabled', 'lead_mode', 'send_at_time', 'hours_before', 'quiet_start', 'quiet_end', 'one_message_per_family', 'skip_cancelled', 'channel', 'reminder_title', 'reminder_template', 'reminder_line_template', 'centre_name',
+      // The second file added these. A key missing from this
+      // list is a field the screen edits and never saves,
+      // which looks exactly like a database that ignored you.
+      'lead_days', 'min_hours_ahead', 'notice_hours', 'replacement_window_days'];
       const patch = {};
       keep.forEach(k => {
         patch[k] = st[k];
@@ -33166,16 +33573,54 @@ function ParentReminders() {
     value: "day_before"
   }, "The day before, at a set time"), /*#__PURE__*/React.createElement("option", {
     value: "hours_before"
-  }, "A fixed number of hours before each class"))), st.lead_mode === 'day_before' ? /*#__PURE__*/React.createElement("div", {
-    className: "field"
+  }, "A fixed number of hours before each class"))), st.lead_mode === 'day_before' ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1,
+      minWidth: 150
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Days before the class"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: 0,
+    max: 30,
+    value: st.lead_days ?? 2,
+    onChange: e => up('lead_days', Number(e.target.value))
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1,
+      minWidth: 150
+    }
   }, /*#__PURE__*/React.createElement("label", null, "Time of day"), /*#__PURE__*/React.createElement("input", {
     className: "input",
     type: "time",
     value: String(st.send_at_time || '').slice(0, 5),
     onChange: e => up('send_at_time', e.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: -6,
+      marginBottom: 10
+    }
+  }, "Everyone hears at the same hour, which is what a parent expects. Two days at 4:00 PM means a Friday 8am class is flagged on Wednesday afternoon — a working day to arrange something before the notice period starts."), /*#__PURE__*/React.createElement("div", {
+    className: "field"
+  }, /*#__PURE__*/React.createElement("label", null, "Never closer than"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: 0,
+    max: 336,
+    value: st.min_hours_ahead ?? 24,
+    onChange: e => up('min_hours_ahead', Number(e.target.value))
   }), /*#__PURE__*/React.createElement("div", {
     className: "small subtle"
-  }, "Everyone hears at the same hour, which is what a parent expects.")) : /*#__PURE__*/React.createElement("div", {
+  }, "Hours. A reminder exists to leave time to tell us, so one arriving inside the notice period cannot be acted on and is not sent at all. At ", st.lead_days ?? 2, " day", (st.lead_days ?? 2) === 1 ? '' : 's', " and ", String(st.send_at_time || '16:00').slice(0, 5), " the closest any class comes is about ", Math.max(0, (st.lead_days ?? 2) * 24 - Number(String(st.send_at_time || '16:00').slice(0, 2))), " hours, so this rarely applies."))) : /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Hours before the class"), /*#__PURE__*/React.createElement("input", {
     className: "input",
@@ -33220,7 +33665,43 @@ function ParentReminders() {
       marginTop: -6,
       marginBottom: 10
     }
-  }, "Quiet hours hold a reminder back rather than losing it — it goes at the next run inside the window."), /*#__PURE__*/React.createElement("label", {
+  }, "Quiet hours hold a reminder back rather than losing it — it goes at the next run inside the window."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1,
+      minWidth: 150
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Notice we ask for"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: 0,
+    max: 336,
+    value: st.notice_hours ?? 24,
+    onChange: e => up('notice_hours', Number(e.target.value))
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Hours. Appears in the message as ", '{notice_hours}', ".")), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      flex: 1,
+      minWidth: 150
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Replacement window"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: 1,
+    max: 120,
+    value: st.replacement_window_days ?? 14,
+    onChange: e => up('replacement_window_days', Number(e.target.value))
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Days. Appears as ", '{replacement_window_days}', "."))), /*#__PURE__*/React.createElement("label", {
     style: {
       display: 'flex',
       gap: 8,

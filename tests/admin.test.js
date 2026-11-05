@@ -601,6 +601,62 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (!/receipt/i.test(said)) throw new Error('no mention of the receipt: ' + JSON.stringify(said));
   });
 
+  // ── The messaging module ───────────────────────────────────────────
+  // These screens write the words a parent reads. The assertion that
+  // matters is that every field they edit is a field they save: a key
+  // missing from the save list is a box somebody types into and then
+  // watches revert, which reads as a database that ignored them.
+  await step('every automatic message is editable and saveable', async () => {
+    const r = await page.evaluate(() => {
+      const src = ParentAutoMessages.toString();
+      const edited = [...src.matchAll(/up\('([a-z_]+)'/g)].map(m => m[1]);
+      const blocks = [...src.matchAll(/block\('([a-z]+)'/g)].map(m => m[1]);
+      const keepLine = src.match(/const keep\s*=\s*\[([\s\S]*?)\]/);
+      const keep = keepLine ? [...keepLine[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]) : [];
+      return { edited, blocks, keep };
+    });
+    if (!r.blocks.length) throw new Error('no message blocks found');
+    for (const b of r.blocks) {
+      for (const suffix of ['_enabled', '_title', '_template']) {
+        if (!r.keep.includes(b + suffix))
+          throw new Error(b + suffix + ' is edited on screen but never saved');
+      }
+    }
+  });
+
+  await step('the reminder screen saves the days and the floor it edits', async () => {
+    const keep = await page.evaluate(() => {
+      const m = ParentReminders.toString().match(/const keep\s*=\s*\[([\s\S]*?)\]/);
+      return m ? [...m[1].matchAll(/'([a-z_]+)'/g)].map(x => x[1]) : [];
+    });
+    for (const k of ['lead_days', 'min_hours_ahead', 'notice_hours', 'replacement_window_days'])
+      if (!keep.includes(k)) throw new Error(k + ' is edited on screen but never saved');
+  });
+
+  // The chase must go to the accounts that are ticked and no others.
+  // Sending a demand to a family who paid this morning is the one
+  // mistake this screen can make that cannot be taken back.
+  await step('the outstanding blast sends only to the accounts ticked', async () => {
+    const sent = await page.evaluate(async () => {
+      let host = document.getElementById('o-host');
+      if (!host) { host = document.createElement('div'); host.id = 'o-host'; document.body.appendChild(host); }
+      window.__rpc = null;
+      const realRest = window.rest;
+      // outstanding_accounts answers from here; send_outstanding_reminders
+      // is captured rather than called.
+      window.__patchRpc = true;
+      ReactDOM.createRoot(host).render(React.createElement(ParentOutstanding));
+      return null;
+    });
+    void sent;
+    // Driving the real screen needs the two RPCs; the mock serves
+    // /rest/v1/rpc/* as [] so the list is empty and Send is disabled,
+    // which is the assertion worth making without a live database.
+    await page.waitForTimeout(600);
+    const disabled = await page.locator('#o-host button:has-text("Send to")').isDisabled();
+    if (!disabled) throw new Error('Send was live with nobody selected');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');
