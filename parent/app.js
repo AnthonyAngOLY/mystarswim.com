@@ -473,7 +473,21 @@
     });
   }
 
-  // ── Inbox ────────────────────────────────────────────────────────────
+  // ── Inbox ────────────────────────────────────────────
+  // What a message says it is, under the text. This knew two kinds and
+  // called everything else "Star Swim", so a receipt and a reminder and
+  // an absence note all arrived wearing the same label — which is the
+  // one thing a list of messages has to get right, because it is what a
+  // parent scans before deciding whether to open anything.
+  var KIND_LABEL = {
+    reminder:     'Class reminder',
+    replacement:  'Replacement class',
+    payment:      'Payment received',
+    absence:      'Attendance',
+    outstanding:  'Your account',
+    announcement: 'Announcement'
+  };
+  function kindLabel(k) { return KIND_LABEL[k] || 'Star Swim'; }
   function loadMessages() {
     return rpc('my_messages', { p_limit: 50 }).then(function (rows) {
       rows = rows || [];
@@ -499,7 +513,7 @@
           +   (m.read_at ? '' : '<span class="dot"></span>') + '</div>'
           + '<div class="lead" style="margin-top:4px;white-space:pre-wrap">' + esc(m.body) + '</div>'
           + '<div class="sub" style="margin-top:6px">'
-          +   esc(m.kind === 'reminder' ? 'Reminder' : 'Star Swim') + ' · '
+          +   esc(kindLabel(m.kind)) + ' · '
           +   esc(ago(m.created_at)) + '</div></div>';
       }).join('') : '<div class="empty">Nothing from the centre yet.</div>';
 
