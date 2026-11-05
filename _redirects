@@ -1,0 +1,34 @@
+# ════════════════════════════════════════════════════════════════════════
+#  attendance.mystarswim.com is this site's /attendance folder
+# ════════════════════════════════════════════════════════════════════════
+#  The attendance PWA had a Netlify project of its own, building this same
+#  repository from this same branch, publishing the attendance/ directory
+#  instead of the root. Two projects, one repo, two builds per push, two
+#  places to look when something is stale — and a third doing the same
+#  thing in an account that had run out of credits.
+#
+#  This folds it back in. One project, one build.
+#
+#  WHY A REWRITE AND NOT A REDIRECT
+#  The app is installed on coaches' phones. A 301 would send an installed
+#  PWA to a URL outside its own scope, and it would open in a browser
+#  frame with an address bar until every coach reinstalled it. A 200 is a
+#  rewrite: the hostname in the phone's address bar never changes, the
+#  origin never changes, so the service worker registration, its cache and
+#  the installed icon all keep working untouched. Nothing on any phone has
+#  to be told about this.
+#
+#  WHY THE EXCLAMATION MARK
+#  Netlify serves a matching static file in preference to a redirect rule
+#  unless the rule is forced. The requested path here is usually "/", and
+#  "/index.html" does exist at the publish root — it is the public
+#  website. Without the !, a coach opening attendance.mystarswim.com would
+#  be shown mystarswim.com's home page. The ! is not a detail.
+#
+#  The splat carries the rest of the path, so ./app.js, ./sw.js,
+#  ./config.js and ./manifest.json all resolve inside attendance/ exactly
+#  as they did when that directory was its own site.
+# ════════════════════════════════════════════════════════════════════════
+
+https://attendance.mystarswim.com/*   /attendance/:splat   200!
+http://attendance.mystarswim.com/*    /attendance/:splat   200!
