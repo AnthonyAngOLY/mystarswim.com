@@ -145,17 +145,24 @@ select part, line, detail from (
   select 8, '   missing', g.rprefix || lpad(g.n::text, g.width, '0')
     from gaps g
 
-  -- Month by month, which is what tells the two causes apart. A month
-  -- with gaps and no voids cannot be explained by voiding, so those
-  -- numbers were reserved and never written. A month where the two
-  -- match is the one to look at.
+  -- Gaps per month, beside the voids. Read as CONTEXT, not as a verdict.
+  --
+  -- The first version of this drew conclusions from it and they were not
+  -- sound: a gap is filed under its receipt's own month prefix, while a
+  -- void is filed under the day somebody pressed the button, and those
+  -- are months apart. INV-202608-233 was voided on 5 November. Lining
+  -- the two up by month is comparing two different clocks, and
+  -- "consistent with the voids" was reading agreement into that.
+  --
+  -- So this reports both counts and stops. What a gap actually was is
+  -- not in this database — see supabase_money_audit_trail.sql, which
+  -- makes sure the next one is.
   union all
-  select 8.5, '   ' || m || ' — gaps vs voids',
+  select 8.5, '   ' || m,
          gp::text || ' gap' || case when gp = 1 then '' else 's' end
-         || ', ' || vd::text || ' invoice' || case when vd = 1 then '' else 's' end || ' voided'
-         || case when vd = 0 then '   → no void that month, so nothing was deleted: the numbers were never issued'
-                 when gp <= vd then '   → consistent with the voids'
-                 else '   → more gaps than voids; the extra were never issued' end
+         || ' in receipts numbered ' || m
+         || ',  ' || vd::text || ' invoice' || case when vd = 1 then '' else 's' end
+         || ' voided during ' || m
     from (
       select m,
              coalesce(sum(gp),0)::int gp, coalesce(sum(vd),0)::int vd
@@ -166,6 +173,15 @@ select part, line, detail from (
                  0, 1 from invoices where status = 'void'
         ) u where m is not null group by m
     ) z
+
+  union all
+  select 8.9, '   what a gap means',
+         'Not determinable here. A gap is either a receipt that was deleted — voiding used to '
+      || 'remove an invoice''s payments — or a number reserved by a save that then failed, since '
+      || 'the counter is bumped before the row is written. Neither leaves a trace. '
+      || 'Against ' || (select count(*)::text from seqd) || ' payments, '
+      || (select count(*)::text from gaps) || ' is a small set: document each one with the voided '
+      || 'invoices below and the matter is closed.'
 
   union all
   select 9, 'voided invoices',
