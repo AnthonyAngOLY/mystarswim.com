@@ -36,9 +36,22 @@
 --  Voiding removed the payments rows outright rather than reversing
 --  them. The invoice stayed, marked void, with its number; the receipts
 --  went. That leaves holes in the receipt sequence with nothing to say
---  what was in them — which is the exact pattern an audit looks for,
---  and indistinguishable from suppressed income. The gaps are listed
---  below so each can be accounted for.
+--  what was in them — the exact pattern an audit looks for, and
+--  indistinguishable from suppressed income.
+--
+--  BUT A GAP IS NOT PROOF OF A DELETION, AND THIS REPORT SAID IT WAS.
+--  There is a second way to make one, and it has nothing to do with
+--  voiding. A receipt number is reserved by bumping the counter BEFORE
+--  the payment row is written. If that write then fails — a dropped
+--  connection, a rejected insert — the number is spent and no receipt
+--  ever exists. Nobody deleted anything; the number was simply never
+--  issued.
+--
+--  The two look identical in the sequence and are completely different
+--  facts. A deleted receipt is a document somebody was given and the
+--  system no longer admits to. A number never issued is housekeeping.
+--  Section 8 sets the gaps against the voided invoices month by month,
+--  which is the evidence that separates them.
 -- ════════════════════════════════════════════════════════════════════════
 
 with
@@ -126,12 +139,33 @@ select part, line, detail from (
          case when (select count(*) from gaps) = 0 then 'none — every number is accounted for'
               else (select count(*)::text from gaps) || ' missing number'
                    || case when (select count(*) from gaps) = 1 then '' else 's' end
-                   || ' — each one was a receipt that has been deleted' end
+                   || ' — either a deleted receipt or a number reserved and never written' end
 
   union all
-  select 8, '   missing',
-         g.rprefix || lpad(g.n::text, g.width, '0')
+  select 8, '   missing', g.rprefix || lpad(g.n::text, g.width, '0')
     from gaps g
+
+  -- Month by month, which is what tells the two causes apart. A month
+  -- with gaps and no voids cannot be explained by voiding, so those
+  -- numbers were reserved and never written. A month where the two
+  -- match is the one to look at.
+  union all
+  select 8.5, '   ' || m || ' — gaps vs voids',
+         gp::text || ' gap' || case when gp = 1 then '' else 's' end
+         || ', ' || vd::text || ' invoice' || case when vd = 1 then '' else 's' end || ' voided'
+         || case when vd = 0 then '   → no void that month, so nothing was deleted: the numbers were never issued'
+                 when gp <= vd then '   → consistent with the voids'
+                 else '   → more gaps than voids; the extra were never issued' end
+    from (
+      select m,
+             coalesce(sum(gp),0)::int gp, coalesce(sum(vd),0)::int vd
+        from (
+          select substring(rprefix from '[0-9]{6}') m, 1 gp, 0 vd from gaps
+          union all
+          select to_char(coalesce(voided_at, updated_at, now()) at time zone 'Asia/Kuala_Lumpur','YYYYMM'),
+                 0, 1 from invoices where status = 'void'
+        ) u where m is not null group by m
+    ) z
 
   union all
   select 9, 'voided invoices',
@@ -146,6 +180,14 @@ select part, line, detail from (
             from invoices i
            where i.status = 'void'
              and exists (select 1 from payments p where p.invoice_id = i.id))
+
+  union all
+  select 10.5, '   voided',
+         'INV ' || coalesce(i.invoice_number::text,'?')
+         || '  ' || to_char(coalesce(i.voided_at, i.updated_at) at time zone 'Asia/Kuala_Lumpur','DD Mon YYYY')
+         || '  RM ' || to_char(coalesce(i.total_amount,0),'FM999999990.00')
+         || coalesce('  · ' || nullif(btrim(i.void_reason),''), '  · no reason recorded')
+    from invoices i where i.status = 'void'
 
   union all
   select 11, 'FOR THE ACCOUNTANT',
