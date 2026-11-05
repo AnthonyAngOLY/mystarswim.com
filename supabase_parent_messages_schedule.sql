@@ -65,12 +65,20 @@ select jobname as job, schedule, active,
  where jobname like 'star-swim-%'
  order by jobname;
 
--- To see what they have done, afterwards:
+-- To see what they have done, afterwards. cron.job_run_details keys on
+-- jobid and carries no jobname — that lives on cron.job — so the two
+-- have to be joined. Selecting jobname straight from the run details is
+-- the obvious guess and it fails with "column jobname does not exist".
 --
---   select jobname, status, return_message, start_time
---     from cron.job_run_details
---    where jobname like 'star-swim-%'
---    order by start_time desc limit 20;
+--   select j.jobname, d.status, d.return_message, d.start_time
+--     from cron.job_run_details d
+--     join cron.job j on j.jobid = d.jobid
+--    where j.jobname like 'star-swim-%'
+--    order by d.start_time desc limit 20;
+--
+-- return_message holds the job's own answer — how many were sent, for
+-- which date, or why nothing went out. "not yet time today" before the
+-- send hour and a number after it is the whole system working.
 --
 -- To stop them:
 --
