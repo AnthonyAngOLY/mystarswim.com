@@ -76,9 +76,25 @@ select jobname as job, schedule, active,
 --    where j.jobname like 'star-swim-%'
 --    order by d.start_time desc limit 20;
 --
--- return_message holds the job's own answer — how many were sent, for
--- which date, or why nothing went out. "not yet time today" before the
--- send hour and a number after it is the whole system working.
+-- status is the useful column there, and only that. return_message
+-- holds the command tag — "1 row" — because pg_cron records what the
+-- statement returned, not what the function decided. The job's own
+-- answer never reaches it.
+--
+-- So to see what actually went out, ask the inbox rather than the
+-- scheduler. This is the one to keep:
+--
+--   select kind,
+--          count(*)                                        as messages,
+--          count(distinct account_id)                      as families,
+--          to_char(max(created_at) at time zone 'Asia/Kuala_Lumpur',
+--                  'Dy DD Mon, HH24:MI')                   as most_recent
+--     from parent_messages
+--    where created_at > now() - interval '7 days'
+--    group by kind order by 2 desc;
+--
+-- A row of zero is not possible there — a kind with nothing sent simply
+-- does not appear, which is the answer when a reminder did not go.
 --
 -- To stop them:
 --
