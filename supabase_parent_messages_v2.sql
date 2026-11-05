@@ -463,6 +463,15 @@ create trigger parent_payment_thanks_trg
 -- ─── 9. The outstanding-balance blast, which a person sends ─────────────
 -- Not automatic, on purpose. Chasing money is a decision about a
 -- particular family at a particular moment, and the office makes it.
+-- WHAT COUNTS AS OWED
+-- The arithmetic, not the label. An invoice marked 'paid' that has had
+-- less than its total paid against it is a contradiction, and leaving
+-- those out by status made this disagree with the monthly report, which
+-- works from the same two columns. Two screens giving two answers about
+-- who owes money is how a family gets chased for a bill they settled.
+--
+-- A draft is excluded because it is not a bill yet — nobody has been
+-- asked for it. Void and refunded are excluded for the obvious reason.
 create or replace function outstanding_accounts(p_min numeric default 0.01)
 returns table (account_id uuid, parent_name text, phone text, owed numeric, invoices integer)
 language sql stable security definer set search_path = public as $$
@@ -474,7 +483,8 @@ language sql stable security definer set search_path = public as $$
     from invoices i
     join parent_accounts pa on pa.id = i.account_id
    where can_write_office()
-     and coalesce(i.status,'') not in ('void','refunded','paid')
+     and coalesce(i.status,'') not in ('void','refunded','draft')
+     and coalesce(i.total_amount,0) - coalesce(i.amount_paid,0) >= 0.005
    group by pa.id
   having sum(greatest(0, coalesce(i.total_amount,0) - coalesce(i.amount_paid,0))) >= p_min
    order by 4 desc;
