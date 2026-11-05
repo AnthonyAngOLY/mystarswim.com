@@ -32,7 +32,7 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
 
   const step = async (n, f) => {
     try { await f(); console.log('PASS  ' + n); }
-    catch (e) { console.log('FAIL  ' + n + ' -> ' + String(e.message).split('\n')[0]); fail++; }
+    catch (e) { console.log('FAIL  ' + n + ' -> ' + String(e.message).split('\n').slice(0,6).join(' | ')); fail++; }
   };
 
   await page.request.get(BASE + '/__fail?on=0');
@@ -400,6 +400,129 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     const t = await rText();
     if (!/no payment date/i.test(t)) throw new Error('the undated payment is never mentioned');
     if (!/voided invoices/i.test(t)) throw new Error('the voided payment is never mentioned');
+  });
+
+  // ── Recording a payment on an invoice ──────────────────────────────
+  // The form sent payment_date / payment_method / reference_number; the
+  // handler destructures paymentDate / paymentMethod / referenceNumber.
+  // Nothing threw. All three arrived undefined, the method fell to its
+  // 'cash' default, the date fell to today and the reference was
+  // dropped — so every invoice payment ever taken was filed as cash, on
+  // the day it was keyed, with no bank reference. It was found when an
+  // accountant asked where all the cash was.
+  //
+  // This drives the real form and reads back the object it hands over.
+  const payForm = () => page.evaluate(() => {
+    let host = document.getElementById('p-host');
+    if (!host) { host = document.createElement('div'); host.id = 'p-host'; document.body.appendChild(host); }
+    window.__sent = null;
+    const INV = { id: 'inv-1', invoice_number: 1, account_name: 'Lee Oy Yin',
+                  status: 'sent', total_amount: 300, amount_paid: 0, issue_date: '2026-11-01' };
+    ReactDOM.createRoot(host).render(React.createElement(InvoiceDetailPanel, {
+      invoice: INV, lines: [], pmts: [], pendingCredits: [], isOverdue: false,
+      membersByGroup: {}, products: [],
+      onVoid: () => {}, onDelete: null, onRefund: () => {},
+      onEditVoidReason: null, onUpdateStatus: () => {},
+      onRecordPayment: (d) => { window.__sent = d; return Promise.resolve({ receipt_number: 1 }); },
+      onConfirmCredit: () => {}, onReverseCredit: () => {},
+      onAddLine: () => {}, onUpdateLine: () => {}, onDeleteLine: () => {}
+    }));
+  });
+
+  await step('the payment form hands over the method it was given', async () => {
+    await payForm();
+    await page.waitForTimeout(500);
+    await page.locator('#p-host button:has-text("Record Payment")').first().click();
+    await page.waitForTimeout(300);
+    const amount = page.locator('#p-host .inv-pay-form input').first();
+    await amount.fill('300');
+    // The Method dropdown, whatever its options are called on this build.
+    const method = page.locator('#p-host .inv-pay-form select').first();
+    const opts = await method.locator('option').evaluateAll(os => os.map(o => o.value));
+    const notCash = opts.find(v => v && v !== 'cash');
+    if (!notCash) throw new Error('no non-cash method to choose: ' + JSON.stringify(opts));
+    await method.selectOption(notCash);
+    await page.waitForTimeout(200);
+    await page.locator('#p-host .inv-pay-form button:has-text("Save Payment")').click();
+    await page.waitForTimeout(400);
+    const sent = await page.evaluate(() => window.__sent);
+    if (!sent) throw new Error('the form handed over nothing');
+    // The handler reads paymentMethod. Anything else and it defaults.
+    const m = sent.paymentMethod !== undefined ? sent.paymentMethod : sent.payment_method;
+    if (m !== notCash) throw new Error('chose ' + notCash + ', sent ' + JSON.stringify(m));
+    if (sent.paymentMethod === undefined)
+      throw new Error('sent under a key recordPayment does not read: ' + JSON.stringify(Object.keys(sent)));
+  });
+
+  await step('and the date and reference travel under readable keys too', async () => {
+    const sent = await page.evaluate(() => window.__sent);
+    if (sent.paymentDate === undefined)
+      throw new Error('the payment date is under a key recordPayment does not read');
+    if (!sent.paymentDate) throw new Error('no payment date was sent at all');
+    if (!('referenceNumber' in sent))
+      throw new Error('the bank reference is under a key recordPayment does not read');
+  });
+
+  // ── Void ───────────────────────────────────────────────────────────
+  // Voiding used to delete the invoice's payments. On an unpaid invoice
+  // that is a no-op; on a paid one it erased receipts the parent holds,
+  // left an unexplained hole in a numbered sequence, and moved a past
+  // month's revenue. Void is now only for an invoice nobody has paid.
+  const detail = (invoice, pmts) => page.evaluate(([inv, ps]) => {
+    let host = document.getElementById('v-host');
+    if (!host) { host = document.createElement('div'); host.id = 'v-host'; document.body.appendChild(host); }
+    window.__voided = false;
+    const root = window.__vRoot || (window.__vRoot = ReactDOM.createRoot(host));
+    root.render(React.createElement(InvoiceDetailPanel, {
+      key: inv.id,                 // remount, as picking another invoice does
+      invoice: inv, lines: [], pmts: ps, pendingCredits: [], isOverdue: false,
+      membersByGroup: {}, products: [],
+      onVoid: () => { window.__voided = true; return Promise.resolve(); },
+      onDelete: null, onRefund: () => {}, onEditVoidReason: null,
+      onUpdateStatus: () => {}, onRecordPayment: () => Promise.resolve({}),
+      onConfirmCredit: () => {}, onReverseCredit: () => {},
+      onAddLine: () => {}, onUpdateLine: () => {}, onDeleteLine: () => {}
+    }));
+  }, [invoice, pmts]);
+
+  // "Void" is a prefix of "Confirm Void", so match the whole label.
+  const voidBtn = () => page.locator('#v-host button').filter({ hasText: /^Void$/ });
+
+  const UNPAID = { id:'v1', invoice_number:7, account_name:'Lee Oy Yin', status:'sent',
+                   total_amount:300, amount_paid:0, issue_date:'2026-11-01' };
+  const PAID   = { id:'v2', invoice_number:8, account_name:'Lee Oy Yin', status:'paid',
+                   total_amount:300, amount_paid:300, issue_date:'2026-11-01' };
+  const RECEIPT = [{ id:'pm1', invoice_id:'v2', receipt_number:'R-202611-0042',
+                     amount:300, payment_date:'2026-11-03', payment_method:'transfer' }];
+
+  await step('an invoice nobody has paid can still be voided', async () => {
+    await detail(UNPAID, []);
+    await page.waitForTimeout(400);
+    await voidBtn().click();
+    await page.waitForTimeout(300);
+    const form = await page.locator('#v-host textarea').count();
+    if (!form) throw new Error('the void form did not open on an unpaid invoice');
+  });
+
+  await step('an invoice with a receipt against it cannot be voided', async () => {
+    await detail(PAID, RECEIPT);
+    await page.waitForTimeout(400);
+    let said = '';
+    page.once('dialog', d => { said = d.message(); d.accept(); });
+    await voidBtn().click();
+    await page.waitForTimeout(400);
+    if (await page.evaluate(() => window.__voided))
+      throw new Error('it voided a paid invoice');
+    if (!/refund/i.test(said))
+      throw new Error('it refused without pointing at Refund: ' + JSON.stringify(said));
+  });
+
+  await step('and it says why, in terms of the document the parent holds', async () => {
+    let said = '';
+    page.once('dialog', d => { said = d.message(); d.accept(); });
+    await voidBtn().click();
+    await page.waitForTimeout(400);
+    if (!/receipt/i.test(said)) throw new Error('no mention of the receipt: ' + JSON.stringify(said));
   });
 
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });

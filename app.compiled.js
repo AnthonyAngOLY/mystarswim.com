@@ -1441,14 +1441,31 @@ function App({
       invoiceId
     };
   }
-  async function recordPayment({
-    invoiceId,
-    amount,
-    paymentDate,
-    paymentMethod,
-    referenceNumber,
-    notes: pNotes
-  }) {
+
+  // Accepts either spelling of the three fields, because this file mixes
+  // the two conventions and the cost of getting it wrong is not a crash
+  // but a plausible wrong answer that nobody sees for months.
+  async function recordPayment(arg) {
+    const {
+      invoiceId,
+      amount,
+      notes: pNotes
+    } = arg;
+    const paymentDate = arg.paymentDate ?? arg.payment_date;
+    const paymentMethod = arg.paymentMethod ?? arg.payment_method;
+    const referenceNumber = arg.referenceNumber ?? arg.reference_number ?? null;
+
+    // No silent default. A missing method used to become 'cash', which is
+    // a real method and a believable answer, so nothing ever looked wrong
+    // — it surfaced only when an accountant asked where all the cash was
+    // and the bank slips did not match. Refusing is recoverable in
+    // seconds at a reception desk; a wrong method is found months later,
+    // after it has been written on receipts the parents already hold.
+    if (!paymentMethod) {
+      alert('No payment method was given, so nothing was recorded. Choose one and try again.');
+      throw new Error('recordPayment: no payment method supplied');
+    }
+
     // Read current settings (fresh) for receipt number
     const settRows = await selectRows('invoice_settings', '*').catch(() => []);
     const sett = settRows?.[0] || invoiceSettings;
@@ -1471,7 +1488,8 @@ function App({
       receipt_number: receiptNumber,
       amount: Number(amount),
       payment_date: paymentDate || todayStr(),
-      payment_method: paymentMethod || 'cash',
+      payment_method: paymentMethod,
+      // guaranteed above, no default
       reference_number: referenceNumber || null,
       notes: pNotes || null
     });
@@ -1594,11 +1612,60 @@ function App({
       alert(err.message || 'Failed to reverse');
     }
   }
+
+  // Void an invoice that was raised in error.
+  //
+  // This used to delete the invoice's payments. An invoice nobody paid
+  // has none, so most of the time it did nothing — but on a paid one it
+  // erased receipts the parent is holding a copy of, left an
+  // unexplained hole in the receipt sequence, and quietly changed what
+  // a past month's revenue had been. A gap in a numbered sequence with
+  // no record of what was in it is the one pattern an audit is looking
+  // for, and it cannot be told apart from suppressed income.
+  //
+  // So: a receipt is never removed. Each payment is reversed by a
+  // negative one, exactly as a refund is, with its own number and its
+  // own date. The original stands, the reversal is visible, the net is
+  // zero, and both documents are there to be read.
+  //
+  // The Void button itself now refuses a paid invoice and points at
+  // Refund, which is the correct instrument for money that is going
+  // back. This path remains for the case the button cannot see.
   async function voidInvoice(id, reason) {
     try {
-      await deleteRows('payments', {
-        invoice_id: id
-      }).catch(() => {});
+      const existing = await selectRows('payments', '*', `&invoice_id=eq.${id}`).catch(() => []);
+      const live = (existing || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+      if (Math.abs(live) > 0.005) {
+        const note = `Void: ${(reason || 'raised in error').slice(0, 80)}`;
+        const settRows = await selectRows('invoice_settings', '*').catch(() => []);
+        let sett = settRows?.[0] || invoiceSettings;
+        let seqStart = Number(sett.next_receipt_seq) || 1;
+        const {
+          seq,
+          number: receiptNumber
+        } = await nextFreeReceiptNumber(sett, seqStart);
+        await patchRows('invoice_settings', {
+          id: 1
+        }, {
+          next_receipt_seq: seq + 1
+        }).catch(() => {});
+        await insertRows('payments', {
+          invoice_id: id,
+          receipt_number: receiptNumber,
+          kind: 'reversal',
+          amount: -live,
+          payment_date: todayStr(),
+          // Carried from the receipts being reversed where they agree, so
+          // the reversal lands in the same column of the cash book as the
+          // money it is taking back out.
+          payment_method: (() => {
+            const ms = [...new Set((existing || []).map(p => p.payment_method).filter(Boolean))];
+            return ms.length === 1 ? ms[0] : 'cash';
+          })(),
+          reference_number: null,
+          notes: note
+        });
+      }
       await deleteRows('pending_credits', {
         invoice_id: id
       }).catch(() => {});
@@ -21365,11 +21432,18 @@ function InvoiceDetailPanel({
     }
     setPayBusy(true);
     try {
+      // These key names are not a style choice. recordPayment destructures
+      // paymentDate / paymentMethod / referenceNumber, and this form used
+      // to send payment_date / payment_method / reference_number — so all
+      // three arrived undefined. The method fell to its 'cash' default,
+      // the date fell to today, and the bank reference was dropped. Every
+      // invoice payment ever taken here was filed as cash, on the day it
+      // was keyed in, with no reference.
       const pmt = await onRecordPayment({
         amount: Number(payAmt),
-        payment_date: payDate,
-        payment_method: payMethod,
-        reference_number: payRef.trim() || null,
+        paymentDate: payDate,
+        paymentMethod: payMethod,
+        referenceNumber: payRef.trim() || null,
         notes: payNotes.trim() || null
       });
       setLastReceipt(pmt);
@@ -21488,10 +21562,17 @@ function InvoiceDetailPanel({
       const lastPmt = [...pmts].sort((a, b) => (b.payment_date || '').localeCompare(a.payment_date || ''))[0];
       printInvoiceAndReceipt(invoice, lines, lastPmt, membersByGroup);
     }
-  }, "🖨 Print Invoice & Receipt"), invoice.status !== 'void' && invoice.status !== 'refunded' && /*#__PURE__*/React.createElement("button", {
+  }, "🖨 Print Invoice & Receipt"), invoice.status !== 'void' && invoice.status !== 'refunded' && (pmts && pmts.length ? /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    title: "This invoice has receipts against it, so it cannot be voided. Use Refund.",
+    onClick: () => alert('This invoice has ' + pmts.length + ' receipt' + (pmts.length === 1 ? '' : 's') + ' against it, so it cannot be voided — the receipts are documents the parent holds.\n\nUse Refund instead. It keeps the original and records a reversing receipt beside it.'),
+    style: {
+      opacity: .55
+    }
+  }, "Void") : /*#__PURE__*/React.createElement("button", {
     className: "btn btn-danger small",
     onClick: () => setShowVoidForm(true)
-  }, "Void"), onRefund && paidTotal > 0 && invoice.status !== 'void' && invoice.status !== 'refunded' && /*#__PURE__*/React.createElement("button", {
+  }, "Void")), onRefund && paidTotal > 0 && invoice.status !== 'void' && invoice.status !== 'refunded' && /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     style: {
       borderColor: '#C4B5FD',
