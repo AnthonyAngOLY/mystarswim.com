@@ -4,7 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Star Swim — Parents</title>
-<link rel="icon" href="../logo.png">
+<link rel="icon" href="./logo.png">
+<!-- Installable, like the coach app. start_url, scope and the icons are
+     all RELATIVE, which matters: this is served both at the root of
+     app.mystarswim.com and at /parent on the main site, and an absolute
+     "/" would mean the public website from the second of those — which
+     is what would get installed under the Star Swim name. -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#0EA5E9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Star Swim">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <style>
   /* Same tokens as the crew app, so the two feel like one family of
      things rather than two products that happen to share a logo. */

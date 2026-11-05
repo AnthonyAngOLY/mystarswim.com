@@ -61,22 +61,75 @@ step('BUILD matches between the attendance app and its worker', () => {
   if (app[1] !== sw[1]) throw new Error('app.js says ' + app[1] + ', sw.js says ' + sw[1]);
 });
 
+// ── The parent app ──────────────────────────────────────────────────────
+// Added the day it became installable. Everything here is the same trap
+// the attendance app walked into: a shell that pre-caches a file it does
+// not have, and a manifest whose paths are right from one URL and wrong
+// from the other.
+step('every file the parent shell pre-caches exists', () => {
+  const sw = read('parent/sw.js');
+  const block = sw.match(/var SHELL = \[([\s\S]*?)\];/);
+  if (!block) throw new Error('could not find SHELL in parent/sw.js');
+  const items = block[1].match(/'([^']+)'/g).map(s => s.slice(1, -1));
+  const missing = items
+    .filter(x => x !== './')
+    .map(x => 'parent/' + x.replace(/^\.\//, ''))
+    .filter(p => !exists(p));
+  if (missing.length) throw new Error('missing: ' + missing.join(', '));
+});
+
+// The attendance manifest declares start_url, scope and icons as "/",
+// which is right while it owns a hostname and wrong from the path form:
+// installing from mystarswim.com/attendance would install the public
+// WEBSITE under the Attendance name. The parent app is served from two
+// places from day one, so its paths are relative and must stay that way.
+step('the parent manifest works from both the hostname and the path', () => {
+  const m = JSON.parse(read('parent/manifest.json'));
+  for (const k of ['start_url', 'scope']) {
+    if (!String(m[k] || '').startsWith('.'))
+      throw new Error(k + ' is "' + m[k] + '" — absolute, so it means the site root '
+        + 'when installed from mystarswim.com/parent');
+  }
+  for (const ic of m.icons || []) {
+    if (!String(ic.src).startsWith('.'))
+      throw new Error('icon ' + ic.src + ' is absolute');
+    if (!exists('parent/' + ic.src.replace(/^\.\//, '')))
+      throw new Error('icon ' + ic.src + ' does not exist');
+  }
+});
+
+step('BUILD matches between the parent app and its worker', () => {
+  const app = read('parent/app.js').match(/BUILD\s*=\s*(\d+)/);
+  const sw = read('parent/sw.js').match(/BUILD\s*=\s*(\d+)/);
+  if (!app || !sw) throw new Error('could not read BUILD from both files');
+  if (app[1] !== sw[1]) throw new Error('app.js says ' + app[1] + ', sw.js says ' + sw[1]);
+});
+
 // ── The deploy ──────────────────────────────────────────────────────────
 // attendance.mystarswim.com is served by this site's /attendance folder,
 // through a rewrite. Netlify prefers a matching static file over a
 // redirect rule unless the rule is forced, and "/" matches the public
 // website's index.html — so without the !, a coach opening the attendance
 // hostname is shown the home page instead.
-step('the attendance hostname is rewritten, forced, and not redirected', () => {
-  if (!exists('_redirects')) throw new Error('no _redirects at the publish root');
-  const lines = read('_redirects').split('\n')
-    .map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-  const rule = lines.find(l => /attendance\.mystarswim\.com/.test(l));
-  if (!rule) throw new Error('nothing routes attendance.mystarswim.com');
-  if (!/\/attendance\/:splat/.test(rule)) throw new Error('does not carry the path: ' + rule);
-  if (/\b30[12]\b/.test(rule)) throw new Error('a redirect, not a rewrite — this breaks installed PWAs: ' + rule);
-  if (!/\b200!/.test(rule)) throw new Error('not forced, so index.html wins and the website is served: ' + rule);
-});
+// Both app hostnames, held to the same two rules: a rewrite and not a
+// redirect, because a 301 sends an installed PWA outside its own scope;
+// and forced, because /index.html exists at the publish root and an
+// unforced rule loses to it, serving the public website instead.
+for (const [host, path] of [['attendance', 'attendance'], ['app', 'parent']]) {
+  step(`${host}.mystarswim.com is rewritten, forced, and not redirected`, () => {
+    if (!exists('_redirects')) throw new Error('no _redirects at the publish root');
+    const lines = read('_redirects').split('\n')
+      .map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+    const rule = lines.find(l => l.startsWith('https://' + host + '.mystarswim.com'));
+    if (!rule) throw new Error('nothing routes ' + host + '.mystarswim.com');
+    if (!new RegExp('/' + path + '/:splat').test(rule))
+      throw new Error('does not carry the path: ' + rule);
+    if (/\b30[12]\b/.test(rule))
+      throw new Error('a redirect, not a rewrite — this breaks installed PWAs: ' + rule);
+    if (!/\b200!/.test(rule))
+      throw new Error('not forced, so index.html wins and the website is served: ' + rule);
+  });
+}
 
 // ── No second copies ────────────────────────────────────────────────────
 // Netlify deploys every file in the functions directory as its own

@@ -17788,7 +17788,10 @@ function ParentReminders(){
       <div className="field"><label>One line per class, inside {'{class_list}'}</label>
         <input className="input" value={st.reminder_line_template||''}
                onChange={e=>up('reminder_line_template',e.target.value)}/>
-        <div className="small subtle">{'{child} {time} {lesson} {pool} {coach}'}</div></div>
+        {/* day_time was added when the reminder learned to say the day
+            as well as the hour. A placeholder that works and is not
+            listed is one nobody uses. */}
+        <div className="small subtle">{'{child} {day_time} {time} {lesson} {pool} {coach}'}</div></div>
       <div className="field"><label>Signed</label>
         <input className="input" value={st.centre_name||''}
                onChange={e=>up('centre_name',e.target.value)}/></div>
@@ -17799,7 +17802,7 @@ function ParentReminders(){
         {dirty?'Save changes':'Saved'}
       </button>
       <button className="btn btn-ghost" disabled={busy} onClick={sendNow}>Run the job now</button>
-      <span className="small subtle">Safe to press — it sends only what is due, and never twice.</span>
+      <span className="small subtle">Safe to press — it sends only what is due, and never twice. You do not have to: the job runs by itself every hour and sends when the time above arrives.</span>
     </div>
 
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:10,flexWrap:'wrap'}}>

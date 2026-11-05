@@ -32,3 +32,14 @@
 
 https://attendance.mystarswim.com/*   /attendance/:splat   200!
 http://attendance.mystarswim.com/*    /attendance/:splat   200!
+
+#  app.mystarswim.com is the parent app, the same way.
+#
+#  Both apps are installable and both have their own service worker, so
+#  the scoping matters: a worker registered from ./sw.js at the root of
+#  app.mystarswim.com claims that origin and nothing of the main site,
+#  and the manifest's start_url and icons are relative, so an install
+#  from app.mystarswim.com and one from mystarswim.com/parent both land
+#  on the parent app rather than one of them installing the website.
+https://app.mystarswim.com/*          /parent/:splat       200!
+http://app.mystarswim.com/*           /parent/:splat       200!

@@ -33783,7 +33783,7 @@ function ParentReminders() {
     onChange: e => up('reminder_line_template', e.target.value)
   }), /*#__PURE__*/React.createElement("div", {
     className: "small subtle"
-  }, '{child} {time} {lesson} {pool} {coach}')), /*#__PURE__*/React.createElement("div", {
+  }, '{child} {day_time} {time} {lesson} {pool} {coach}')), /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Signed"), /*#__PURE__*/React.createElement("input", {
     className: "input",
@@ -33807,7 +33807,7 @@ function ParentReminders() {
     onClick: sendNow
   }, "Run the job now"), /*#__PURE__*/React.createElement("span", {
     className: "small subtle"
-  }, "Safe to press — it sends only what is due, and never twice.")), /*#__PURE__*/React.createElement("div", {
+  }, "Safe to press — it sends only what is due, and never twice. You do not have to: the job runs by itself every hour and sends when the time above arrives.")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',

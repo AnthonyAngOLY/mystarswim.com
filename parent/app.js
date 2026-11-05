@@ -12,6 +12,16 @@
 (function () {
   'use strict';
 
+  // Installable. Registered relative, so the scope is this directory and
+  // never the whole site — which matters when the same files are also
+  // served from the root of app.mystarswim.com.
+  var BUILD = 1;
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
   var KEY = 'ssb.parent.session';
