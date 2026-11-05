@@ -1,0 +1,30 @@
+{
+  "name": "mystarswim",
+  "private": true,
+  "description": "Star Swim scheduler, attendance PWA, parent app and public intake. Static files served by Netlify; this file exists only to pin what build.js and the tests need.",
+  "scripts": {
+    "build": "node build.js app.js app.compiled.js && node build.js intake.js intake.compiled.js",
+    "check": "node build.js app.js app.compiled.js --check && node build.js intake.js intake.compiled.js --check",
+    "test": "bash tests/run.sh"
+  },
+  "//": [
+    "Babel is pinned to 7, exactly, and not by preference. app.compiled.js and",
+    "intake.compiled.js are committed, and build.js reproduces them byte for byte",
+    "only with preset-react's useSpread option. Babel 8 removed that option and",
+    "refuses to build at all, so an unpinned install does not degrade quietly --",
+    "it stops. Which is the better of the two failures, but still a stop.",
+    "",
+    "react and react-dom are here for the tests, not for the pages: the pages load",
+    "18.2.0 from a CDN the sandbox cannot reach, and tests/browser.js answers those",
+    "requests from node_modules instead. The versions have to match the CDN tags in",
+    "app.html and intake.html, or the tests drive a different React from the one",
+    "that is deployed."
+  ],
+  "devDependencies": {
+    "@babel/core": "7.28.4",
+    "@babel/preset-react": "7.27.1",
+    "@babel/preset-typescript": "7.27.1",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  }
+}

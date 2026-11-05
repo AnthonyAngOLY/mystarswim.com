@@ -70,6 +70,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   try {
     const body = await req.json().catch(() => null);
     if (!body) return json({ error: "Nothing to register." }, 400);
+
+    // The database client, made before anything can want it.
+    //
+    // It used to be made further down, just before the registration
+    // path, and the lookup branch above it reached for it anyway. A
+    // const is not hoisted the way a function is — it exists but cannot
+    // be touched until its line runs — so every lookup threw "Cannot
+    // access 'db' before initialization" and came back through the
+    // catch at the bottom as a plain 500. The returning-parent route
+    // was deployed and dead, and nothing in the form could tell the
+    // difference between that and a wrong account number.
+    const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
+
     // ── Looking a family up, before any of the rest applies ──
     // The form asks this before the parent has typed anything else, so
     // it answers and returns before any field is required. It sat below
@@ -112,8 +125,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     for (const c of children) {
       if (!s(c?.name, 120)) return json({ error: "Every swimmer needs a name." }, 400);
     }
-
-    const db = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { persistSession: false } });
 
     // ── Which family is this? ──
     // ss_normalise_phone is the database's own reading of a number, so the
