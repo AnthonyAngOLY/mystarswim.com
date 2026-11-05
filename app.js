@@ -17599,7 +17599,11 @@ function ParentReminders(){
   const [busy,setBusy]=useState(false);
   const [err,setErr]=useState('');
   const [msg,setMsg]=useState('');
-  const [when,setWhen]=useState(()=>{ const d=new Date(); d.setDate(d.getDate()+1);
+  // Tomorrow was right while the job always meant tomorrow. It now
+  // sends lead_days out, so a preview of tomorrow shows a different day
+  // to a different set of families than the one that will actually go —
+  // which is worse than no preview, because it looks like one.
+  const [when,setWhen]=useState(()=>{ const d=new Date(); d.setDate(d.getDate()+2);
     return d.toISOString().slice(0,10); });
   const [prev,setPrev]=useState(null);
   const [prevBusy,setPrevBusy]=useState(false);
@@ -17607,7 +17611,12 @@ function ParentReminders(){
   async function load(){
     try{
       const r=await selectRows('parent_message_settings','*','&limit=1');
-      setSt(r?.[0]||null); setDirty(false);
+      const row=r?.[0]||null;
+      setSt(row); setDirty(false);
+      if(row && row.lead_days != null){
+        const d=new Date(); d.setDate(d.getDate()+Number(row.lead_days));
+        setWhen(d.toISOString().slice(0,10));
+      }
     }catch(e){ setErr(e.message); }
   }
   useEffect(()=>{ load(); },[]);
