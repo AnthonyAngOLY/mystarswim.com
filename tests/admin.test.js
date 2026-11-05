@@ -389,6 +389,82 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (/RM 1150\.00/.test(t)) throw new Error('it divided by the months with money, not by three');
   });
 
+  // ── The printed statement ──────────────────────────────────────────
+  // A summary is something you read; a statement is something an
+  // accountant checks. So the thing to assert is that it foots: the
+  // receipts listed on the page must add up to the total printed at the
+  // bottom of it. A statement whose lines do not reach its own total is
+  // worse than no statement.
+  const printed = async () => {
+    const html = await page.evaluate(() => {
+      let captured = '';
+      const realOpen = window.open;
+      window.open = () => ({
+        document: { write: (h) => { captured = h; }, close: () => {} }
+      });
+      try { document.querySelector('#r-host button.btn-primary').click(); }
+      finally { window.open = realOpen; }
+      return captured;
+    });
+    if (!html) throw new Error('the print window was never written to');
+    return html;
+  };
+  const moneyIn = (html, re) => {
+    const m = html.match(re);
+    return m ? Number(m[1].replace(/,/g, '')) : null;
+  };
+
+  await step('the statement lists every receipt of the month', async () => {
+    await setMonth('2026-11');
+    const html = await printed();
+    for (const r of ['p4', 'p5', 'p6', 'p7']) void r;   // ids are not printed
+    // Four live November payments: 800, 200, 100 and the -300 refund.
+    const rows = (html.match(/<tr[^>]*>\s*<td class="mono">/g) || []).length;
+    if (rows !== 4) throw new Error('listed ' + rows + ' receipts, expected 4');
+    if (!/Receipts issued — 4/.test(html)) throw new Error('the count in the heading is wrong');
+  });
+
+  await step('and the listed receipts add up to the total it prints', async () => {
+    const html = await printed();
+    const amounts = [...html.matchAll(/<td class="n">RM ([-\d,]+\.\d\d)<\/td>/g)]
+      .map(m => Number(m[1].replace(/,/g, '')));
+    // The last one is the total row; the rest are the listing.
+    const total = amounts[amounts.length - 1];
+    const lines = amounts.slice(0, -1).filter((_, i, a) => i < a.length);
+    const sum = lines.reduce((a, n) => a + n, 0);
+    // The by-branch block also prints amounts, so compare the total
+    // against the sum of the receipt lines only.
+    const receiptLines = [...html.matchAll(/<td class="mono">[^<]*<\/td>[\s\S]*?<td class="n">RM ([-\d,]+\.\d\d)<\/td>/g)]
+      .map(m => Number(m[1].replace(/,/g, '')));
+    const receiptSum = receiptLines.reduce((a, n) => a + n, 0);
+    if (Math.abs(receiptSum - 800) > 0.005)
+      throw new Error('the receipts list to ' + receiptSum + ', expected 800');
+    if (Math.abs(total - 800) > 0.005)
+      throw new Error('the printed total is ' + total + ', expected 800');
+    void sum;
+  });
+
+  await step('a refund is listed as a receipt, negative, and marked', async () => {
+    const html = await printed();
+    if (!/RM -300\.00/.test(html)) throw new Error('the refund receipt is not listed');
+    if (!/is-neg/.test(html)) throw new Error('the refund is not distinguished from a payment');
+  });
+
+  await step('it states the basis it was prepared on', async () => {
+    const html = await printed();
+    if (!/Basis\./.test(html)) throw new Error('no basis of preparation');
+    if (!/voided invoices/.test(html)) throw new Error('it does not say what is excluded');
+    if (!/November 2026/.test(html)) throw new Error('the month is not on the page');
+  });
+
+  await step('it prints the branch on the page when one is chosen', async () => {
+    await setScope('br-sjkc');
+    const html = await printed();
+    if (!/SJKC BSB/.test(html)) throw new Error('the branch is not named on the statement');
+    if (/RM 800\.00/.test(html)) throw new Error('it printed every branch while scoped to one');
+    await setScope('all');
+  });
+
   await step('a month with nothing in it reads as zero, not as an error', async () => {
     await setMonth('2026-07');
     const t = await rText();

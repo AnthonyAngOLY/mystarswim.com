@@ -18858,6 +18858,74 @@ function ProgrammeClausesEditor({
 }
 
 // ============================================================================
+// printRevenueStatement — the month as a document, receipt by receipt
+// ============================================================================
+// A summary is something you read; a statement is something you hand to
+// an accountant and they can check. The difference is the listing. Every
+// receipt issued in the month is on it — number, date, invoice, who paid,
+// how, how much — and the listed amounts add up to the figure at the top.
+// Nothing on this page comes from anywhere but receipts.
+//
+// ON WHAT THE NUMBER IS MADE OF
+// A row in payments IS a receipt: it carries its own receipt number from
+// the same sequence the printed receipts use. So the total here is the
+// sum of receipts issued, which is what was asked for — it was never
+// derived from invoice values or from anything else.
+//
+// A refund is a receipt too, with its own number and a negative amount.
+// That gives two honest totals rather than one, and a statement that
+// shows only one of them invites the question it does not answer. Both
+// are at the top and the basis is stated in words, because the first
+// thing anybody does with a figure they did not produce is ask what is
+// in it.
+// ============================================================================
+function printRevenueStatement({
+  rows,
+  monthLabel,
+  scopeLabel,
+  gross,
+  refunds,
+  net,
+  byBranch,
+  byMethod,
+  invoiceById,
+  methodLabel
+}) {
+  const w = window.open('', '_blank');
+  if (!w) {
+    alert('Allow popups from this site to print.');
+    return;
+  }
+  const esc = adminEsc;
+  const rm = adminFmtRM;
+  const logo = window.location.origin + '/logo.png';
+  const printed = new Date().toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  // Oldest first: a statement is read down the month, not up it.
+  const listed = [...rows].sort((a, b) => String(a.payment_date || '').localeCompare(String(b.payment_date || '')) || String(a.receipt_number || '').localeCompare(String(b.receipt_number || '')));
+  const body = listed.map(p => {
+    const inv = invoiceById[p.invoice_id] || null;
+    const isRefund = Number(p.amount || 0) < 0;
+    return '<tr class="' + (isRefund ? 'is-neg' : '') + '">' + '<td class="mono">' + esc(p.receipt_number || '—') + '</td>' + '<td>' + esc(adminFmtDate(p.payment_date)) + '</td>' + '<td class="mono">' + esc(inv && inv.invoice_number || '—') + '</td>' + '<td>' + esc(inv && inv.account_name || '—') + '</td>' + '<td>' + esc(methodLabel(p.payment_method || 'unrecorded')) + '</td>' + '<td class="n">' + esc(rm(p.amount)) + '</td>' + '</tr>';
+  }).join('');
+  const branchRows = (byBranch || []).map(b => '<tr><td>' + esc(b.name) + '</td><td class="n">' + b.count + '</td>' + '<td class="n">' + esc(rm(b.net)) + '</td></tr>').join('');
+  const methodRows = (byMethod || []).map(([k, v]) => '<tr><td>' + esc(methodLabel(k)) + '</td><td class="n">' + esc(rm(v)) + '</td></tr>').join('');
+  const html = '<!doctype html><html><head><meta charset="utf-8">' + '<title>Revenue Statement — ' + esc(monthLabel) + '</title><style>\n' + '@page{size:A4 portrait;margin:12mm}\n' + 'html{-webkit-print-color-adjust:exact;print-color-adjust:exact}\n' + "body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:8.5pt;color:#1a1a1a;background:#fff;margin:0}\n" + '@media screen{body{background:#eceef1;padding:16px}' + '.sheet{max-width:210mm;margin:0 auto;background:#fff;padding:14mm 12mm;' + 'box-shadow:0 1px 3px rgba(0,0,0,.14),0 8px 24px rgba(0,0,0,.08);border-radius:2px}}\n' + '.hdr{display:flex;justify-content:space-between;align-items:flex-start;' + 'padding-bottom:6pt;border-bottom:1pt solid #1a1a1a;margin-bottom:9pt}\n' + '.logo{height:26pt;width:auto;object-fit:contain;display:block}\n' + '.co{font-size:6.5pt;color:#555;margin-top:4pt;line-height:1.5}\n' + '.ttl{font-size:13pt;font-weight:700;text-align:right}\n' + '.meta{font-size:7pt;color:#777;margin-top:3pt;line-height:1.6;text-align:right}\n' + '.tiles{display:flex;gap:7pt;margin-bottom:9pt}\n' + '.tile{flex:1;background:#f8f9fa;border-radius:2pt;padding:5pt 7pt}\n' + '.tile .big{font-size:14pt;font-weight:700;line-height:1.1}\n' + '.tile .lbl{font-size:6pt;text-transform:uppercase;letter-spacing:.5px;color:#999;margin-top:2pt}\n' + '.tile.net{background:#eef6ff}\n' + '.note{font-size:7pt;color:#555;background:#f8f9fa;border-left:2pt solid #d4d4d4;' + 'border-radius:1pt;padding:5pt 7pt;margin-bottom:9pt;line-height:1.6}\n' + '.cols{display:flex;gap:9pt;margin-bottom:9pt}\n' + '.cols>div{flex:1}\n' + 'h2{font-size:8pt;text-transform:uppercase;letter-spacing:.6px;color:#777;' + 'margin:0 0 4pt;font-weight:700}\n' + 'table{width:100%;border-collapse:collapse}\n' + 'thead{display:table-header-group}\n' + 'tr{break-inside:avoid;page-break-inside:avoid}\n' + 'th{font-size:6.5pt;text-transform:uppercase;letter-spacing:.5px;color:#777;' + 'text-align:left;padding:3pt 4pt;border-bottom:.75pt solid #1a1a1a}\n' + 'td{padding:2.6pt 4pt;border-bottom:.4pt solid #e6e6e6;vertical-align:top}\n' + 'th.n,td.n{text-align:right;white-space:nowrap}\n' + '.mono{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:7.5pt}\n' + '.is-neg td{color:#B91C1C}\n' + 'tr.tot td{border-top:1pt solid #1a1a1a;border-bottom:none;font-weight:700;padding-top:4pt}\n' + '.ftr{margin-top:10pt;padding-top:5pt;border-top:.5pt solid #ddd;display:flex;' + 'justify-content:space-between;font-size:6.5pt;color:#999}\n' + '</style></head><body><div class="sheet">\n' + '<div class="hdr"><div><img class="logo" src="' + logo + '" alt="">' + '<div class="co">' + esc(ADMIN_COMPANY.name) + ' (' + esc(ADMIN_COMPANY.reg) + ')<br>' + esc(ADMIN_COMPANY.address) + '</div></div>' + '<div><div class="ttl">Revenue Statement</div>' + '<div class="meta">' + esc(monthLabel) + '<br>' + esc(scopeLabel) + '<br>Printed ' + esc(printed) + '</div></div></div>\n' + '<div class="tiles">' + '<div class="tile"><div class="big">' + esc(rm(gross)) + '</div>' + '<div class="lbl">Receipts issued</div></div>' + '<div class="tile"><div class="big">' + esc(rm(refunds)) + '</div>' + '<div class="lbl">Refund receipts</div></div>' + '<div class="tile net"><div class="big">' + esc(rm(net)) + '</div>' + '<div class="lbl">Net received</div></div>' + '</div>\n'
+
+  // The basis of preparation. An accountant asks this first; writing it
+  // on the page saves the question and fixes the answer.
+  + '<div class="note"><b>Basis.</b> Every receipt issued between the first and last day of ' + esc(monthLabel) + ', taken on its receipt date, for ' + esc(scopeLabel).toLowerCase() + '. ' + 'Each line below is one receipt and the lines add to the net figure above. ' + 'A refund carries its own receipt number and a negative amount, so it appears in the listing ' + 'and is already taken off the net. Receipts against voided invoices, and any receipt with no ' + 'date, are excluded and are not in any figure here.</div>\n' + '<div class="cols">' + (branchRows ? '<div><h2>By branch</h2><table><thead><tr><th>Branch</th>' + '<th class="n">Receipts</th><th class="n">Net</th></tr></thead><tbody>' + branchRows + '</tbody></table></div>' : '') + (methodRows ? '<div><h2>By method</h2><table><thead><tr><th>Method</th>' + '<th class="n">Net</th></tr></thead><tbody>' + methodRows + '</tbody></table></div>' : '') + '</div>\n' + '<h2>Receipts issued — ' + listed.length + '</h2>' + (listed.length ? '<table><thead><tr><th>Receipt</th><th>Date</th><th>Invoice</th><th>Paid by</th>' + '<th>Method</th><th class="n">Amount</th></tr></thead><tbody>' + body + '<tr class="tot"><td colspan="5">Net received — ' + esc(monthLabel) + '</td>' + '<td class="n">' + esc(rm(net)) + '</td></tr>' + '</tbody></table>' : '<div class="note">No receipts were issued in this month.</div>') + '\n<div class="ftr"><span>' + esc(ADMIN_COMPANY.name) + '</span>' + '<span>Prepared from receipts. Not a tax invoice.</span></div>\n' + '</div></body></html>';
+  w.document.write(html);
+  w.document.close();
+}
+
+// ============================================================================
 // RevenueView — what came in, by month, by quarter, by branch
 // ============================================================================
 // Lives on the system side rather than under Accounts › Reports, because
@@ -19176,7 +19244,24 @@ function RevenueView({
     className: "btn btn-ghost small",
     onClick: () => setMonth(shiftMonth(month, 1)),
     disabled: month >= nowMonth
-  }, "Next month →"))), /*#__PURE__*/React.createElement("div", {
+  }, "Next month →"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    style: {
+      marginLeft: 'auto'
+    },
+    onClick: () => printRevenueStatement({
+      rows: sel.rows,
+      monthLabel: monthLabel(month),
+      scopeLabel: scope === 'all' ? 'All branches' : branchName(scope),
+      gross: sel.gross,
+      refunds: sel.refunds,
+      net: sel.net,
+      byBranch: scope === 'all' ? byBranch : null,
+      byMethod,
+      invoiceById,
+      methodLabel
+    })
+  }, "🖨 Print statement"))), /*#__PURE__*/React.createElement("div", {
     className: "settings-cols",
     style: {
       gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))',
