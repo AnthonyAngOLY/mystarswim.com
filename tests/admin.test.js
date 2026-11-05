@@ -246,6 +246,162 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (!/lives in the database/.test(v)) throw new Error('branch editor lost its document: ' + v.slice(0, 120));
   });
 
+  // ── Revenue ────────────────────────────────────────────────────────
+  // Arithmetic, against figures worked out by hand. A revenue report
+  // that is merely plausible is worse than none: nobody checks a number
+  // that looks about right, and this one will be read as fact.
+  //
+  // The fixture is deliberately awkward — a refund, a payment on an
+  // invoice with no branch, one against a voided invoice, and one with
+  // no date at all — because each is a real row shape this database
+  // produces and each one is a different way for a total to be wrong.
+  const revenue = (props) => page.evaluate((q) => {
+    let host = document.getElementById('r-host');
+    if (!host) { host = document.createElement('div'); host.id = 'r-host'; document.body.appendChild(host); }
+    const BRANCHES = [
+      { id: 'br-ssgt', name: 'SSGT', code: 'SSGT', is_active: true },
+      { id: 'br-sjkc', name: 'SJKC BSB', code: 'SJKCBSB', is_active: true }
+    ];
+    const INVOICES = [
+      { id: 'i-1', branch_id: 'br-ssgt', status: 'paid' },
+      { id: 'i-2', branch_id: 'br-sjkc', status: 'paid' },
+      { id: 'i-3', branch_id: null,      status: 'paid' },   // raised on "All"
+      { id: 'i-4', branch_id: 'br-ssgt', status: 'void' }
+    ];
+    const P = (id, inv, amt, date, method, kind) =>
+      ({ id, invoice_id: inv, amount: amt, payment_date: date,
+         payment_method: method || 'cash', kind: kind || 'payment' });
+    const PAYMENTS = [
+      // September — 400 at SSGT
+      P('p1', 'i-1', 400, '2026-09-10'),
+      // October — 1000 SSGT + 500 SJKC = 1500
+      P('p2', 'i-1', 1000, '2026-10-05', 'transfer'),
+      P('p3', 'i-2', 500,  '2026-10-20'),
+      // November — 800 SSGT, 200 SJKC, 100 no-branch, less a 300 refund
+      P('p4', 'i-1', 800,  '2026-11-03', 'transfer'),
+      P('p5', 'i-2', 200,  '2026-11-11'),
+      P('p6', 'i-3', 100,  '2026-11-12'),
+      P('p7', 'i-1', -300, '2026-11-20', 'transfer', 'refund'),
+      // Never revenue: a voided invoice, and a payment with no date
+      P('p8', 'i-4', 9999, '2026-11-15'),
+      // created_at is deliberately a DIFFERENT month from anything else.
+      // If the report ever falls back to it when payment_date is empty,
+      // this 55 lands in October and the figures move — which is the
+      // whole danger of a fallback on a revenue report: money filed in
+      // the month it was typed rather than the month it arrived.
+      Object.assign(P('p9', 'i-1', 55, null), { created_at: '2026-10-01T02:00:00Z' })
+    ];
+    const root = window.__rRoot || (window.__rRoot = ReactDOM.createRoot(host));
+    root.render(React.createElement(RevenueView, {
+      payments: PAYMENTS, invoices: INVOICES, branches: BRANCHES, paymentMethods: []
+    }));
+  }, props);
+
+  const rText = () => page.locator('#r-host').textContent();
+  const setMonth = async (ym) => {
+    await page.locator('#r-host input[type=month]').fill(ym);
+    await page.waitForTimeout(300);
+  };
+  const setScope = async (v) => {
+    await page.locator('#r-host select').first().selectOption(v);
+    await page.waitForTimeout(300);
+  };
+
+  await step('the revenue screen renders from the live bundle', async () => {
+    const missing = await page.evaluate(() => {
+      try { return typeof eval('RevenueView') === 'function' ? [] : ['RevenueView is not a function']; }
+      catch (e) { return ['RevenueView is missing']; }
+    });
+    if (missing.length) throw new Error(missing.join('; '));
+    await revenue({});
+    await page.waitForTimeout(400);
+    if (!/Revenue/.test(await rText())) throw new Error('nothing rendered');
+  });
+
+  // 800 + 200 + 100 - 300 = 800. The voided 9999 and the undated 55 are
+  // out; a report that included either would read 10799 or 855.
+  // Read off the headline tile, not the page text: the excluded amounts
+  // are printed further down on purpose, so searching the whole screen
+  // for them finds the note that says they were left out.
+  const headline = async () => (await page.locator('#r-host .card').nth(1).textContent()).trim();
+
+  await step('the month nets refunds and leaves out void and undated', async () => {
+    await setMonth('2026-11');
+    const h = await headline();
+    if (!/RM 800\.00/.test(h)) throw new Error('the headline is not 800: ' + h);
+    if (/9999|10799|855/.test(h))
+      throw new Error('a voided or undated payment reached the headline: ' + h);
+  });
+
+  await step('a payment with no date stays out, whatever else is on the row', async () => {
+    await setMonth('2026-10');
+    const h = await headline();
+    if (!/RM 1500\.00/.test(h)) throw new Error('October is not 1500: ' + h);
+    if (/1555/.test(h)) throw new Error('an undated payment was filed by created_at');
+    await setMonth('2026-11');
+  });
+
+  await step('it shows takings and refunds separately, not just the net', async () => {
+    const t = await rText();
+    if (!/RM 1100\.00/.test(t)) throw new Error('gross before refunds is not 1100');
+    if (!/RM -300\.00/.test(t)) throw new Error('refunds are not shown as -300');
+  });
+
+  await step('the branch split adds up to the month total', async () => {
+    const rows = await page.locator('#r-host table').last().textContent();
+    const t = await rText();
+    // SSGT 800-300=500, SJKC 200, no branch 100 → 800
+    if (!/RM 500\.00/.test(t)) throw new Error("SSGT's net is not 500");
+    if (!/RM 200\.00/.test(t)) throw new Error("SJKC's net is not 200");
+    if (!/RM 100\.00/.test(t)) throw new Error('the no-branch payment is not shown');
+  });
+
+  // The whole reason the bucket exists: an invoice raised while the
+  // header said "All" stores no branch, and dropping it would make the
+  // branch rows quietly disagree with the total.
+  await step('an invoice with no branch is named, not dropped', async () => {
+    const t = await rText();
+    if (!/No branch recorded/.test(t)) throw new Error('the no-branch bucket is missing');
+  });
+
+  await step('filtering to one branch changes the figure', async () => {
+    await setScope('br-sjkc');
+    const t = await rText();
+    if (!/SJKC BSB/.test(t)) throw new Error('scope label did not change');
+    if (/RM 800\.00/.test(t)) throw new Error('still showing every branch');
+    if (!/RM 200\.00/.test(t)) throw new Error("SJKC's November is not 200");
+    await setScope('all');
+  });
+
+  // Sep 400, Oct 1500, Nov 800 = 2700 over three months, 900 a month.
+  await step('the quarter totals and averages are right', async () => {
+    const t = await rText();
+    if (!/RM 2700\.00/.test(t)) throw new Error('the three-month total is not 2700');
+    if (!/RM 900\.00/.test(t)) throw new Error('the monthly average is not 900');
+  });
+
+  // Q4 is Oct, Nov, Dec. December has nothing, so 1500+800+0 = 2300,
+  // and the average still divides by three: 766.67, not 1150.
+  await step('a calendar quarter divides by three, not by the months that have money', async () => {
+    const t = await rText();
+    if (!/RM 2300\.00/.test(t)) throw new Error('Q4 total is not 2300');
+    if (!/RM 766\.67/.test(t)) throw new Error('Q4 average is not 766.67');
+    if (/RM 1150\.00/.test(t)) throw new Error('it divided by the months with money, not by three');
+  });
+
+  await step('a month with nothing in it reads as zero, not as an error', async () => {
+    await setMonth('2026-07');
+    const t = await rText();
+    if (!/RM 0\.00/.test(t)) throw new Error('an empty month did not report zero');
+    await setMonth('2026-11');
+  });
+
+  await step('it says what it has left out rather than swallowing it', async () => {
+    const t = await rText();
+    if (!/no payment date/i.test(t)) throw new Error('the undated payment is never mentioned');
+    if (!/voided invoices/i.test(t)) throw new Error('the voided payment is never mentioned');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

@@ -819,13 +819,13 @@ function App({
   }
   // Robust: header rendering follows the CURRENT VIEW, not a separate `side`
   // state, so the header can never drift out of sync with the content area.
-  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'attendance', 'leave'].includes(view);
+  const isOnSystemView = ['adminDirectory', 'adminVouchers', 'adminCrew', 'attendance', 'leave', 'revenue'].includes(view);
   // Defensive: if view and side ever get out of sync (e.g. after login flow
   // or a stale route), snap view back to the side's home. Prevents the
   // "half-breed" state where system nav is shown but schedule content mounts.
   useEffect(() => {
     const scheduleViews = new Set(['schedule', 'programme', 'accounts', 'shop', 'messages', 'enroll', 'settings', 'students']);
-    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'attendance', 'leave']);
+    const systemViews = new Set(['adminDirectory', 'adminVouchers', 'adminCrew', 'attendance', 'leave', 'revenue']);
     if (side === 'schedule' && systemViews.has(view)) setView('schedule');
     if (side === 'system' && scheduleViews.has(view)) setView('adminDirectory');
     // Timetable (view only) has one screen. Nothing in the nav offers
@@ -6570,6 +6570,12 @@ function App({
   }, "🧾 ", /*#__PURE__*/React.createElement("span", {
     className: "nav-label"
   }, "Vouchers")), /*#__PURE__*/React.createElement("button", {
+    className: `nav-btn ${view === 'revenue' ? 'active' : ''}`,
+    onClick: () => setView('revenue'),
+    title: "Revenue"
+  }, "💰 ", /*#__PURE__*/React.createElement("span", {
+    className: "nav-label"
+  }, "Revenue")), /*#__PURE__*/React.createElement("button", {
     className: `nav-btn ${view === 'adminCrew' ? 'active' : ''}`,
     onClick: () => setView('adminCrew'),
     title: "Crew"
@@ -6664,6 +6670,11 @@ function App({
   }, /*#__PURE__*/React.createElement("span", {
     className: "mtab-ic"
   }, "🧾"), "Vouchers"), /*#__PURE__*/React.createElement("button", {
+    className: `mtab ${view === 'revenue' ? 'active' : ''}`,
+    onClick: () => setView('revenue')
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "mtab-ic"
+  }, "💰"), "Revenue"), /*#__PURE__*/React.createElement("button", {
     className: `mtab ${view === 'adminCrew' ? 'active' : ''}`,
     onClick: () => setView('adminCrew')
   }, /*#__PURE__*/React.createElement("span", {
@@ -7021,6 +7032,11 @@ function App({
     saveContact: adminSaveContact,
     deleteContact: adminDeleteContact,
     onRefresh: loadAdminAll
+  }), !loading && side === 'system' && view === 'revenue' && canSystem && /*#__PURE__*/React.createElement(RevenueView, {
+    payments: pmts,
+    invoices: invoices,
+    branches: options.branches || [],
+    paymentMethods: paymentMethods
   }), !loading && side === 'system' && view === 'adminVouchers' && canSystem && /*#__PURE__*/React.createElement(AdminVouchersView, {
     canAmendPaid: isOwner,
     vouchers: adminVouchers,
@@ -18772,6 +18788,437 @@ function ProgrammeClausesEditor({
     h3Class: 'tc-h3',
     h2Class: 'tc-doc-title'
   })))));
+}
+
+// ============================================================================
+// RevenueView — what came in, by month, by quarter, by branch
+// ============================================================================
+// Lives on the system side rather than under Accounts › Reports, because
+// it is the one money screen about the whole company rather than the
+// branch you happen to have selected. The header's branch picker is
+// hidden on that side, so this carries its own and nothing fights over
+// which scope is in force.
+//
+// WHAT COUNTS AS REVENUE HERE
+// A row in payments, on its payment_date. Not the invoice date: the
+// question is what arrived in a month, not what was billed in it. An
+// invoice raised in October and settled in November is November's money.
+//
+// REFUNDS ARE NOT SUBTRACTED, THEY ARE ALREADY NEGATIVE
+// A refund is a payments row with kind 'refund' and a negative amount,
+// written against the same invoice. So summing the column nets them out
+// on its own, and filtering them away would overstate every figure on
+// this page. They are shown on their own line anyway, because a net
+// number with nothing beside it is a number nobody can check.
+//
+// WHICH BRANCH A PAYMENT BELONGS TO
+// payments carries no branch. The invoice does, so a payment inherits
+// its invoice's branch — and invoices.branch_id is nullable, which is
+// not a hypothetical: an invoice raised while the header said "All"
+// stores null. Those land in "No branch recorded" rather than being
+// dropped, so the branch rows always add up to the total. A figure that
+// does not add up is worse than one that is inconvenient.
+// ============================================================================
+function RevenueView({
+  payments,
+  invoices,
+  branches,
+  paymentMethods
+}) {
+  const rm = v => `RM ${Number(v || 0).toFixed(2)}`;
+  const NONE = '__none__'; // the bucket for invoices with no branch
+
+  // The month this opens on is the one that is running. Months are held
+  // as 'YYYY-MM' strings and compared as strings against the first seven
+  // characters of payment_date, which sidesteps time zones completely —
+  // the server stores UTC, the centre runs on UTC+8, and a Date object
+  // in the middle of that is how a payment taken at 9am on the 1st ends
+  // up counted in the previous month.
+  const nowMonth = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  })();
+  const [month, setMonth] = useState(nowMonth);
+  const [scope, setScope] = useState('all'); // 'all' | branch id | NONE
+
+  const invoiceById = React.useMemo(() => {
+    const m = {};
+    for (const i of invoices || []) m[i.id] = i;
+    return m;
+  }, [invoices]);
+  const activeBranches = (branches || []).filter(b => b.is_active !== false);
+  const branchName = id => id === NONE ? 'No branch recorded' : (activeBranches.find(b => b.id === id) || (branches || []).find(b => b.id === id) || {}).name || 'Unknown branch';
+
+  // Every payment, tagged with its month and its branch, once.
+  const tagged = React.useMemo(() => (payments || []).map(p => {
+    const inv = invoiceById[p.invoice_id] || null;
+    return {
+      ...p,
+      amt: Number(p.amount || 0),
+      ym: (p.payment_date || '').slice(0, 7) || null,
+      branch: inv && inv.branch_id || NONE,
+      voidInv: !!(inv && inv.status === 'void')
+    };
+  }), [payments, invoiceById]);
+
+  // A payment against a voided invoice is not revenue. Voiding normally
+  // removes the payment rows outright, so this is usually nothing — but
+  // "usually nothing" is the kind of thing that is silently something,
+  // so it is excluded here and counted in the open where it happens.
+  const live = tagged.filter(p => !p.voidInv);
+  const voidedCount = tagged.length - live.length;
+  const voidedTotal = tagged.filter(p => p.voidInv).reduce((a, p) => a + p.amt, 0);
+  // A payment with no date cannot be put in a month. Saying so beats
+  // quietly leaving it out of every total on the page.
+  const undated = live.filter(p => !p.ym);
+  const inScope = p => scope === 'all' || p.branch === scope;
+
+  // Totals for one month, under the current branch scope.
+  function monthFigures(ym) {
+    const rows = live.filter(p => p.ym === ym && inScope(p));
+    const gross = rows.filter(p => p.amt > 0).reduce((a, p) => a + p.amt, 0);
+    const refunds = rows.filter(p => p.amt < 0).reduce((a, p) => a + p.amt, 0);
+    return {
+      ym,
+      rows,
+      gross,
+      refunds,
+      net: gross + refunds,
+      count: rows.length
+    };
+  }
+  const shiftMonth = (ym, by) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 + by, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const monthLabel = ym => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-GB', {
+      month: 'long',
+      year: 'numeric'
+    });
+  };
+  const monthShort = ym => {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString('en-GB', {
+      month: 'short',
+      year: '2-digit'
+    });
+  };
+  const sel = monthFigures(month);
+
+  // ── The two ways of saying "the last three months" ──────────────────
+  // They are different numbers and both get asked for, so both are here
+  // rather than one of them chosen on somebody's behalf. The calendar
+  // quarter is what an accountant means; the trailing three is what you
+  // mean when you ask how the last three months went.
+  const qIndex = Math.floor((Number(month.split('-')[1]) - 1) / 3);
+  const qStartMonth = `${month.split('-')[0]}-${String(qIndex * 3 + 1).padStart(2, '0')}`;
+  const calendarQ = [0, 1, 2].map(i => monthFigures(shiftMonth(qStartMonth, i)));
+  const trailing = [2, 1, 0].map(i => monthFigures(shiftMonth(month, -i)));
+
+  // A month that has not happened yet, or has not finished, drags an
+  // average down for a reason that has nothing to do with trade. The
+  // average still divides by three — that is what a quarterly average
+  // is — but the page says which months are not yet complete so the
+  // number is read for what it is.
+  const isFuture = ym => ym > nowMonth;
+  const isRunning = ym => ym === nowMonth;
+  const avgOf = set => set.reduce((a, f) => a + f.net, 0) / 3;
+
+  // ── Every branch, for the month on screen ───────────────────────────
+  // Shown whenever the scope is All, because the split is the first
+  // thing anybody asks after seeing a total.
+  const byBranch = React.useMemo(() => {
+    const ids = [...activeBranches.map(b => b.id), NONE];
+    return ids.map(id => {
+      const rows = live.filter(p => p.ym === month && p.branch === id);
+      const net = rows.reduce((a, p) => a + p.amt, 0);
+      return {
+        id,
+        name: branchName(id),
+        net,
+        count: rows.length
+      };
+    }).filter(r => r.count > 0 || r.id !== NONE).sort((a, b) => b.net - a.net);
+  }, [live, month, branches]);
+
+  // ── How it arrived ──────────────────────────────────────────────────
+  const byMethod = React.useMemo(() => {
+    const m = {};
+    for (const p of sel.rows) {
+      const k = p.payment_method || 'unrecorded';
+      m[k] = (m[k] || 0) + p.amt;
+    }
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [sel.rows]);
+  const methodLabel = k => {
+    const hit = (paymentMethods || []).find(x => x.key === k || x.name === k || x.code === k);
+    if (hit && (hit.name || hit.label)) return hit.name || hit.label;
+    if (k === 'unrecorded') return 'Not recorded';
+    // No matching row in payment_methods — the key itself, made
+    // presentable, rather than a lower-case database value on screen.
+    return String(k).replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  };
+  const tile = (label, value, note) => /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: '14px 16px',
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 4
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 22,
+      fontWeight: 800,
+      letterSpacing: '-.5px'
+    }
+  }, value), note && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 3,
+      lineHeight: 1.5
+    }
+  }, note));
+  const quarterBlock = (title, set, note) => /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 2
+    }
+  }, title), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 10
+    }
+  }, note), /*#__PURE__*/React.createElement("table", {
+    className: "table",
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("tbody", null, set.map(f => /*#__PURE__*/React.createElement("tr", {
+    key: f.ym
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      width: '45%'
+    }
+  }, monthShort(f.ym), isFuture(f.ym) && /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, " · not yet"), isRunning(f.ym) && /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, " · in progress")), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 600
+    }
+  }, rm(f.net)))), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 800,
+      borderTop: '2px solid var(--border-2)'
+    }
+  }, "Total"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 800,
+      borderTop: '2px solid var(--border-2)'
+    }
+  }, rm(set.reduce((a, f) => a + f.net, 0)))), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 800
+    }
+  }, "Monthly average"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 800,
+      color: 'var(--primary)'
+    }
+  }, rm(avgOf(set)))))), set.some(f => isFuture(f.ym) || isRunning(f.ym)) && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      lineHeight: 1.5
+    }
+  }, "The average divides by three however many months have finished, so it reads low while one of them is still running."));
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 1100,
+      margin: '0 auto'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 18,
+      fontWeight: 800
+    }
+  }, "💰 Revenue"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12
+    }
+  }, "Money received, by the date it was received. Across every branch, or one at a time."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0,
+      minWidth: 190
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Month"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "month",
+    value: month,
+    onChange: e => setMonth(e.target.value || nowMonth)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0,
+      minWidth: 230
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Branch"), /*#__PURE__*/React.createElement("select", {
+    className: "select",
+    value: scope,
+    onChange: e => setScope(e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "all"
+  }, "All branches"), activeBranches.map(b => /*#__PURE__*/React.createElement("option", {
+    key: b.id,
+    value: b.id
+  }, b.name, b.code ? ` (${b.code})` : '')), /*#__PURE__*/React.createElement("option", {
+    value: NONE
+  }, "No branch recorded"))), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setMonth(shiftMonth(month, -1))
+  }, "← Previous month"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setMonth(shiftMonth(month, 1)),
+    disabled: month >= nowMonth
+  }, "Next month →"))), /*#__PURE__*/React.createElement("div", {
+    className: "settings-cols",
+    style: {
+      gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))',
+      gap: 12,
+      marginBottom: 12
+    }
+  }, tile(`Received in ${monthLabel(month)}`, rm(sel.net), scope === 'all' ? 'All branches' : branchName(scope)), tile('Takings before refunds', rm(sel.gross), `${sel.rows.filter(p => p.amt > 0).length} receipt${sel.rows.filter(p => p.amt > 0).length === 1 ? '' : 's'}`), tile('Refunds', rm(sel.refunds), sel.refunds === 0 ? 'None this month' : `${sel.rows.filter(p => p.amt < 0).length} refunded · already taken off the figure above`)), /*#__PURE__*/React.createElement("div", {
+    className: "settings-cols",
+    style: {
+      gridTemplateColumns: '1fr 1fr',
+      gap: 12,
+      marginBottom: 12
+    }
+  }, quarterBlock(`Quarter ${qIndex + 1} ${month.split('-')[0]}`, calendarQ, `The calendar quarter ${monthLabel(month)} falls in.`), quarterBlock('Last three months', trailing, `${monthShort(trailing[0].ym)} to ${monthShort(trailing[2].ym)}, ending with the month selected.`)), scope === 'all' && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 2
+    }
+  }, "By branch · ", monthLabel(month)), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 10
+    }
+  }, "A payment takes the branch from its invoice. These rows add up to the figure above."), /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Branch"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Payments"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Received"))), /*#__PURE__*/React.createElement("tbody", null, byBranch.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.id
+  }, /*#__PURE__*/React.createElement("td", null, r.name, r.id === NONE && r.count > 0 && /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, " · raised with no branch selected")), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, r.count), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 700
+    }
+  }, rm(r.net)))), !byBranch.length && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 3,
+    className: "empty"
+  }, "Nothing received this month.")), /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 800,
+      borderTop: '2px solid var(--border-2)'
+    }
+  }, "Total"), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 800,
+      borderTop: '2px solid var(--border-2)'
+    }
+  }, sel.count), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 800,
+      borderTop: '2px solid var(--border-2)'
+    }
+  }, rm(sel.net)))))), !!byMethod.length && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 10
+    }
+  }, "How it was paid · ", monthLabel(month)), /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("tbody", null, byMethod.map(([k, v]) => /*#__PURE__*/React.createElement("tr", {
+    key: k
+  }, /*#__PURE__*/React.createElement("td", null, methodLabel(k)), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 600
+    }
+  }, rm(v))))))), (undated.length > 0 || voidedCount > 0) && /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 8
+    }
+  }, "Not counted above"), undated.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginBottom: 6,
+      lineHeight: 1.6
+    }
+  }, /*#__PURE__*/React.createElement("strong", null, undated.length, " payment", undated.length === 1 ? '' : 's', " with no payment date"), ' ', "(", rm(undated.reduce((a, p) => a + p.amt, 0)), "). They cannot be placed in a month, so they are in no figure on this page. Worth giving them a date."), voidedCount > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      lineHeight: 1.6
+    }
+  }, /*#__PURE__*/React.createElement("strong", null, voidedCount, " payment", voidedCount === 1 ? '' : 's', " against voided invoices"), ' ', "(", rm(voidedTotal), "), left out on purpose — a voided invoice is not revenue.")));
 }
 function SessionModal({
   modal,
