@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 1;
+  var BUILD = 2;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});

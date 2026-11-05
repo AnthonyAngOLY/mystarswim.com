@@ -12,7 +12,7 @@
 // at app.mystarswim.com and in /parent at the same time.
 //
 // Must match BUILD in app.js.
-var BUILD = 1;
+var BUILD = 2;
 var CACHE = 'ssb-parent-v' + BUILD;
 var SHELL = ['./', './index.html', './app.js', './config.js', './manifest.json',
              './logo.png', './icon-192.png', './icon-512.png'];
