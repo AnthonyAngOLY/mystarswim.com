@@ -45,6 +45,24 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
     await page.waitForTimeout(500);
   };
 
+  // The stylesheet moved out of this page into public.css so the
+  // declaration page could share it rather than carry a copy. A missing
+  // or misnamed href does not fail any selector in this file — the form
+  // still works perfectly and arrives looking like a 1996 bug report —
+  // so this asks the browser what it actually computed.
+  await step('the shared stylesheet is loaded, not just referenced', async () => {
+    const bg = await page.evaluate(() => {
+      const b = document.createElement('button');
+      b.className = 'submit-btn'; b.style.display = 'none';
+      document.body.appendChild(b);
+      const c = getComputedStyle(b).backgroundColor;
+      b.remove();
+      return c;
+    });
+    // --primary, #6D5BD0. Unstyled would be a browser default grey.
+    if (!/109,\s*91,\s*208/.test(bg)) throw new Error('public.css did not load: .submit-btn is ' + bg);
+  });
+
   await step('the form loads and offers the branches', async () => {
     const opts = await page.locator('select').first().locator('option').allTextContents();
     if (!opts.some(o => /SSGT/.test(o))) throw new Error('no SSGT: ' + JSON.stringify(opts));
@@ -215,6 +233,31 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8903';
     const second = page.locator('.health-block').nth(1);
     const onSecond = await second.locator('.gender-opt.active').count();
     if (onSecond) throw new Error('answering for one child answered for the other');
+  });
+
+
+  // Geometry, not text. Every assertion in this file passed while the
+  // question text was nought pixels wide and the Yes/No toggle had the
+  // whole row — .gender-toggle is width:100% and sits on the same
+  // element as .health-yn, so flex-basis:auto resolved to the full row
+  // and .health-q-text, min-width:0, collapsed to nothing. The six
+  // questions rendered as columns of single letters on a live form and
+  // nothing here noticed, because the words were all present.
+  await step('the health questions are readable, not a column of letters', async () => {
+    const m = await page.evaluate(() => {
+      const q = document.querySelector('.health-q');
+      if (!q) return null;
+      const t = q.querySelector('.health-q-text').getBoundingClientRect();
+      const y = q.querySelector('.health-yn').getBoundingClientRect();
+      return { row: q.getBoundingClientRect().width, text: t.width, yn: y.width, lines: t.height };
+    });
+    if (!m) throw new Error('no health question on screen');
+    if (m.text < m.row * 0.5)
+      throw new Error(`the question has ${Math.round(m.text)}px of ${Math.round(m.row)}px`);
+    if (m.yn > 200) throw new Error('the Yes/No toggle is ' + Math.round(m.yn) + 'px wide');
+    // A question that wraps past six lines at this width is not wrapping,
+    // it is stacking one word at a time.
+    if (m.lines > 140) throw new Error('the question is ' + Math.round(m.lines) + 'px tall — it is stacking');
   });
 
   await step('a yes asks what we should know, a no does not', async () => {
