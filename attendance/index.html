@@ -200,10 +200,18 @@
   .notepad textarea{width:100%; min-height:74px; padding:10px; font:inherit; font-size:14.5px;
     border:1px solid var(--border); border-radius:10px; background:var(--surface);
     color:var(--text); resize:vertical}
-  .noteold{background:var(--slate-bg); border-radius:9px; padding:8px 10px; margin-bottom:6px;
-           font-size:13.5px; line-height:1.45}
-  .noteold .by{color:var(--muted); font-size:11.5px; margin-top:3px}
-  .linkish{background:none; border:0; font:inherit; font-size:12.5px; font-weight:700;
+  .noteold{background:var(--slate-bg); border-radius:9px; padding:9px 11px; margin-bottom:7px;
+           font-size:13.5px; line-height:1.5}
+  /* The note carries the eye; who wrote it and when is reference, there
+     when looked for. That is the whole reason for the size difference —
+     a coach scanning six months of history on a phone is reading the
+     words, not the dates. */
+  .noteold .by{color:var(--muted); font-size:10.5px; margin-top:5px; line-height:1.6}
+  .noteold .nb{white-space:pre-wrap}
+  .noteold textarea{width:100%; min-height:72px; padding:9px; font:inherit;
+    font-size:14.5px; line-height:1.45; border:1px solid var(--border);
+    border-radius:8px; background:var(--surface); color:var(--text)}
+  .linkish{background:none; border:0; font:inherit; font-size:11px; font-weight:700;
            color:var(--primary-on-soft); cursor:pointer; padding:5px 0}
   .owed{background:var(--amber-bg); border:1px solid var(--amber-bd); color:var(--amber-tx);
         border-radius:10px; padding:8px 10px; font-size:12.5px; line-height:1.45; margin-top:8px}

@@ -37,7 +37,8 @@ const RPC = {
   my_family: () => ({
     ok: true, account_id: 'acct-1', display_name: 'Kwan Suk Lee',
     phone: '+60123456001',
-    children: [{ id: 'stu-1', name: 'Kobe Kwan', age: 4, lesson_type: 'Toddler Group' }]
+    children: [{ id: 'stu-1', name: 'Kobe Kwan', age: 4, lesson_type: 'Toddler Group' },
+               { id: 'stu-2', name: 'Mira Kwan', age: 6, lesson_type: 'Learn to Swim' }]
   }),
   my_messages: () => ([
     { id: 'm1', kind: 'reminder', title: 'Class reminder', body: BODY,
@@ -53,12 +54,41 @@ const RPC = {
           + 'week are moved to the Saturday.',
       created_at: ago(70), read_at: null }
   ]),
+  // Two swimmers and a spread of dates, because the Progress view groups
+  // by month and names the child only when there is more than one.
+  // Honours p_student, as the database does. A mock that ignores an
+  // argument cannot catch the app passing the wrong one — the Progress
+  // view asking for a single swimmer would have looked identical here.
+  my_child_notes: (a) => NOTES.filter(n => !a || !a.p_student || n.student_id === a.p_student),
+  __notes: () => ([])
+};
+
+const NOTES = ([
+    { student_id:'stu-1', child:'Kobe Kwan', id:'n1',
+      body:'Kobe held a float-and-glide for a full width today without stopping. '
+         + 'Breathing to the side is still catching him — we will work on turning '
+         + 'the head rather than lifting it next week.',
+      author:'Coach Sally', created_at:'2026-11-04T10:30:00Z' },
+    { student_id:'stu-2', child:'Mira Kwan', id:'n2',
+      body:'Mira jumped in unaided for the first time. Very pleased with herself, '
+         + 'and rightly so.',
+      author:'Coach Yong', created_at:'2026-11-01T09:10:00Z' },
+    { student_id:'stu-1', child:'Kobe Kwan', id:'n3',
+      body:'Covered for Sally today. Kobe is kicking from the knee — I have asked '
+         + 'him to think about long legs. Worth keeping an eye on.',
+      author:'Coach Yong', created_at:'2026-10-25T10:30:00Z' },
+    { student_id:'stu-2', child:'Mira Kwan', id:'n4',
+      body:'Settled much better this week. Stayed in the water the whole lesson.',
+      author:'Coach Sally', created_at:'2026-10-18T09:10:00Z' }
+  ]);
+
+Object.assign(RPC, {
   my_schedule: () => ([]),
   my_payments: () => ([]),
   my_credits: () => ([]),
   my_attendance: () => ([]),
   mark_message_read: () => true
-};
+});
 
 const TYPES = { '.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8',
   '.css':'text/css; charset=utf-8', '.png':'image/png', '.json':'application/json',
@@ -86,7 +116,13 @@ http.createServer((req, res) => {
 
   if (p.startsWith('/rest/v1/rpc/')) {
     const fn = RPC[p.slice('/rest/v1/rpc/'.length)];
-    return send(res, 200, JSON.stringify(fn ? fn() : []));
+    let body = '';
+    req.on('data', c => { body += c; });
+    return req.on('end', () => {
+      let args = null;
+      try { args = body ? JSON.parse(body) : null; } catch (_e) { args = null; }
+      send(res, 200, JSON.stringify(fn ? fn(args) : []));
+    });
   }
   if (p.startsWith('/auth/')) return send(res, 200, JSON.stringify({ access_token: 'demo' }));
 

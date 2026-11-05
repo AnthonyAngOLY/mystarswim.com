@@ -116,7 +116,25 @@
   .strike{text-decoration:line-through}
   .otp{letter-spacing:.42em; text-align:center; font-size:22px; font-weight:800}
   .pnote{border-left:3px solid var(--primary-soft)}
-  .pnote .by{color:var(--muted); font-size:12px; margin-top:7px}
+  .pnote .by{color:var(--muted); font-size:11px; margin-top:7px; line-height:1.5}
+  /* Whose note it is, when the list spans several swimmers. Stronger
+     than the date because it is what a parent scans for. */
+  .pnote .who{font-size:12.5px; font-weight:800; color:var(--primary-on-soft);
+              margin-bottom:3px; letter-spacing:.1px}
+  /* One chip per swimmer, to narrow a long list to one child. Hidden
+     entirely for a family with one swimmer: a filter with a single
+     option is furniture. */
+  .progfilter{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px}
+  .progfilter button{background:var(--surface); border:1px solid var(--border);
+    border-radius:999px; padding:6px 13px; font:inherit; font-size:12.5px;
+    font-weight:700; color:var(--muted); cursor:pointer}
+  .progfilter button.on{background:var(--primary-soft); border-color:var(--primary);
+    color:var(--primary-on-soft)}
+  /* A month heading down a long list, so a year of notes can be scanned
+     rather than scrolled through blind. */
+  .progmonth{font-size:11px; font-weight:800; letter-spacing:.6px; text-transform:uppercase;
+    color:var(--muted); margin:14px 2px 6px}
+  .progmonth:first-child{margin-top:0}
   .tapcard{cursor:pointer}
   .tapcard:active{background:#F7FCFF}
   a.plain{color:var(--primary-on-soft); font-weight:700; text-decoration:none}
@@ -198,6 +216,17 @@
       <div id="childNotes"></div>
     </div>
 
+    <!-- Progress: every coach's note about every swimmer, in one list -->
+    <div id="v-progress" class="hidden">
+      <div class="h" style="margin-top:2px">Progress</div>
+      <div class="sub" style="margin:0 2px 12px">
+        Everything the coaches have written, newest first. Whoever took the class
+        writes it, so a replacement lesson appears here the same as any other.
+      </div>
+      <div id="progFilter" class="progfilter"></div>
+      <div id="progBody"></div>
+    </div>
+
     <!-- Schedule -->
     <div id="v-sched" class="hidden">
       <div class="h" style="margin-top:2px">Classes</div>
@@ -237,6 +266,7 @@
   <nav id="tabs">
     <button data-v="home"    class="on"><b>🏠</b>Home</button>
     <button data-v="sched"><b>📅</b>Classes</button>
+    <button data-v="progress"><b>📈</b>Progress</button>
     <button data-v="credits"><b>⭐</b>Credits</button>
     <button data-v="billing"><b>🧾</b>Billing</button>
     <button data-v="msgs"><b>✉️</b>Inbox<span id="msgDot"></span></button>

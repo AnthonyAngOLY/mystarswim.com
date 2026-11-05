@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 16;
+  var BUILD = 17;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1375,16 +1375,53 @@
       var el = $('noteHist');
       if (!el) return;
       rows = rows || [];
+      // The history is the point of this panel, not a footnote to the
+      // box below it. A coach covering somebody else's class, or taking
+      // a swimmer's replacement session, opens this to find out where
+      // they got to — and everything here was written by whoever took
+      // the class, not only by them.
       el.innerHTML = rows.length ? rows.map(function (n) {
-        return '<div class="noteold">' + esc(n.body)
+        return '<div class="noteold" data-id="' + esc(n.id) + '">'
+          + '<div class="nb">' + esc(n.body) + '</div>'
           + '<div class="by">' + esc(n.author) + ' \u00b7 ' + esc(prettyDate(n.created_at.slice(0, 10)))
           +   (n.edited_at ? ' \u00b7 edited' : '')
-          +   (n.mine && n.same_day
-                ? ' \u00b7 <button class="linkish" style="font-size:11.5px;padding:0" '
-                  + 'data-void="' + esc(n.id) + '">withdraw</button>'
+          +   (n.mine
+                ? ' \u00b7 <button class="linkish" data-edit="' + esc(n.id) + '">edit</button>'
+                  + ' \u00b7 <button class="linkish" data-void="' + esc(n.id) + '">withdraw</button>'
                 : '')
           + '</div></div>';
       }).join('') : '<p class="cls-sub">Nothing written about them yet.</p>';
+
+      // Editing happens in place, in the card the note is already in.
+      // A sheet or a second screen loses the thing being corrected,
+      // which on a phone at a poolside is the whole context.
+      Array.prototype.forEach.call(el.querySelectorAll('[data-edit]'), function (b) {
+        b.addEventListener('click', function () {
+          var card = b.closest('.noteold');
+          var id = b.getAttribute('data-edit');
+          var body = card.querySelector('.nb');
+          if (card.querySelector('textarea')) return;
+          var was = body.textContent;
+          body.innerHTML = '<textarea class="noteedit" maxlength="2000"></textarea>'
+            + '<div style="display:flex;gap:6px;margin-top:6px">'
+            + '<button class="btn" data-save="' + esc(id) + '" style="flex:1;padding:8px">Save</button>'
+            + '<button class="btn ghost" data-cancel="1" style="flex:none;width:80px;padding:8px">Cancel</button>'
+            + '</div>';
+          var ta = body.querySelector('textarea');
+          ta.value = was; ta.focus();
+          body.querySelector('[data-cancel]').addEventListener('click', function () {
+            loadNoteHistory(studentId);
+          });
+          body.querySelector('[data-save]').addEventListener('click', function () {
+            var v = ta.value.trim();
+            if (!v) { alert('A note cannot be emptied. Withdraw it instead.'); return; }
+            if (v === was) { loadNoteHistory(studentId); return; }
+            rpc('edit_progress_note', { p_id: id, p_body: v })
+              .then(function () { return loadNoteHistory(studentId); })
+              .catch(function (e) { alert(e.message); });
+          });
+        });
+      });
 
       Array.prototype.forEach.call(el.querySelectorAll('[data-void]'), function (b) {
         b.addEventListener('click', function () {

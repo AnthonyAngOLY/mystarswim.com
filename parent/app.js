@@ -255,7 +255,7 @@
 
   function setView(v) {
     view = v;
-    ['home', 'child', 'sched', 'credits', 'billing', 'msgs'].forEach(function (k) {
+    ['home', 'child', 'progress', 'sched', 'credits', 'billing', 'msgs'].forEach(function (k) {
       $('v-' + k).classList.toggle('hidden', k !== v);
     });
     Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (b) {
@@ -268,6 +268,9 @@
     if (v === 'credits') loadCredits();
     if (v === 'billing') loadBilling();
     if (v === 'msgs')    loadMessages();
+    // Fetched on entry rather than at sign-in: a family two years in has
+    // a hundred of these and none of it is needed to open the app.
+    if (v === 'progress') { if (progRows === null) loadProgress(); else renderProgress(); }
   }
 
   // ── Home ─────────────────────────────────────────────────────────────
@@ -346,6 +349,92 @@
     }).catch(function (e) {
       $('childNotes').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
     });
+  }
+
+  // ── Progress ─────────────────────────────────────────
+  // Every note about every swimmer in the family, newest first, rather
+  // than one child at a time behind a tap. my_child_notes() with no
+  // argument has always returned exactly this and nothing ever asked
+  // for it.
+  //
+  // Grouped by month, because a family two years in has a hundred of
+  // these and a flat list is a wall. Filtered by swimmer, but only when
+  // there is more than one — a filter with a single option is furniture.
+  var progFilter = null;    // student_id, or null for everybody
+  var progRows = null;      // cached, so tapping a chip does not refetch
+
+  function loadProgress() {
+    $('progBody').innerHTML = '<div class="empty">Loading…</div>';
+    return rpc('my_child_notes', {}).then(function (rows) {
+      progRows = rows || [];
+      renderProgress();
+    }).catch(function (e) {
+      $('progBody').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function renderProgress() {
+    var rows = progRows || [];
+    var kids = [];
+    rows.forEach(function (n) {
+      if (!kids.some(function (k) { return k.id === n.student_id; }))
+        kids.push({ id: n.student_id, name: n.child });
+    });
+
+    $('progFilter').innerHTML = kids.length > 1
+      ? '<button data-f="" class="' + (progFilter ? '' : 'on') + '">Everyone</button>'
+        + kids.map(function (k) {
+            return '<button data-f="' + esc(k.id) + '" class="'
+              + (progFilter === k.id ? 'on' : '') + '">' + esc(k.name) + '</button>';
+          }).join('')
+      : '';
+    Array.prototype.forEach.call($('progFilter').querySelectorAll('[data-f]'), function (b) {
+      b.addEventListener('click', function () {
+        progFilter = b.getAttribute('data-f') || null;
+        renderProgress();
+      });
+    });
+
+    var show = progFilter
+      ? rows.filter(function (n) { return n.student_id === progFilter; })
+      : rows;
+
+    if (!show.length) {
+      $('progBody').innerHTML = '<div class="empty">Nothing yet.<br>'
+        + 'Coaches write here after a lesson when there is something to say.</div>';
+      return;
+    }
+
+    var html = '', month = '';
+    show.forEach(function (n) {
+      var m = monthWord(n.created_at);
+      if (m !== month) { month = m; html += '<div class="progmonth">' + esc(m) + '</div>'; }
+      html += '<div class="card pnote">'
+        // The swimmer's name leads only when the list holds more than
+        // one. Inside a single child's list it is noise on every card.
+        + (kids.length > 1 && !progFilter
+            ? '<div class="who">' + esc(n.child) + '</div>' : '')
+        + '<div class="lead" style="white-space:pre-wrap">' + esc(n.body) + '</div>'
+        + '<div class="by">' + esc(n.author) + ' · ' + esc(noteDate(n.created_at)) + '</div>'
+        + '</div>';
+    });
+    $('progBody').innerHTML = html;
+  }
+
+  function monthWord(ts) {
+    try {
+      return new Date(ts).toLocaleDateString('en-GB',
+        { month: 'long', year: 'numeric', timeZone: TZ });
+    } catch (e) { return ''; }
+  }
+
+  // The full date, not "3 days ago". A note is a record, and a record
+  // read six months later needs to say when it was written.
+  function noteDate(ts) {
+    try {
+      return new Date(ts).toLocaleDateString('en-GB',
+        { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ });
+    } catch (e) { return ''; }
   }
 
   function whenWord(iso) {
