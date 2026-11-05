@@ -91,6 +91,120 @@ const FOUND = {
     if (r.body.error) throw new Error('asked for something else: ' + r.body.error);
   });
 
+  // ── declare: the catch-up health declaration ──────────────────────
+  // Every family who joined before the intake form asked the six
+  // questions has nothing on file, while the terms they signed declare
+  // on their behalf that there is nothing to tell. This is how they
+  // discharge that without enrolling anybody again.
+  const MINE = [{ id: 'stu-1', name: 'Aaryan' }, { id: 'stu-2', name: 'Mira' }];
+  const NO_TO_ALL = { supervision: false, chestPain: false, boneJoint: false,
+                      medication: false, learning: false, other: false };
+
+  const declareClient = (opts) => stubClient(Object.assign({
+    rpc: { find_account: async () => ({ data: FOUND, error: null }) },
+    rows: { students: { data: MINE, error: null } }
+  }, opts || {}));
+
+  const declare = (client, body) => post(load(client, ENV), Object.assign({
+    action: 'declare', accountNo: 'LEE-2394', accountPhone: '0123456001',
+    signatureName: 'Lee Oy Yin'
+  }, body));
+
+  await step('a declaration is recorded against the children on the account', async () => {
+    const c = declareClient();
+    const r = await declare(c, { children: [{ id: 'stu-1', health: NO_TO_ALL }] });
+    if (r.body.ok !== true) throw new Error('refused: ' + JSON.stringify(r.body));
+    const w = c.calls.insert.filter(x => x[0] === 'student_health_declarations');
+    if (w.length !== 1) throw new Error('wrote ' + w.length + ' declarations');
+    if (w[0][1].student_id !== 'stu-1') throw new Error('filed against ' + w[0][1].student_id);
+    if (w[0][1].q_chest_pain !== false) throw new Error('the answers did not travel');
+  });
+
+  // The one that matters. A browser can send any id it likes; the only
+  // thing standing between that and a health record on another family's
+  // child is this intersection.
+  await step("a child who is not on the account is never written", async () => {
+    const c = declareClient();
+    const r = await declare(c, { children: [
+      { id: 'stu-1', health: NO_TO_ALL },
+      { id: 'someone-elses-child', health: NO_TO_ALL }
+    ] });
+    if (r.body.ok !== true) throw new Error('refused: ' + JSON.stringify(r.body));
+    const w = c.calls.insert.filter(x => x[0] === 'student_health_declarations');
+    if (w.length !== 1) throw new Error('wrote ' + w.length + ', should have dropped the stranger');
+    if (w.some(x => x[1].student_id === 'someone-elses-child'))
+      throw new Error('a declaration was filed against another family');
+  });
+
+  await step('the account number and phone are proved again on this call', async () => {
+    const c = stubClient({
+      rpc: { find_account: async () => ({ data: { ok: false, error: 'That account number and phone number do not go together.' }, error: null }) },
+      rows: { students: { data: MINE, error: null } }
+    });
+    const r = await declare(c, { children: [{ id: 'stu-1', health: NO_TO_ALL }] });
+    if (r.status !== 403) throw new Error('status ' + r.status);
+    if (c.calls.insert.length) throw new Error('it wrote anyway');
+  });
+
+  // Unanswered is not no. A declaration stored with nulls reads as asked
+  // and answered, which is worse than no declaration at all.
+  await step('an unanswered question is refused, not stored as no', async () => {
+    const c = declareClient();
+    const half = Object.assign({}, NO_TO_ALL); delete half.learning;
+    const r = await declare(c, { children: [{ id: 'stu-1', health: half }] });
+    if (r.body.ok === true) throw new Error('a half-answered declaration was accepted');
+    if (c.calls.insert.length) throw new Error('it wrote a partial declaration');
+  });
+
+  await step('a yes with nothing written is refused', async () => {
+    const c = declareClient();
+    const r = await declare(c, { children: [{ id: 'stu-1',
+      health: Object.assign({}, NO_TO_ALL, { learning: true }) }] });
+    if (r.body.ok === true) throw new Error('a bare yes was accepted');
+    if (c.calls.insert.length) throw new Error('it wrote a yes with no detail');
+  });
+
+  await step('a yes with a detail is recorded', async () => {
+    const c = declareClient();
+    const r = await declare(c, { children: [{ id: 'stu-1',
+      health: Object.assign({}, NO_TO_ALL, { learning: true, details: 'Mild ADHD; needs instructions one at a time.' }) }] });
+    if (r.body.ok !== true) throw new Error('refused: ' + JSON.stringify(r.body));
+    const w = c.calls.insert.filter(x => x[0] === 'student_health_declarations')[0][1];
+    if (w.q_learning !== true) throw new Error('the yes did not travel');
+    if (!/one at a time/.test(w.details || '')) throw new Error('the detail did not travel');
+  });
+
+  await step('one signing covers the children in it, under one reference', async () => {
+    const c = declareClient();
+    const r = await declare(c, { children: [
+      { id: 'stu-1', health: NO_TO_ALL }, { id: 'stu-2', health: NO_TO_ALL }] });
+    if (!/^HD-/.test(r.body.reference || '')) throw new Error('no reference: ' + JSON.stringify(r.body));
+    const w = c.calls.insert.filter(x => x[0] === 'student_health_declarations');
+    if (w.length !== 2) throw new Error('wrote ' + w.length);
+    if (w[0][1].acceptance_id !== w[1][1].acceptance_id)
+      throw new Error('two children in one signing got two references');
+    if (w[0][1].declared_by !== 'Lee Oy Yin') throw new Error('the signature was not recorded');
+  });
+
+  await step('a declaration will not be signed without a name', async () => {
+    const c = declareClient();
+    const r = await declare(c, { signatureName: '', children: [{ id: 'stu-1', health: NO_TO_ALL }] });
+    if (r.status !== 400) throw new Error('status ' + r.status);
+    if (c.calls.insert.length) throw new Error('it wrote an unsigned declaration');
+  });
+
+  await step('the lookup hands back the children with their ids', async () => {
+    const c = declareClient();
+    const r = await post(load(c, ENV), { action: 'lookup', accountNo: 'LEE-2394', accountPhone: '0123456001' });
+    if (!Array.isArray(r.body.childList)) throw new Error('no childList: ' + JSON.stringify(r.body));
+    if (r.body.childList.length !== 2) throw new Error('got ' + r.body.childList.length);
+    if (r.body.childList[0].id !== 'stu-1') throw new Error('no id on the child');
+    // The old key has to survive unchanged: the intake form deployed
+    // right now reads it as an array of names.
+    if (!Array.isArray(r.body.children) || typeof r.body.children[0] !== 'string')
+      throw new Error('the children key changed shape and would break the intake form');
+  });
+
   await step('a registration with no swimmers is still refused', async () => {
     const h = load(stubClient({}), ENV);
     const r = await post(h, { guardianName: 'Lee Oy Yin', guardianPhone: '0123456001', children: [] });

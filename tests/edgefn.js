@@ -91,24 +91,40 @@ function stubClient(opts) {
       if (!f) return { data: null, error: { message: 'no such function ' + name } };
       return f(args);
     },
+    // The query builder, as much of it as this function uses. Every
+    // filter returns the builder, and the builder is thenable, so a
+    // chain ends wherever the code under test stops adding to it.
+    //
+    // It grows when the function grows. A missing method here reads as
+    // a 500 from the handler, which is at least loud — the first run
+    // after the lookup learned to read students said
+    // "db.from(...).select(...).eq(...).neq is not a function".
     from: (table) => {
+      const answer = () => ((o.rows || {})[table]) || { data: [], error: null };
       const q = {
         _table: table, _filters: {},
         select() { calls.select.push([table, q._filters]); return q; },
         eq(col, val) { q._filters[col] = val; return q; },
+        neq(col, val) { q._filters['!' + col] = val; return q; },
+        or(expr) { q._filters.or = expr; return q; },
         order() { return q; },
         limit() { return q; },
+        single: async () => answer(),
+        maybeSingle: async () => answer(),
         insert(rows) {
           calls.insert.push([table, rows]);
           const res = ((o.insert || {})[table]) || { data: rows, error: null };
-          return { select: () => ({ single: async () => res, maybeSingle: async () => res }), then: (r) => r(res) };
+          return {
+            select: () => ({ single: async () => res, maybeSingle: async () => res }),
+            then: (r) => r(res)
+          };
         },
         upsert(rows) {
           calls.upsert.push([table, rows]);
           return Promise.resolve(((o.upsert || {})[table]) || { data: rows, error: null });
         },
         update(patch) { calls.insert.push([table + ':update', patch]); return q; },
-        then(resolve) { return resolve(((o.rows || {})[table]) || { data: [], error: null }); }
+        then(resolve) { return resolve(answer()); }
       };
       return q;
     }

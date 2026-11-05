@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Health Declaration — Star Swim Sdn Bhd</title>
+  <link rel="icon" type="image/png" href="./logo.png" />
+  <link rel="apple-touch-icon" href="./logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" />
+  <link rel="stylesheet" href="./public.css" />
+  <style>
+    /* Only what this page adds. Everything else is public.css, shared
+       with the intake form, so a parent who has seen one recognises the
+       other. */
+    .child-pick{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--surface-2);
+                border:1.5px solid var(--border-2);border-radius:12px;cursor:pointer;margin-bottom:10px;transition:.15s ease}
+    .child-pick:hover{border-color:var(--primary)}
+    .child-pick.is-on{background:var(--primary-soft);border-color:var(--primary)}
+    .child-pick input{width:20px;height:20px;accent-color:var(--primary);cursor:pointer;flex-shrink:0}
+    .child-pick-name{font-size:15px;font-weight:700;color:var(--text)}
+    .child-pick-done{margin-left:auto;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+                     color:var(--green-tx);background:var(--green-bg);border:1px solid var(--green-bd);padding:3px 9px;border-radius:999px}
+    .found-note{padding:12px 14px;background:var(--green-bg);border:1px solid var(--green-bd);color:var(--green-tx);
+                border-radius:10px;font-size:13px;font-weight:600;margin-bottom:14px;line-height:1.5}
+    .done-card{text-align:center;padding:34px 24px}
+    .done-tick{font-size:44px;line-height:1;margin-bottom:10px}
+    .done-ref{display:inline-block;margin-top:10px;padding:7px 14px;background:var(--surface-2);border:1px solid var(--border-2);
+              border-radius:8px;font-weight:800;letter-spacing:.6px}
+    .sig-input{font-family:"Segoe Script","Brush Script MT",cursive;font-size:19px}
+    .why{font-size:12.5px;color:var(--text-3);line-height:1.65}
+    .why strong{color:var(--text-2)}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="./config.js"></script>
+  <script src="./declare.compiled.js"></script>
+</body>
+</html>

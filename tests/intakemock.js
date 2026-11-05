@@ -56,11 +56,21 @@ const STATE = {
     { id: 'lt-lts',   name: 'Learn to Swim', branch: 'br-ssgt' },
     { id: 'lt-p1',    name: 'Personal 1',    branch: 'br-ssgt' }
   ],
-  // An existing family, for the returning-parent route.
+  // An existing family, for the returning-parent route and for the
+  // health declaration page. childList carries the ids the declaration
+  // posts back; children stays an array of names, which is what the
+  // deployed intake form reads.
   accounts: [
     { account_no: 'LEE-2394', phones: ['+60123456001', '+60198887777'],
-      display_name: 'Lee Oy Yin', children: ['Aaryan', 'Mira'] }
+      display_name: 'Lee Oy Yin', children: ['Aaryan', 'Mira'],
+      childList: [{ id: 'stu-aaryan', name: 'Aaryan' }, { id: 'stu-mira', name: 'Mira' }] },
+    // A family with nobody on the account, so the page can be made to
+    // say so rather than show an empty list that reads as a fault.
+    { account_no: 'NEW-0001', phones: ['+60111111111'],
+      display_name: 'Tan Wei Ling', children: [], childList: [] }
   ],
+  // Health declarations this mock has been sent.
+  declarations: [],
   // What public-intake received, so a test can assert on the submission
   // rather than on the screen that produced it.
   submissions: []
@@ -114,8 +124,9 @@ http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return send(res, 204, '');
 
   // Lets a test put the form into a known state between runs.
-  if (p === '/__reset') { STATE.submissions = []; return json(res, 200, { ok: true }); }
+  if (p === '/__reset') { STATE.submissions = []; STATE.declarations = []; return json(res, 200, { ok: true }); }
   if (p === '/__submissions') return json(res, 200, STATE.submissions);
+  if (p === '/__declarations') return json(res, 200, STATE.declarations);
 
   // The page asks for its own config; point it at this server.
   if (p === '/config.js') {
@@ -154,7 +165,34 @@ http.createServer(async (req, res) => {
       if (!a) return json(res, 200, { ok: false,
         error: 'That account number and phone number do not go together.' });
       return json(res, 200, { ok: true, displayName: a.display_name,
-        accountNo: a.account_no, children: a.children });
+        accountNo: a.account_no, children: a.children, childList: a.childList });
+    }
+
+    // The catch-up declaration, with the function's own guards: the pair
+    // is proved again, and a child not on the account is dropped rather
+    // than written.
+    if (b.action === 'declare') {
+      const tail = x => String(x || '').replace(/[^0-9]/g, '').slice(-9);
+      const a = STATE.accounts.find(x =>
+        x.account_no === String(b.accountNo || '').toUpperCase() &&
+        x.phones.some(ph => tail(ph) === tail(b.accountPhone)));
+      if (!a) return json(res, 200, { ok: false,
+        error: 'That account number and phone number do not go together.' });
+      if (!String(b.signatureName || '').trim())
+        return json(res, 200, { ok: false, error: 'Type your name to sign.' });
+      const mine = new Map(a.childList.map(k => [k.id, k.name]));
+      const reference = 'HD-TEST001';
+      const declared = [];
+      for (const k of (b.children || [])) {
+        const name = mine.get(k && k.id);
+        if (!name) continue;
+        STATE.declarations.push({ reference, id: k.id, name,
+                                  signedBy: b.signatureName, health: k.health });
+        declared.push({ name });
+      }
+      if (!declared.length) return json(res, 200, { ok: false,
+        error: 'None of those children are on this account.' });
+      return json(res, 200, { ok: true, reference, declared, refused: [] });
     }
     STATE.submissions.push(b);
     return json(res, 200, {

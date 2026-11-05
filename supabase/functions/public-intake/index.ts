@@ -52,6 +52,25 @@ const s = (v: unknown, max = 200): string =>
 // claiming forty is not a family.
 const MAX_CHILDREN = 10;
 
+// ── The six health answers, read once ───────────────────────────────────
+// Registration and the catch-up declaration both take them, and a
+// seventh question appearing in one and not the other is exactly the
+// drift this is here to prevent. null means not answered, which is not
+// the same as no and must never be stored as one.
+function healthAnswers(h: Record<string, unknown>) {
+  const yn = (v: unknown) => (v === true ? true : v === false ? false : null);
+  return {
+    q_supervision: yn(h.supervision),
+    q_chest_pain:  yn(h.chestPain),
+    q_bone_joint:  yn(h.boneJoint),
+    q_medication:  yn(h.medication),
+    q_learning:    yn(h.learning),
+    q_other:       yn(h.other),
+  };
+}
+const anyYes = (a: Record<string, boolean | null>) =>
+  Object.values(a).some((v) => v === true);
+
 function ageFromDob(dob: string | null): number | null {
   if (!dob) return null;
   const d = new Date(dob);
@@ -103,12 +122,130 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!found || found.ok !== true) {
         return json({ ok: false, error: (found && found.error) || "That account number and phone number do not go together." });
       }
+      // childList carries the same children as `children`, with their
+      // ids, for the declaration page — which has to say which child an
+      // answer is about, and cannot do that by name without mis-filing a
+      // health record the first time a family has two Aarons.
+      //
+      // Added beside `children` rather than replacing it: the intake
+      // form deployed on phones and laptops right now reads that key as
+      // an array of names, and a shape it cannot read would break
+      // enrolment to tidy up a field.
+      //
+      // An id here is not a key to anything. Every route that takes one
+      // re-proves the account number and phone first and then intersects
+      // what it was sent with that account's own children, so an id
+      // without the pair opens nothing.
+      let childList: Array<{ id: string; name: string }> = [];
+      if (found.account_id) {
+        const { data: kids } = await db
+          .from("students").select("id,name")
+          .eq("account_id", found.account_id)
+          .neq("is_active", false)
+          .order("name");
+        childList = (kids ?? []).map((k: { id: string; name: string }) => ({ id: k.id, name: k.name }));
+      }
+
       return json({
         ok: true,
         displayName: found.display_name ?? null,
         accountNo: found.account_no ?? null,
         children: found.children ?? [],
+        childList,
       });
+    }
+
+    // ── A declaration for children who are already with us ──
+    // The six health questions are asked at enrolment. Every family who
+    // joined before the form asked them has nothing on file — and the
+    // terms they signed declare, on their behalf, that the child "does
+    // not have any known medical, physical or psychological condition
+    // that would prevent safe participation", with clause 9.4 saying
+    // non-disclosure may mean withdrawal without refund. We were holding
+    // families to a disclosure obligation through a form with no
+    // disclosure in it. This is how they discharge it without enrolling
+    // anybody again.
+    if (s(body.action, 20) === "declare") {
+      const accountNo = s(body.accountNo, 20).toUpperCase();
+      const accountPhone = s(body.accountPhone, 40);
+      const signature = s(body.signatureName, 120);
+      const kids = Array.isArray(body.children) ? body.children : [];
+
+      if (!signature) return json({ ok: false, error: "Type your name to sign." }, 400);
+      if (!kids.length) return json({ ok: false, error: "Choose at least one child." }, 400);
+      if (kids.length > MAX_CHILDREN) {
+        return json({ ok: false, error: `That is more than ${MAX_CHILDREN} children.` }, 400);
+      }
+
+      // Proved again, on this call. The lookup that filled the screen is
+      // not a session and grants nothing on its own.
+      const { data: who, error: wErr } = await db.rpc("find_account", {
+        p_account_no: accountNo, p_phone: accountPhone,
+      });
+      if (wErr) return json({ ok: false, error: "Could not check that just now. Please try again shortly." }, 503);
+      if (!who || who.ok !== true) {
+        return json({ ok: false, error: (who && who.error)
+          || "That account number and phone number do not go together." }, 403);
+      }
+
+      // The account's own children, read here rather than taken from the
+      // browser. Anything sent that is not in this set is dropped without
+      // comment: a health record filed against another family's child is
+      // the worst failure this page has available to it.
+      const { data: mine, error: mErr } = await db
+        .from("students").select("id,name")
+        .eq("account_id", who.account_id)
+        .neq("is_active", false);
+      if (mErr) return json({ ok: false, error: "Could not read your children just now." }, 503);
+      const byId = new Map<string, string>((mine ?? []).map((k: { id: string; name: string }) => [k.id, k.name]));
+
+      const reference = "HD-" + crypto.randomUUID().replace(/-/g, "").slice(0, 7).toUpperCase();
+      const declaredAt = new Date().toISOString();
+      const done: Array<{ name: string }> = [];
+      const refused: string[] = [];
+
+      for (const k of kids) {
+        const id = s(k?.id, 64);
+        const name = byId.get(id);
+        if (!name) continue;                       // not this family's child
+
+        const h = (k && typeof k.health === "object" && k.health) ? k.health : null;
+        if (!h) { refused.push(name); continue; }
+        const ans = healthAnswers(h);
+        const details = s(h.details, 2000) || null;
+
+        // Unlike registration, refusing here strands nobody: the parent
+        // is on a page with one job and can answer the question. A
+        // declaration recorded as unanswered would be worse than none,
+        // because it reads as asked and answered.
+        if (Object.values(ans).some((v) => v === null)) { refused.push(name); continue; }
+        if (anyYes(ans) && !details) { refused.push(name); continue; }
+
+        const { error: hErr } = await db
+          .from("student_health_declarations")
+          .insert({
+            student_id: id,
+            acceptance_id: reference,
+            declared_at: declaredAt,
+            declared_by: signature,
+            ...ans,
+            details,
+          });
+        if (hErr) {
+          console.warn("declaration failed for", name, hErr.message);
+          refused.push(name);
+          continue;
+        }
+        done.push({ name });
+      }
+
+      if (!done.length) {
+        return json({ ok: false,
+          error: refused.length
+            ? "Please answer all six questions for each child, and tell us what we should know wherever you answered yes."
+            : "None of those children are on this account." }, 400);
+      }
+      return json({ ok: true, reference, declared: done, refused });
     }
 
 
@@ -273,23 +410,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // and this is the field a safeguarding question would be asked of.
       const h = (c && typeof c.health === "object" && c.health) ? c.health : null;
       if (h) {
-        const yn = (v: unknown) => (v === true ? true : v === false ? false : null);
-        const ans = {
-          q_supervision: yn(h.supervision),
-          q_chest_pain:  yn(h.chestPain),
-          q_bone_joint:  yn(h.boneJoint),
-          q_medication:  yn(h.medication),
-          q_learning:    yn(h.learning),
-          q_other:       yn(h.other),
-        };
-        const anyYes = Object.values(ans).some((v) => v === true);
+        const ans = healthAnswers(h);
         const details = s(h.details, 2000) || null;
         // The form asks for details whenever an answer is yes, and the
         // table refuses the row without them. Refusing the whole
         // registration here would strand a family at the last step over
         // a field they can still be asked for, so the declaration is
         // recorded as unanswered and the office is told.
-        if (anyYes && !details) {
+        if (anyYes(ans) && !details) {
           console.warn("health declaration for", name, "had a yes with no details; not recorded");
         } else {
           const { error: hErr } = await db
