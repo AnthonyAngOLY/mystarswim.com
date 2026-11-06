@@ -5,31 +5,39 @@
 --  changes nothing and takes no argument. Safe to re-run.
 --
 --  WHY
---  outstanding_accounts() reports zero accounts owing. That was true
---  before, when the function filtered on the status label, and it is
---  still true now that it does the arithmetic. Two very different things
---  produce that same zero:
+--  outstanding_accounts() reported zero accounts owing, before and after
+--  it was changed to do arithmetic instead of reading the status label.
+--  Several very different things produce that same zero:
 --
---    1. Everything billed really has been collected. For a swim school
---       taking payment at the counter this is entirely plausible, and
---       the invoice-to-receipt pairing already came back 154 of 154.
+--    1. Everything billed really has been collected.
+--    2. amount_paid is written as settled whether or not money arrived,
+--       so every invoice looks square and the list is empty by
+--       construction.
+--    3. Balances exist, but only on invoices nobody would chase — void,
+--       refunded, draft — which the function excludes on purpose.
+--    4. An invoice was paid and then refunded, netting to zero, but its
+--       status label was never moved off 'sent'. It reads as owing and
+--       is not.
+--    5. The function could not answer at all. It is seat-guarded, and a
+--       guard written as a where clause returns an empty list rather
+--       than an error. In the SQL editor there is no JWT and so never a
+--       seat, which means the confirm block that reported the zero was
+--       never measuring the data in the first place.
 --
---    2. amount_paid is being written as though the invoice were settled,
---       whether or not money arrived. Then every invoice looks square by
---       arithmetic and the outstanding list is empty by construction.
---
---  Reading the number alone cannot tell these apart. The question that
---  can is: are there invoices marked paid with no payment row behind
---  them? Money that arrived leaves a row in payments. A field set by a
---  form does not. Part C is that test; everything else is context.
+--  Reading one number cannot tell these apart. This file separates them.
+--  The parts that matter most are C, which asks whether any invoice
+--  claims payment with no row in payments behind it — money that arrives
+--  leaves a row, a form that pre-fills a field does not — and F, which
+--  catches an invoice whose label disagrees with its own money.
 --
 --  WHAT THE PARTS ARE
 --    A  the arithmetic, across every invoice regardless of status
 --    B  whether amount_paid agrees with the payments actually recorded
---    C  invoices claiming payment with no payment row  ← the test
+--    C  invoices claiming payment with no payment row
 --    D  the same arithmetic broken down by status label
---    E  the invoices that do show a balance, largest first
---    F  what A–E together mean, in a sentence
+--    E  every invoice where amount_paid and total_amount disagree
+--    F  invoices whose status label disagrees with their own money
+--    G  what A to F together mean, in a sentence
 --
 --  ONE STATEMENT
 --  The SQL editor shows the result of the last statement only, so this
@@ -57,114 +65,162 @@ j as (
   select inv.*,
          coalesce(pay.pay_sum,0)::numeric as pay_sum,
          coalesce(pay.pay_rows,0)         as pay_rows,
-         (inv.tot - inv.paid)::numeric    as owed
+         (inv.tot - inv.paid)::numeric    as owed,
+         -- Paid and then refunded: rows exist, and they cancel out.
+         (coalesce(pay.pay_rows,0) > 0
+          and abs(coalesce(pay.pay_sum,0)) < 0.005) as netted_out
     from inv
     left join pay on pay.invoice_id = inv.id
 ),
-owing   as (select count(*) n from j where owed >=  0.005),
-nomoney as (select count(*) n from j where paid >= 0.005 and pay_rows = 0),
-mismatch as (select count(*) n from j where abs(paid - pay_sum) >= 0.005)
+-- What outstanding_accounts() would actually chase: a balance on an
+-- invoice that is not void, refunded or draft.
+chase as (
+  select * from j
+   where owed >= 0.005
+     and status not in ('void','refunded','draft')
+),
+owing    as (select count(*) n from j where owed >= 0.005),
+unbal    as (select count(*) n from j where abs(owed) >= 0.005),
+real_n   as (select count(*) n, coalesce(sum(owed),0) rm from chase where not netted_out),
+label_n  as (select count(*) n from chase where netted_out),
+nomoney  as (select count(*) n from j where paid >= 0.005 and pay_rows = 0),
+mismatch as (select count(*) n from j where abs(paid - pay_sum) >= 0.005),
+mislabel as (select count(*) n from j
+              where netted_out and status not in ('void','refunded'))
 
 select z.part, z.item, z.detail
   from (
 
   -- ── A. the arithmetic ────────────────────────────────────────────────
   select 1 k, 'A. the arithmetic' part,
-         'invoices in total' item,
-         count(*)::text detail
+         'invoices in total' item, count(*)::text detail
     from j
   union all
   select 1, 'A. the arithmetic',
-         'owing — amount_paid is short of total_amount',
-         count(*)::text
+         'owing — amount_paid is short of total_amount', count(*)::text
     from j where owed >= 0.005
   union all
   select 1, 'A. the arithmetic',
-         'settled exactly, to the cent',
-         count(*)::text
+         'settled exactly, to the cent', count(*)::text
     from j where abs(owed) < 0.005
   union all
   select 1, 'A. the arithmetic',
-         'overpaid — amount_paid exceeds total_amount',
-         count(*)::text
+         'overpaid — amount_paid exceeds total_amount', count(*)::text
     from j where owed <= -0.005
   union all
   select 1, 'A. the arithmetic',
-         'total still owed across every invoice',
-         'RM ' || to_char(coalesce(sum(greatest(0,owed)),0),'FM999999990.00')
-    from j
+         'of that, actually chaseable (not void, refunded or draft)',
+         (select n::text from real_n) || ' invoice'
+      || case when (select n from real_n) = 1 then '' else 's' end
+      || ', RM ' || (select to_char(rm,'FM999999990.00') from real_n)
 
   -- ── B. amount_paid against the payments actually recorded ────────────
   union all
   select 2, 'B. amount_paid vs the payment rows',
-         'invoices where the two disagree',
-         count(*)::text
-    from j where abs(paid - pay_sum) >= 0.005
+         'invoices where the two disagree', (select n::text from mismatch)
   union all
   select 2, 'B. amount_paid vs the payment rows',
          'how much they disagree by, added up',
-         'RM ' || to_char(coalesce(sum(abs(paid - pay_sum)),0),'FM999999990.00')
-    from j where abs(paid - pay_sum) >= 0.005
+         'RM ' || to_char(coalesce((select sum(abs(paid - pay_sum)) from j
+                                     where abs(paid - pay_sum) >= 0.005),0),
+                          'FM999999990.00')
 
-  -- ── C. the test ──────────────────────────────────────────────────────
+  -- ── C. the pre-fill test ─────────────────────────────────────────────
   union all
   select 3, 'C. paid, with no money behind it',
          'invoices with amount_paid above zero and NO payment row',
-         count(*)::text
-    from j where paid >= 0.005 and pay_rows = 0
+         (select n::text from nomoney)
   union all
   select 3, 'C. paid, with no money behind it',
          'what those invoices claim to have collected',
-         'RM ' || to_char(coalesce(sum(paid),0),'FM999999990.00')
-    from j where paid >= 0.005 and pay_rows = 0
+         'RM ' || to_char(coalesce((select sum(paid) from j
+                                     where paid >= 0.005 and pay_rows = 0),0),
+                          'FM999999990.00')
 
   -- ── D. by status label ───────────────────────────────────────────────
   union all
   select 4, 'D. by status',
-         j.status || ' — ' || count(*) || ' invoice' ||
-           case when count(*) = 1 then '' else 's' end,
-         'owed RM ' || to_char(sum(greatest(0,j.owed)),'FM999999990.00') ||
-           ' of RM ' || to_char(sum(j.tot),'FM999999990.00') || ' billed'
+         j.status || ' — ' || count(*) || ' invoice'
+           || case when count(*) = 1 then '' else 's' end,
+         'owed RM ' || to_char(sum(greatest(0,j.owed)),'FM999999990.00')
+           || ' of RM ' || to_char(sum(j.tot),'FM999999990.00') || ' billed'
     from j group by j.status
 
-  -- ── E. who actually owes ─────────────────────────────────────────────
+  -- ── E. every invoice that does not balance ───────────────────────────
   union all
-  select 5, 'E. invoices showing a balance',
+  select 5, 'E. invoices that do not balance',
          coalesce(j.invoice_number,'(no number)') || '  [' || j.status || ']',
-         'RM ' || to_char(j.owed,'FM999999990.00') ||
-           ' of RM ' || to_char(j.tot,'FM999999990.00') ||
-           ' — ' || j.pay_rows || ' payment row' ||
-           case when j.pay_rows = 1 then '' else 's' end
-    from j where j.owed >= 0.005
+         case when j.owed >= 0.005 then 'owes RM ' || to_char(j.owed,'FM999999990.00')
+              else 'OVERPAID by RM ' || to_char(-j.owed,'FM999999990.00') end
+           || ' of RM ' || to_char(j.tot,'FM999999990.00')
+           || ' — ' || j.pay_rows || ' payment row'
+           || case when j.pay_rows = 1 then '' else 's' end
+           || case when j.netted_out then ', netting to zero (paid then refunded)'
+                   when j.pay_rows = 0 then ', no money ever recorded'
+                   else ', RM ' || to_char(j.pay_sum,'FM999999990.00') || ' recorded' end
+           || case when j.status in ('void','refunded','draft')
+                   then '  ·  not chased' else '' end
+    from j where abs(j.owed) >= 0.005
   union all
-  select 5, 'E. invoices showing a balance',
-         '(none)',
-         'No invoice has amount_paid short of total_amount.'
-    from owing where owing.n = 0
+  select 5, 'E. invoices that do not balance', '(none)',
+         'Every invoice has amount_paid equal to total_amount.'
+    from unbal where unbal.n = 0
 
-  -- ── F. what it means ─────────────────────────────────────────────────
+  -- ── F. labels that disagree with the money ───────────────────────────
   union all
-  select 6, 'F. verdict', 'reading A to E together',
+  select 6, 'F. label disagrees with the money',
+         coalesce(j.invoice_number,'(no number)') || '  [' || j.status || ']',
+         'Payments net to zero — paid and then refunded — but the status '
+      || 'is not refunded or void. It reads as owing RM '
+      || to_char(greatest(0,j.owed),'FM999999990.00') || ' and is not.'
+    from j where j.netted_out and j.status not in ('void','refunded')
+  union all
+  select 6, 'F. label disagrees with the money', '(none)',
+         'Every invoice whose payments cancel out is labelled refunded or void.'
+    from mislabel where mislabel.n = 0
+
+  -- ── G. what it means ─────────────────────────────────────────────────
+  union all
+  select 7, 'G. verdict', 'is the money itself sound',
          case
-           when (select n from owing) > 0 then
-             'Accounts DO owe money, so the outstanding list should not be empty. '
-          || 'The arithmetic finds a balance that outstanding_accounts() is not '
-          || 'reporting — the fault is in the function, not the data. Send me part E.'
            when (select n from nomoney) > 0 then
-             'No invoice shows a balance, but ' || (select n from nomoney) ||
-             ' are marked paid with no payment row behind them. amount_paid is '
-          || 'being set without money arriving, so a zero outstanding list proves '
-          || 'nothing either way. The receipts, not this field, are the record.'
+             (select n::text from nomoney) || ' invoices are marked paid with no '
+          || 'payment row behind them. amount_paid is being set without money '
+          || 'arriving, so no figure drawn from it can be trusted.'
            when (select n from mismatch) > 0 then
-             'No invoice shows a balance, and every paid invoice has payment rows, '
-          || 'but ' || (select n from mismatch) || ' disagree on the amount. '
-          || 'Worth an eye, though it does not explain the zero.'
+             (select n::text from mismatch) || ' invoices disagree with the sum of '
+          || 'their own payment rows. Worth an accountant''s eye.'
            else
-             'No invoice shows a balance, every paid invoice has payment rows '
-          || 'behind it, and the two agree on the amount. Zero accounts owing is '
-          || 'the truth: everything billed has been collected. The outstanding '
-          || 'reminder has nothing to send because there is nothing to chase.'
+             'Yes. Every invoice claiming payment has payment rows behind it, and '
+          || 'the two agree to the cent. amount_paid is not being pre-filled.'
          end
+  union all
+  select 7, 'G. verdict', 'should the outstanding list be empty',
+         case
+           when (select n from real_n) > 0 then
+             'No. RM ' || (select to_char(rm,'FM999999990.00') from real_n)
+          || ' across ' || (select n::text from real_n) || ' invoice(s) is genuinely '
+          || 'chaseable, so outstanding_accounts() reporting nothing is a fault in '
+          || 'the function, not the data. Part E names them.'
+           when (select n from label_n) > 0 then
+             'Yes, but for a sloppy reason. The only invoices that would be chased '
+          || 'were paid and then refunded, netting to zero, and had their status '
+          || 'left behind. Nothing is owed. Part F names them; fix the labels and '
+          || 'the list is empty for the right reason.'
+           when (select n from owing) > 0 then
+             'Yes. Balances exist only on void, refunded or draft invoices, which '
+          || 'are never chased. Everything billed in earnest has been collected.'
+           else
+             'Yes. No invoice anywhere shows a balance.'
+         end
+  union all
+  select 7, 'G. verdict', 'can this file be trusted over the confirm block',
+         'Yes, and the confirm block could not be. outstanding_accounts() is '
+      || 'seat-guarded, and the guard was written as a where clause, so a caller '
+      || 'with no seat gets an empty list rather than an error. The SQL editor '
+      || 'carries no JWT and so never has a seat. Every zero it reported meant '
+      || '"not allowed to ask", not "nobody owes". This file does the arithmetic '
+      || 'directly and has no guard to trip over.'
 
   ) z
  order by z.k, z.item;
