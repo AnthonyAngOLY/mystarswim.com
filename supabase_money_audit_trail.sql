@@ -84,10 +84,13 @@ select thing, detail from (
   select 3, 'money rows of history so far',
          (select count(*)::text from audit_log
            where table_name in ('payments','invoices','invoice_lines'))
-      || ' (zero until the next payment is taken — this is not retrospective)'
+      || ' (only what has happened since the triggers were attached —'
+      || ' this is not retrospective)'
 
   union all
   select 4, 'what this does not do',
-         'It cannot recover the eight receipt numbers already missing. '
-      || 'Nothing can: the rows were deleted before anything was watching.'
+         'It cannot say what the eight missing receipt numbers were. '
+      || 'Whether each was a receipt that was erased or a number burnt '
+      || 'by a save that failed is not recorded anywhere, so it is not '
+      || 'answerable — not here and not by any other query.'
 ) z order by sort;
