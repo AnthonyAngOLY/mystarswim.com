@@ -474,23 +474,37 @@ create trigger parent_payment_thanks_trg
 --
 -- A draft is excluded because it is not a bill yet — nobody has been
 -- asked for it. Void and refunded are excluded for the obvious reason.
+-- A seat check belongs in an exception, not in a where clause. Written
+-- as a predicate, a caller with no seat gets an empty list — and an empty
+-- list is exactly what "nobody owes anything" looks like. The two are
+-- indistinguishable to every caller, which is how this reported a clean
+-- sheet twice from the SQL editor, where there is no JWT and so never a
+-- seat. It was answering "not allowed to ask" and being read as "nothing
+-- to chase". Now it refuses out loud and a zero means zero.
 create or replace function outstanding_accounts(p_min numeric default 0.01)
 returns table (account_id uuid, parent_name text, phone text, owed numeric, invoices integer)
-language sql stable security definer set search_path = public as $$
-  select pa.id::uuid,
-         coalesce(nullif(btrim(pa.display_name),''),'—')::text,
-         coalesce(pa.phone_primary,'')::text,
-         sum(greatest(0, coalesce(i.total_amount,0) - coalesce(i.amount_paid,0)))::numeric,
-         count(*)::int
-    from invoices i
-    join parent_accounts pa on pa.id = i.account_id
-   where can_write_office()
-     and coalesce(i.status,'') not in ('void','refunded','draft')
-     and coalesce(i.total_amount,0) - coalesce(i.amount_paid,0) >= 0.005
-   group by pa.id
-  having sum(greatest(0, coalesce(i.total_amount,0) - coalesce(i.amount_paid,0))) >= p_min
-   order by 4 desc;
-$$;
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+begin
+  if not can_write_office() then
+    raise exception 'outstanding_accounts: this seat may not read account balances'
+      using errcode = '42501';
+  end if;
+
+  return query
+    select pa.id::uuid,
+           coalesce(nullif(btrim(pa.display_name),''),'—')::text,
+           coalesce(pa.phone_primary,'')::text,
+           sum(greatest(0, coalesce(i.total_amount,0) - coalesce(i.amount_paid,0)))::numeric,
+           count(*)::int
+      from public.invoices i
+      join public.parent_accounts pa on pa.id = i.account_id
+     where coalesce(i.status,'') not in ('void','refunded','draft')
+       and coalesce(i.total_amount,0) - coalesce(i.amount_paid,0) >= 0.005
+     group by pa.id
+    having sum(greatest(0, coalesce(i.total_amount,0) - coalesce(i.amount_paid,0))) >= p_min
+     order by 4 desc;
+end $$;
 
 -- Takes the accounts the office picked, so what was reviewed on screen
 -- is exactly what goes out. A key per month means the same chase is not
@@ -558,7 +572,18 @@ select thing, detail from (
   select 4, 'marked absent', (select case when absence_enabled then 'automatic, when a coach marks it' else 'switched off' end
          from parent_message_settings where id)
   union all
-  select 5, 'outstanding balances', (select count(*)::text || ' accounts owe something' from outstanding_accounts(0.01))
+  select 5, 'outstanding balances',
+         (select count(*)::text from (
+            select i.account_id
+              from public.invoices i
+             where coalesce(i.status,'') not in ('void','refunded','draft')
+               and coalesce(i.total_amount,0) - coalesce(i.amount_paid,0) >= 0.005
+             group by i.account_id
+            having sum(greatest(0, coalesce(i.total_amount,0)
+                                 - coalesce(i.amount_paid,0))) >= 0.01) q)
+      || ' accounts owe something (counted here directly — calling'
+      || ' outstanding_accounts() from the SQL editor raises, because there'
+      || ' is no seat here to read balances with)'
   union all
   select 6, 'messages in parents'' inboxes', (select count(*)::text from parent_messages)
   union all
