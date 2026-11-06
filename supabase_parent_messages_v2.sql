@@ -39,10 +39,12 @@
 --  the day somebody sets the lead to one day and nobody does the
 --  arithmetic.
 --
---  NOTHING HERE SENDS ITSELF ON A SCHEDULE
---  send_class_reminders() and send_replacement_reminders() have to be
---  called. The last section of supabase_parent_messages.sql says how,
---  with pg_cron. Both are safe to run as often as you like.
+--  WHAT CALLS THESE
+--  send_class_reminders() and send_replacement_reminders() do not run
+--  themselves. supabase_parent_messages_schedule.sql installs the
+--  pg_cron jobs that call them hourly; part 7 of the confirm block
+--  below reports whether those jobs are in place. Both functions are
+--  safe to run as often as you like.
 -- ════════════════════════════════════════════════════════════════════════
 
 
@@ -560,7 +562,16 @@ select thing, detail from (
   union all
   select 6, 'messages in parents'' inboxes', (select count(*)::text from parent_messages)
   union all
-  select 7, 'still to do', 'Nothing here runs itself. Schedule send_class_reminders() and '
-       || 'send_replacement_reminders() hourly with pg_cron — see the last section of '
-       || 'supabase_parent_messages.sql. Both are safe to run as often as you like.'
+  select 7, 'scheduling',
+         case when exists (select 1 from pg_extension where extname = 'pg_cron')
+               and exists (select 1 from cron.job
+                            where command ilike '%send_class_reminders%')
+              then 'Already running. pg_cron calls send_class_reminders() and '
+                || 'send_replacement_reminders() on their own — nothing to press, '
+                || 'no daily step. supabase_parent_messages_schedule.sql installed them.'
+              else 'Nothing here runs itself yet. Run '
+                || 'supabase_parent_messages_schedule.sql to have pg_cron call '
+                || 'send_class_reminders() and send_replacement_reminders() hourly. '
+                || 'Both are safe to run as often as you like.'
+         end
 ) z order by sort;
