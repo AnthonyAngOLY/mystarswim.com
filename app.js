@@ -8478,6 +8478,12 @@ function ParentsView({ accountSection, setAccountSection, branches, parentGroups
         guardianName: patch.guardianName,
         guardianEmail: patch.guardianEmail,
         guardianPhone: patch.guardianPhone,
+        // Forwarded explicitly, like every field above. This handler
+        // names the keys it passes on rather than spreading the patch,
+        // so a field the editor collects and updateStudent can write is
+        // still lost unless it is listed here. These two were.
+        guardianIc: patch.guardianIc,
+        guardianTin: patch.guardianTin,
         emergencyName: patch.emergencySameAsGuardian ? patch.guardianName : patch.emergencyName,
         emergencyPhone: patch.emergencySameAsGuardian ? patch.guardianPhone : patch.emergencyPhone,
         emergencyRelationship: patch.emergencySameAsGuardian ? 'Account Holder' : patch.emergencyRelationship,
