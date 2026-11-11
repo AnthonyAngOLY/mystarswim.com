@@ -27971,7 +27971,7 @@ function AttendanceAlertsView({
     className: "table"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 150
+      width: 200
     }
   }, "Worker"), /*#__PURE__*/React.createElement("th", {
     style: {
@@ -28003,6 +28003,7 @@ function AttendanceAlertsView({
     }, /*#__PURE__*/React.createElement("td", {
       style: {
         fontWeight: 600,
+        whiteSpace: 'nowrap',
         borderLeft: `3px solid ${bad ? '#DC2626' : '#B45309'}`
       }
     }, emp.full_name || 'Unknown worker'), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
@@ -28038,7 +28039,8 @@ function AttendanceAlertsView({
       }
     }, "removed")), /*#__PURE__*/React.createElement("td", {
       className: "small",
-      title: [reason, note && 'Note: ' + note].filter(Boolean).join('\n'),
+      title: [reason, note && 'Note: ' + note].filter(Boolean).join('\n')
+    }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: '-webkit-box',
         WebkitLineClamp: 2,
@@ -28052,7 +28054,7 @@ function AttendanceAlertsView({
       className: "subtle"
     }, "—"), note && /*#__PURE__*/React.createElement("span", {
       className: "subtle"
-    }, " · ", note)), /*#__PURE__*/React.createElement("td", {
+    }, " · ", note))), /*#__PURE__*/React.createElement("td", {
       className: "small",
       style: {
         whiteSpace: 'nowrap'
