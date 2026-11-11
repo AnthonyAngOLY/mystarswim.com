@@ -15001,7 +15001,7 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
 
     {!!(alerts||[]).length && <div className="table-wrap"><table className="table">
       <thead><tr>
-        <th style={{width:150}}>Worker</th>
+        <th style={{width:200}}>Worker</th>
         <th style={{width:130}}>Alert</th>
         <th style={{width:235}}>Session</th>
         <th>Reason given</th>
@@ -15021,7 +15021,14 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
                          .filter(Boolean).join(' — ');
         const note   = a.remark || '';
         return <tr key={a.id} style={a.status==='open'&&bad?{background:'#FFF7F7'}:undefined}>
-          <td style={{fontWeight:600,borderLeft:`3px solid ${bad?'#DC2626':'#B45309'}`}}>
+          {/* nowrap, like the three columns after it. A width on a td is
+              only a minimum under auto table-layout, and a squeezed table
+              ignores it: at 620px this cell was handed 78px and the name
+              broke across two lines. nowrap is what actually holds a name
+              on one line, and .table-wrap already scrolls if one is long
+              enough to need it. */}
+          <td style={{fontWeight:600,whiteSpace:'nowrap',
+                      borderLeft:`3px solid ${bad?'#DC2626':'#B45309'}`}}>
             {emp.full_name || 'Unknown worker'}</td>
           <td><span style={{display:'inline-block',padding:'1px 7px',borderRadius:999,
                  fontWeight:800,fontSize:11.5,whiteSpace:'nowrap',
@@ -15034,15 +15041,21 @@ function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, se
             {sh.is_void && <span style={{marginLeft:6,fontSize:10,fontWeight:700,color:'#475569',
               background:'#F1F5F9',border:'1px solid #CBD5E1',borderRadius:999,padding:'0 5px'}}>removed</span>}
           </td>
-          {/* Clamped to two lines, with the full text on hover. */}
-          <td className="small" title={[reason,note&&('Note: '+note)].filter(Boolean).join('\n')}
-              style={{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',
-                      overflow:'hidden',lineHeight:1.35}}>
-            {reason ? <i>{reason}</i>
-              : a.status==='open'
-                ? <span className="subtle">{sh.is_void ? '—' : 'none yet'}</span>
-                : <span className="subtle">—</span>}
-            {note && <span className="subtle"> · {note}</span>}
+          {/* Clamped to two lines, with the full text on hover. The clamp
+              lives on a div inside the cell and never on the cell itself:
+              display:-webkit-box stops a td being a table-cell, so it drops
+              out of the row's height and draws its own border-bottom at its
+              own height. One name long enough to wrap in the first column
+              then leaves every rule in the row at a different level. */}
+          <td className="small" title={[reason,note&&('Note: '+note)].filter(Boolean).join('\n')}>
+            <div style={{display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',
+                         overflow:'hidden',lineHeight:1.35}}>
+              {reason ? <i>{reason}</i>
+                : a.status==='open'
+                  ? <span className="subtle">{sh.is_void ? '—' : 'none yet'}</span>
+                  : <span className="subtle">—</span>}
+              {note && <span className="subtle"> · {note}</span>}
+            </div>
           </td>
           <td className="small" style={{whiteSpace:'nowrap'}}>
             {a.status==='open'
