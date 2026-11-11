@@ -1316,6 +1316,8 @@ function App({
     accountName,
     accountEmail,
     accountPhone,
+    accountIc,
+    accountTin,
     lines,
     notes,
     dueDate,
@@ -1347,6 +1349,10 @@ function App({
       account_name: accountName,
       account_email: accountEmail || null,
       account_phone: accountPhone || null,
+      // Snapshot, like the email above: an invoice keeps saying what it
+      // said when it was handed over, whatever the account says later.
+      account_ic: accountIc || null,
+      account_tin: accountTin || null,
       status: 'draft',
       issue_date: toDateStr(now),
       due_date: dueDate || null,
@@ -6377,6 +6383,22 @@ function App({
     Object.values(m).forEach(pg => {
       pg.isActive = pg.swimmers.some(s => s.isActive !== false);
     });
+    // The print helpers sit outside this component and are handed only an
+    // invoice row. They need somewhere to look up a customer's current
+    // particulars for invoices issued before those particulars could be
+    // stored at all. Same reason __SSB_BRANCHES__ exists.
+    try {
+      const party = {};
+      Object.values(m).forEach(pg => {
+        if (pg.accountId) party[pg.accountId] = {
+          email: pg.email || '',
+          phone: pg.phone || '',
+          ic: pg.ic || '',
+          tin: pg.tin || ''
+        };
+      });
+      window.__SSB_PARTY__ = party;
+    } catch (_) {}
     return Object.values(m).sort((a, b) => {
       if (a.key === '__unassigned__') return 1;
       if (b.key === '__unassigned__') return -1;
@@ -14514,6 +14536,8 @@ function ParentsView({
           accountName: pg.name,
           accountEmail: pg.email,
           accountPhone: pg.phone,
+          accountIc: pg.ic,
+          accountTin: pg.tin,
           lines: allItems,
           notes: 'Batch generated',
           dueDate: null
@@ -14723,6 +14747,8 @@ function ParentsView({
           accountName: pg.name,
           accountEmail: pg.email,
           accountPhone: pg.phone,
+          accountIc: pg.ic,
+          accountTin: pg.tin,
           lines,
           ...meta
         });
@@ -23132,6 +23158,41 @@ function getSwimmerNames(line, membersByGroup) {
   const members = membersByGroup[line.family_group_id] || [];
   return members.map(m => m.name || m.student_name || '').filter(Boolean);
 }
+
+// The buyer's particulars for a printed document, in one place so the
+// invoice and the invoice-with-receipt can never disagree about them.
+//
+// The invoice's own snapshot wins. An invoice is a document issued on a
+// date and a reprint has to match what the customer was handed, so an IC
+// edited afterwards must not rewrite one already given out.
+//
+// The live account is a fallback for one case only: invoices issued
+// before there was anywhere to keep an IC. Their snapshot is empty not
+// because nothing was known but because nothing could be stored, and
+// without this they would reprint blank for ever.
+function invoiceParty(invoice) {
+  var live = {};
+  try {
+    var m = window.__SSB_PARTY__ || {};
+    live = invoice && invoice.account_id && m[invoice.account_id] || {};
+  } catch (_) {
+    live = {};
+  }
+  const pick = (snap, fallback) => {
+    const v = (snap == null ? '' : String(snap)).trim();
+    return v || (fallback == null ? '' : String(fallback)).trim();
+  };
+  const party = {
+    email: pick(invoice && invoice.account_email, live.email),
+    phone: pick(invoice && invoice.account_phone, live.phone),
+    ic: pick(invoice && invoice.account_ic, live.ic),
+    tin: pick(invoice && invoice.account_tin, live.tin)
+  };
+  // Escaped here rather than at each use: an IC is free text a person
+  // typed, and these templates are written into a new window's document.
+  party.line = [party.email, party.phone, party.ic ? 'IC: ' + party.ic : '', party.tin ? 'TIN: ' + party.tin : ''].filter(Boolean).map(adminEsc).join(' &middot; ');
+  return party;
+}
 function printInvoice(invoice, lines, membersByGroup) {
   const billable = (lines || []).filter(l => l.is_billable);
   const paidAmt = Number(invoice.amount_paid) || 0;
@@ -23139,6 +23200,7 @@ function printInvoice(invoice, lines, membersByGroup) {
   const outstanding = Math.max(0, total - paidAmt);
   const isPaid = outstanding <= 0 && invoice.status !== 'void';
   const logoUrl = window.location.origin + '/logo.png';
+  const party = invoiceParty(invoice);
   const linesHtml = billable.map(l => {
     const isAdjustment = l.line_type === 'adjustment';
     const amt = Number(l.amount) || 0;
@@ -23212,8 +23274,8 @@ thead th.td-amt{text-align:right}
 <div class="bill-row">
   <div class="bill-box">
     <div class="bill-label">Bill To</div>
-    <div class="bill-name">${invoice.account_name || '—'}</div>
-    ${invoice.account_email || invoice.account_phone ? `<div class="bill-contact">${[invoice.account_email, invoice.account_phone].filter(Boolean).join(' &middot; ')}</div>` : ''}
+    <div class="bill-name">${adminEsc(invoice.account_name || '—')}</div>
+    ${party.line ? `<div class="bill-contact">${party.line}</div>` : ''}
   </div>
 </div>
 ${invoice.notes ? `<div class="notes">${invoice.notes}</div>` : ''}
@@ -23288,6 +23350,7 @@ ${pmt.notes ? `<div class="row"><span class="row-label">Notes</span><span class=
 }
 function printInvoiceAndReceipt(invoice, lines, pmt, membersByGroup) {
   const logoUrl = window.location.origin + '/logo.png';
+  const party = invoiceParty(invoice);
   const billable = (lines || []).filter(l => l.is_billable);
   const paidAmt = Number(invoice.amount_paid) || 0;
   const total = Number(invoice.total_amount) || 0;
@@ -23346,7 +23409,7 @@ th{font-size:5.5pt;text-transform:uppercase;letter-spacing:.4px;color:#999;font-
       <div class="rmeta">Issued: ${invoice.issue_date || '—'}${invoice.due_date ? `<br>Due: ${invoice.due_date}` : ''}</div>
     </div>
   </div>
-  <div class="bill"><span style="font-size:5pt;text-transform:uppercase;letter-spacing:.4px;color:#999">Bill To</span><strong>${invoice.account_name || '—'}</strong>${invoice.account_email ? `<span style="font-size:6.5pt;color:#666"> ${invoice.account_email}</span>` : ''}</div>
+  <div class="bill"><span style="font-size:5pt;text-transform:uppercase;letter-spacing:.4px;color:#999">Bill To</span><strong>${adminEsc(invoice.account_name || '—')}</strong>${party.line ? `<span style="font-size:6.5pt;color:#666"> ${party.line}</span>` : ''}</div>
   <table><thead><tr><th>Description &amp; Swimmers</th><th>Type</th><th style="text-align:right">Amount</th></tr></thead><tbody>${linesHtml}</tbody></table>
   <div class="totals">
     <div class="tr"><span>Subtotal</span><span>RM ${total.toFixed(2)}</span></div>
