@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 2;
+  var BUILD = 3;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -584,7 +584,8 @@
     payment:      'Payment received',
     absence:      'Attendance',
     outstanding:  'Your account',
-    announcement: 'Announcement'
+    announcement: 'Announcement',
+    correction:   'Attendance corrected'
   };
   function kindLabel(k) { return KIND_LABEL[k] || 'Star Swim'; }
   function loadMessages() {
@@ -607,14 +608,49 @@
         : '';
 
       $('msgBody').innerHTML = rows.length ? rows.map(function (m) {
+        // Only an absence can be disputed from here. A parent who thinks
+        // a payment or a reminder is wrong is telephoning anyway, and a
+        // button on every message turns one meaningful signal into noise
+        // the office has to sort through.
+        var canFlag = m.kind === 'absence';
+        var foot = '';
+        if (m.flagged_at) {
+          foot = '<div class="msgflag flagged">'
+               + '<span>⚑ You told us this looks wrong. The centre will check it.</span>'
+               + '<button class="linkish" data-unflag="' + esc(m.id) + '">Undo</button></div>';
+        } else if (canFlag) {
+          foot = '<div class="msgflag">'
+               + '<button class="linkish" data-flag="' + esc(m.id) + '">'
+               + 'This isn’t right</button></div>';
+        }
         return '<div class="card msg' + (m.read_at ? '' : ' unread') + '" data-m="' + esc(m.id) + '">'
           + '<div style="font-weight:800">' + esc(m.title)
           +   (m.read_at ? '' : '<span class="dot"></span>') + '</div>'
           + '<div class="lead" style="margin-top:4px;white-space:pre-wrap">' + esc(m.body) + '</div>'
           + '<div class="sub" style="margin-top:6px">'
           +   esc(kindLabel(m.kind)) + ' · '
-          +   esc(ago(m.created_at)) + '</div></div>';
+          +   esc(ago(m.created_at)) + '</div>' + foot + '</div>';
       }).join('') : '<div class="empty">Nothing from the centre yet.</div>';
+
+      Array.prototype.forEach.call($('msgBody').querySelectorAll('[data-flag],[data-unflag]'), function (b) {
+        b.addEventListener('click', function (ev) {
+          // stopPropagation, or the card's own handler marks the message
+          // read in the same tap and the list reloads underneath us.
+          ev.stopPropagation();
+          var on  = b.getAttribute('data-flag');
+          var off = b.getAttribute('data-unflag');
+          b.disabled = true;
+          b.textContent = on ? 'Sending…' : 'Undoing…';
+          rpc(on ? 'flag_message' : 'unflag_message',
+              on ? { p_id: on } : { p_id: off })
+            .then(loadMessages)
+            .catch(function (e) {
+              b.disabled = false;
+              b.textContent = on ? 'This isn’t right' : 'Undo';
+              alert(e.message || 'Could not send that just now.');
+            });
+        });
+      });
 
       Array.prototype.forEach.call($('msgBody').querySelectorAll('[data-m]'), function (c) {
         c.addEventListener('click', function () {

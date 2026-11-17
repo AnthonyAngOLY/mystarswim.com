@@ -121,6 +121,70 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (bad.length) throw new Error(bad.join('; '));
   });
 
+  // ── Disputing an absence ───────────────────────────────────────────
+  // The notice used to be a statement with no reply to it. These check the
+  // whole round trip rather than that a button exists: the mock honours
+  // p_id and changes what my_messages returns next, so an app that sends
+  // the wrong argument name — the failure that has twice reached
+  // production here — leaves the message unflagged and fails below.
+  await step('only an absence notice can be disputed', async () => {
+    await tab('Inbox');
+    const n = await page.evaluate(() => ({
+      cards:  document.querySelectorAll('#msgBody .msg').length,
+      flags:  document.querySelectorAll('#msgBody [data-flag]').length
+    }));
+    if (n.cards < 4) throw new Error('expected four messages, saw ' + n.cards);
+    if (n.flags !== 1)
+      throw new Error('expected exactly one message to offer a dispute, saw ' + n.flags);
+  });
+
+  await step('the button sits on the absence message and nowhere else', async () => {
+    const kind = await page.evaluate(() => {
+      const b = document.querySelector('#msgBody [data-flag]');
+      return b ? b.closest('.msg').querySelector('.sub').textContent : '';
+    });
+    if (!/Attendance/.test(kind))
+      throw new Error('the dispute button is on a "' + kind.trim() + '" message');
+  });
+
+  await step('tapping it records the dispute against that message', async () => {
+    await page.click('#msgBody [data-flag]');
+    await page.waitForTimeout(700);
+    const after = await page.evaluate(() => ({
+      flagged: document.querySelectorAll('#msgBody .msgflag.flagged').length,
+      offer:   document.querySelectorAll('#msgBody [data-flag]').length,
+      undo:    document.querySelectorAll('#msgBody [data-unflag]').length,
+      text:    (document.querySelector('#msgBody .msgflag.flagged') || {}).textContent || ''
+    }));
+    if (after.flagged !== 1) throw new Error('the message does not show as disputed');
+    if (after.offer !== 0)   throw new Error('it still offers to dispute an already-disputed message');
+    if (after.undo !== 1)    throw new Error('no way to undo it');
+    if (!/will check/.test(after.text))
+      throw new Error('the parent is not told anything happened: ' + after.text.trim());
+  });
+
+  await step('disputing does not mark the message read (sabotage)', async () => {
+    // The flag button sits inside the card, and the card marks itself read
+    // on click. Without stopPropagation one tap would do both, and the
+    // centre would lose the "not opened" signal on the very messages that
+    // matter most.
+    const stillUnread = await page.evaluate(() =>
+      !!document.querySelector('#msgBody .msg.unread [data-unflag]'));
+    if (!stillUnread)
+      throw new Error('the dispute tap also marked it read — stopPropagation is missing');
+  });
+
+  await step('undo clears it again', async () => {
+    await page.click('#msgBody [data-unflag]');
+    await page.waitForTimeout(700);
+    const n = await page.evaluate(() => ({
+      flagged: document.querySelectorAll('#msgBody .msgflag.flagged').length,
+      offer:   document.querySelectorAll('#msgBody [data-flag]').length
+    }));
+    if (n.flagged !== 0) throw new Error('still showing as disputed');
+    if (n.offer !== 1)   throw new Error('the dispute button did not come back');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

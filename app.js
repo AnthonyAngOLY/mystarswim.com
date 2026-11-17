@@ -4786,6 +4786,7 @@ function App({ currentUser, onLogout }){
             Alerts{attOpenAlertCount>0 && <span style={{marginLeft:6,background:'#EF4444',color:'#fff',
               fontSize:10,fontWeight:800,borderRadius:999,padding:'1px 6px'}}>{attOpenAlertCount}</span>}
           </button>
+          <button className={`sub-tab ${attendanceSection==='marks'?'active':''}`} onClick={()=>setAttendanceSection('marks')}>Class marks</button>
           <button className={`sub-tab ${attendanceSection==='report'?'active':''}`} onClick={()=>setAttendanceSection('report')}>Report</button>
           <button className={`sub-tab ${attendanceSection==='locations'?'active':''}`} onClick={()=>setAttendanceSection('locations')}>Locations</button>
           <button className={`sub-tab ${attendanceSection==='staffapp'?'active':''}`} onClick={()=>setAttendanceSection('staffapp')}>Staff app</button>
@@ -4794,6 +4795,11 @@ function App({ currentUser, onLogout }){
           <div style={{fontWeight:700,marginBottom:4}}>Attendance data is not available for this login.</div>
           <div className="small">These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated <code>login</code> function may not be deployed yet.</div>
         </div>}
+        {attendanceSection==='marks' && <ClassMarksView
+          sessions={sessions}
+          options={options}
+          onReloadSessions={loadSessions}
+        />}
         {!attBlocked && attendanceSection==='live' && <AttendanceLiveView
           shifts={attToday}
           punches={attPunches}
@@ -14969,6 +14975,138 @@ function AttendanceReportView({ shifts, alerts, locations, categories, employees
 // recorded minutes; the alert gains a decision and a remark alongside them.
 // That is the §4 rule — "Late 12 min · No deduction · accident on Jalan Kuala
 // Kangsar" is the whole record, not a correction of it.
+// ── Class marks ───────────────────────────────────────────────────────────
+// The screen mark_attendance has been telling coaches about for months.
+//
+// A coach may only mark on the day. After midnight the function answers
+// "That day has closed. Ask the office to change it." — and the office had
+// nowhere to go. The database never had the limit; the office bypasses the
+// date check entirely. Only the button was missing.
+//
+// It writes through mark_attendance like the poolside screen does, rather
+// than patching attendance_status directly, because that function is where
+// the credit moves and the ledger row is written. A direct patch would
+// change the mark and leave the credit where it was, which is worse than
+// not being able to correct it at all.
+function ClassMarksView({ sessions, options, onReloadSessions }){
+  const [day, setDay] = useState(() => todayStr());
+  const [busy, setBusy] = useState(null);
+  const [note, setNote] = useState('');
+  const [onlyAbsent, setOnlyAbsent] = useState(false);
+
+  const poolName = useMemo(() => {
+    const m = {}; (options?.pools || []).forEach(p => { m[p.id] = p.name; }); return m;
+  }, [options]);
+
+  // weekStartDate is the Monday; day is 0-based from it, as the loader sets it.
+  const dateOf = (s) => {
+    try{
+      const d = new Date(s.weekStartDate + 'T00:00:00');
+      d.setDate(d.getDate() + Number(s.day || 0));
+      return d.toISOString().slice(0,10);
+    }catch(_){ return ''; }
+  };
+
+  const todaysSessions = useMemo(() => (sessions || [])
+    .filter(s => dateOf(s) === day && !s.cancelledAt)
+    .map(s => ({ ...s, roster: (s.students || [])
+        .filter(st => !onlyAbsent || st.attendance === 'absent') }))
+    .filter(s => s.roster.length)
+    .sort((a,b) => (a.startMinute||0) - (b.startMinute||0)),
+  [sessions, day, onlyAbsent]);
+
+  const absentCount = useMemo(() => (sessions || [])
+    .filter(s => dateOf(s) === day)
+    .reduce((n,s) => n + (s.students||[]).filter(st => st.attendance === 'absent').length, 0),
+  [sessions, day]);
+
+  async function setMark(row, state){
+    setNote(''); setBusy(row.id);
+    try{
+      const call = (confirmIt) => rest('rpc/mark_attendance', { method:'POST',
+        body: JSON.stringify({ p_row_id: row.id, p_state: state, p_confirm: !!confirmIt }) });
+      let out = await call(false);
+      // Asked rather than assumed: credit_move writes nothing when it
+      // answers needs_confirm, so the swimmer is still unmarked here.
+      if(out && out.needs_confirm){
+        if(!window.confirm((out.error || 'This will take a credit they do not have.')
+             + '\n\nGo ahead anyway?')){ setBusy(null); return; }
+        out = await call(true);
+      }
+      if(out && out.ok === false){ setNote(out.error || 'That did not go through.'); setBusy(null); return; }
+      const moved = Number(out?.credit_moved || 0);
+      setNote(`${row.name || 'Swimmer'} is now ${state === 'pending' ? 'unmarked' : state}.`
+        + (moved > 0 ? ` One credit returned.` : moved < 0 ? ` One credit taken.` : ' No credit moved.')
+        + (out?.balance != null ? ` Balance ${out.balance}.` : ''));
+      await onReloadSessions();
+    }catch(e){ setNote(e.message || 'That did not go through.'); }
+    setBusy(null);
+  }
+
+  const MARKS = [['attended','Attended'],['absent','Absent'],['pending','Not marked']];
+
+  return <>
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{fontSize:18,fontWeight:800}}>Class marks</div>
+      <div className="small subtle" style={{marginTop:2}}>
+        Correct a swimmer's attendance after the day has closed. The credit follows
+        the mark automatically — returning one to “Not marked” gives it back, and
+        every move is written to the ledger.
+      </div>
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginTop:12}}>
+        <input className="input" type="date" value={day} style={{width:170}}
+               onChange={e=>{ setDay(e.target.value); setNote(''); }} />
+        <button className="btn btn-ghost small" onClick={()=>{ setDay(todayStr()); setNote(''); }}>Today</button>
+        <label className="small" style={{display:'flex',alignItems:'center',gap:6}}>
+          <input type="checkbox" checked={onlyAbsent} onChange={e=>setOnlyAbsent(e.target.checked)} />
+          Only those marked absent
+        </label>
+        <span className="small subtle" style={{marginLeft:'auto'}}>
+          {absentCount} marked absent on this day
+        </span>
+      </div>
+      {note && <div className="small" style={{marginTop:10,padding:'7px 10px',borderRadius:8,
+        background:'#ECFDF5',border:'1px solid #A7F3D0',color:'#065F46'}}>{note}</div>}
+    </div>
+
+    {!todaysSessions.length && <div className="card"><div className="empty">
+      {onlyAbsent ? 'Nobody is marked absent on this day.' : 'No classes with swimmers on this day.'}
+    </div></div>}
+
+    {todaysSessions.map(s => <div className="card" key={s.id} style={{marginBottom:10}}>
+      <div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap',marginBottom:8}}>
+        <div style={{fontWeight:700}}>{minuteToTime(s.startMinute)} · {s.type || 'Class'}</div>
+        <div className="small subtle">{poolName[s.poolId] || ''}</div>
+      </div>
+      <div className="table-wrap"><table className="table">
+        <thead><tr>
+          <th style={{width:220}}>Swimmer</th>
+          <th style={{width:120}}>Now</th>
+          <th>Change to</th>
+        </tr></thead>
+        <tbody>{s.roster.map(st => {
+          const cur = st.attendance || 'pending';
+          return <tr key={st.id} style={cur==='absent'?{background:'#FFF7F7'}:undefined}>
+            <td style={{fontWeight:600,whiteSpace:'nowrap'}}>{st.name || 'Swimmer'}
+              {st.isReplacement && <span className="small subtle"> · replacement</span>}</td>
+            <td><span className="small" style={{fontWeight:700,
+              color: cur==='absent' ? '#DC2626' : cur==='attended' ? '#059669' : '#64748B'}}>
+              {cur==='pending' ? 'Not marked' : cur==='attended' ? 'Attended' : 'Absent'}</span></td>
+            <td>
+              <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                {MARKS.filter(([k])=>k!==cur).map(([k,label])=>
+                  <button key={k} className="btn btn-ghost small" disabled={busy===st.id}
+                          style={{padding:'2px 10px'}}
+                          onClick={()=>setMark(st, k)}>{busy===st.id?'…':label}</button>)}
+              </div>
+            </td>
+          </tr>;
+        })}</tbody>
+      </table></div>
+    </div>)}
+  </>;
+}
+
 function AttendanceAlertsView({ alerts, shifts, locations, employees, filter, setFilter, resolveAlert, enterPunch, onRefresh }){
   const [modal,setModal]=useState(null);
   const [busy,setBusy]=useState(false);
@@ -17246,7 +17384,7 @@ function MessagesView({ messages, onMarkRead, onMarkAllRead, onDelete, onRefresh
     if(m.status==='new') onMarkRead(m.id);
   }
   const tabs=[['in','📥 Enquiries'],['announce','📣 Announcements'],['remind','⏰ Reminders'],
-              ['auto','🤖 Automatic'],['owing','💳 Outstanding']];
+              ['auto','🤖 Automatic'],['owing','💳 Outstanding'],['sent','📨 Sent']];
   return <div style={{maxWidth:860,margin:'18px auto 0'}}>
     <div style={{display:'flex',gap:6,marginBottom:14,flexWrap:'wrap'}}>
       {tabs.map(([k,label])=>(k==='in'||canSend)&&
@@ -17254,6 +17392,7 @@ function MessagesView({ messages, onMarkRead, onMarkAllRead, onDelete, onRefresh
                 onClick={()=>setTab(k)}>{label}</button>)}
     </div>
 
+    {tab==='sent'     && <ParentSent/>}
     {tab==='announce' && <ParentAnnouncements/>}
     {tab==='remind'   && <ParentReminders/>}
     {tab==='auto'     && <ParentAutoMessages/>}
@@ -17549,6 +17688,100 @@ function ParentAutoMessages(){
 // So: see who owes what, untick anybody who should not hear from us,
 // read the exact words, press send. What is on screen is what goes out.
 // ============================================================================
+// ── What was sent, whether it was opened, and what was disputed ──────────
+// read_at has been recorded since the inbox shipped and shown nowhere, so
+// "were they told?" has only ever been answerable as "we sent it".
+//
+// The flag is the half that matters more. An absence notice used to be a
+// statement with no reply to it: a parent who thought it wrong had to
+// telephone, and the ones who do not telephone simply conclude the centre
+// has their attendance wrong. One tap puts them here instead.
+function ParentSent(){
+  const [rows,setRows] = useState(null);
+  const [err,setErr]   = useState('');
+  const [seg,setSeg]   = useState('flagged');
+
+  async function load(){
+    setErr('');
+    try{
+      const out = await selectRows('parent_messages',
+        'id,kind,title,created_at,read_at,flagged_at,flag_note,parent_accounts(display_name,phone_primary)',
+        '&order=created_at.desc&limit=200');
+      setRows(Array.isArray(out) ? out : []);
+    }catch(e){ setErr(e.message); setRows([]); }
+  }
+  useEffect(()=>{ load(); },[]); // eslint-disable-line
+
+  const list = (rows||[]).filter(r => seg==='all' ? true
+    : seg==='flagged' ? !!r.flagged_at
+    : !r.read_at);
+  const flaggedCount = (rows||[]).filter(r=>r.flagged_at).length;
+  const unreadCount  = (rows||[]).filter(r=>!r.read_at).length;
+
+  const when = (ts) => { try{ return new Date(ts).toLocaleString('en-GB',
+    { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }); }catch(_){ return ''; } };
+
+  const SEGS = [['flagged',`🚩 Disputed (${flaggedCount})`],
+                ['unread', `📪 Not opened (${unreadCount})`],
+                ['all',    '📨 Everything']];
+
+  return <div className="card">
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,flexWrap:'wrap'}}>
+      <div>
+        <div style={{fontSize:16,fontWeight:800}}>Sent messages</div>
+        <div className="small subtle">Whether each one was opened, and anything a parent has told us looks wrong.</div>
+      </div>
+      <button className="btn btn-ghost small" onClick={load}>Refresh</button>
+    </div>
+
+    <div style={{display:'flex',gap:6,margin:'12px 0',flexWrap:'wrap'}}>
+      {SEGS.map(([k,label])=>
+        <button key={k} className={`btn small ${seg===k?'btn-primary':'btn-ghost'}`}
+                onClick={()=>setSeg(k)}>{label}</button>)}
+    </div>
+
+    {err && <div className="small" style={{color:'#DC2626',marginBottom:8}}>{err}</div>}
+    {rows===null && <div className="empty">Loading…</div>}
+
+    {rows!==null && !list.length && <div className="empty">
+      {seg==='flagged' ? 'Nothing disputed. Silence here means settled.'
+       : seg==='unread' ? 'Every message has been opened.'
+       : 'Nothing sent yet.'}
+    </div>}
+
+    {!!list.length && <div className="table-wrap"><table className="table">
+      <thead><tr>
+        <th style={{width:190}}>Family</th>
+        <th style={{width:130}}>Kind</th>
+        <th>Message</th>
+        <th style={{width:190}}>Delivered / opened</th>
+      </tr></thead>
+      <tbody>{list.map(r => {
+        const acct = r.parent_accounts || {};
+        return <tr key={r.id} style={r.flagged_at?{background:'#FFFBEB'}:undefined}>
+          <td style={{fontWeight:600,whiteSpace:'nowrap'}}>{acct.display_name || '—'}
+            {acct.phone_primary && <div className="small subtle">{acct.phone_primary}</div>}</td>
+          <td className="small subtle" style={{whiteSpace:'nowrap'}}>{PARENT_KIND_LABEL[r.kind] || r.kind}</td>
+          <td className="small">{r.title}
+            {r.flagged_at && <div style={{marginTop:3,color:'#B45309',fontWeight:700,fontSize:11.5}}>
+              🚩 Parent says this is wrong{r.flag_note ? ' — ' + r.flag_note : ''}</div>}</td>
+          <td className="small subtle" style={{whiteSpace:'nowrap'}}>
+            {when(r.created_at)}
+            <div style={{color: r.read_at ? '#059669' : '#94A3B8'}}>
+              {r.read_at ? 'Opened ' + when(r.read_at) : 'Not opened'}</div>
+          </td>
+        </tr>;
+      })}</tbody>
+    </table></div>}
+  </div>;
+}
+
+const PARENT_KIND_LABEL = {
+  reminder:'Class reminder', replacement:'Replacement', payment:'Payment',
+  absence:'Absence', correction:'Correction', outstanding:'Account',
+  announcement:'Announcement'
+};
+
 function ParentOutstanding(){
   const [rows,setRows] = useState(null);
   const [picked,setPicked] = useState({});
