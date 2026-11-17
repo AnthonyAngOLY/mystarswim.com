@@ -1,1 +1,8 @@
 node_modules
+
+# npm writes this as soon as anything is installed. Not committed: the
+# direct dependencies are already pinned exactly in package.json, and the
+# one thing a dependency here produces -- the QR code -- is committed as a
+# file and verified by decoding it, so a transitive version drifting
+# cannot change what ships. Delete this line if that stops being true.
+package-lock.json

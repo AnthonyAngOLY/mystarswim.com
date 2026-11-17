@@ -5,7 +5,8 @@
   "scripts": {
     "build": "node build.js app.js app.compiled.js && node build.js intake.js intake.compiled.js",
     "check": "node build.js app.js app.compiled.js --check && node build.js intake.js intake.compiled.js --check",
-    "test": "bash tests/run.sh"
+    "test": "bash tests/run.sh",
+    "qr": "node scripts/make-qr.js"
   },
   "//": [
     "Babel is pinned to 7, exactly, and not by preference. app.compiled.js and",
@@ -18,13 +19,23 @@
     "18.2.0 from a CDN the sandbox cannot reach, and tests/browser.js answers those",
     "requests from node_modules instead. The versions have to match the CDN tags in",
     "app.html and intake.html, or the tests drive a different React from the one",
-    "that is deployed."
+    "that is deployed.",
+    "",
+    "qrcode, jsqr and pngjs are for scripts/make-qr.js and nothing else. The QR is",
+    "generated and committed rather than drawn at view time, because the one place",
+    "it is printed and pinned to a wall is the one place nobody sees a console",
+    "error. jsqr and pngjs are there so the script decodes its own rendered pixels",
+    "before writing: a wrong QR looks exactly like a right one, and the failure is",
+    "otherwise found by a parent at the counter whose phone went somewhere else."
   ],
   "devDependencies": {
     "@babel/core": "7.28.4",
     "@babel/preset-react": "7.27.1",
     "@babel/preset-typescript": "7.27.1",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "qrcode": "1.5.4",
+    "jsqr": "1.4.0",
+    "pngjs": "7.0.0"
   }
 }

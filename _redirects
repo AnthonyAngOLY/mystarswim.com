@@ -43,3 +43,15 @@ http://attendance.mystarswim.com/*    /attendance/:splat   200!
 #  on the parent app rather than one of them installing the website.
 https://app.mystarswim.com/*          /parent/:splat       200!
 http://app.mystarswim.com/*           /parent/:splat       200!
+
+
+#  mystarswim.com/get is the page a parent lands on from the printed QR
+#  code and from anything the centre sends them. A rewrite rather than a
+#  redirect, so the address stays the short one that is on the card: a
+#  parent who glances at the bar should see what they were told to type.
+#
+#  It sits after the two host rules above on purpose. Netlify takes the
+#  first match, and those are scoped to the app hostnames, so this one is
+#  reached only on www and the apex — which is where it is wanted.
+/get     /welcome.html   200
+/GET     /welcome.html   200
