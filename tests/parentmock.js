@@ -40,20 +40,7 @@ const RPC = {
     children: [{ id: 'stu-1', name: 'Kobe Kwan', age: 4, lesson_type: 'Toddler Group' },
                { id: 'stu-2', name: 'Mira Kwan', age: 6, lesson_type: 'Learn to Swim' }]
   }),
-  my_messages: () => ([
-    { id: 'm1', kind: 'reminder', title: 'Class reminder', body: BODY,
-      created_at: ago(2), read_at: null },
-    { id: 'm2', kind: 'payment', title: 'Payment received — thank you',
-      body: 'Dear Kwan Suk Lee,\n\nThank you — we have received your payment of RM 480.00.\n\n'
-          + 'Your receipt RCT-202611-0810 is in your account under Payments, together with the '
-          + 'invoice it settles.\n\nWe appreciate you keeping your account up to date, and we '
-          + 'look forward to seeing you at the pool.\n\nStar Swim',
-      created_at: ago(28), read_at: ago(27) },
-    { id: 'm3', kind: 'announcement', title: 'Pool closed — Deepavali',
-      body: 'The centre is closed on Monday for the public holiday. All Monday classes that '
-          + 'week are moved to the Saturday.',
-      created_at: ago(70), read_at: null }
-  ]),
+  my_messages: () => MESSAGES,
   // Two swimmers and a spread of dates, because the Progress view groups
   // by month and names the child only when there is more than one.
   // Honours p_student, as the database does. A mock that ignores an
@@ -82,12 +69,47 @@ const NOTES = ([
       author:'Coach Sally', created_at:'2026-10-18T09:10:00Z' }
   ]);
 
+// Held as state, not rebuilt per call, so flag_message can actually change
+// what the next my_messages returns. A mock that answers {ok:true} and
+// forgets cannot tell the difference between the app sending the right
+// argument and the app sending nothing at all — which is the exact way a
+// dropped field has twice reached production here.
+const MESSAGES = [
+  { id: 'm1', kind: 'reminder', title: 'Class reminder', body: BODY,
+    created_at: ago(2), read_at: null, flagged_at: null },
+  { id: 'm2', kind: 'payment', title: 'Payment received — thank you',
+    body: 'Thank you — we have received your payment of RM 480.00.',
+    created_at: ago(28), read_at: ago(27), flagged_at: null },
+  { id: 'm4', kind: 'absence', title: 'We missed you today',
+    body: 'Hi Kwan Suk Lee, Kobe Kwan was marked absent from the 10:00 AM '
+        + 'Toddler Group class today.',
+    created_at: ago(5), read_at: null, flagged_at: null },
+  { id: 'm3', kind: 'announcement', title: 'Pool closed — Deepavali',
+    body: 'The centre is closed on Monday for the public holiday.',
+    created_at: ago(70), read_at: null, flagged_at: null }
+];
+
 Object.assign(RPC, {
   my_schedule: () => ([]),
   my_payments: () => ([]),
   my_credits: () => ([]),
   my_attendance: () => ([]),
-  mark_message_read: () => true
+  mark_message_read: () => true,
+  // p_id is honoured. Pass the wrong key and nothing is flagged, which is
+  // what the assertion is for.
+  flag_message: (a) => {
+    const m = MESSAGES.filter(x => x.id === (a && a.p_id))[0];
+    if (!m) return { ok: false, error: 'No such message.' };
+    m.flagged_at = new Date().toISOString();
+    if (a && a.p_note) m.flag_note = a.p_note;
+    return { ok: true };
+  },
+  unflag_message: (a) => {
+    const m = MESSAGES.filter(x => x.id === (a && a.p_id))[0];
+    if (!m) return { ok: false, error: 'No such message.' };
+    m.flagged_at = null; m.flag_note = null;
+    return { ok: true };
+  }
 });
 
 const TYPES = { '.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8',

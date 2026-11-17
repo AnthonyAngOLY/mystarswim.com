@@ -7195,6 +7195,9 @@ function App({
       padding: '1px 6px'
     }
   }, attOpenAlertCount)), /*#__PURE__*/React.createElement("button", {
+    className: `sub-tab ${attendanceSection === 'marks' ? 'active' : ''}`,
+    onClick: () => setAttendanceSection('marks')
+  }, "Class marks"), /*#__PURE__*/React.createElement("button", {
     className: `sub-tab ${attendanceSection === 'report' ? 'active' : ''}`,
     onClick: () => setAttendanceSection('report')
   }, "Report"), /*#__PURE__*/React.createElement("button", {
@@ -7216,7 +7219,11 @@ function App({
     }
   }, "Attendance data is not available for this login."), /*#__PURE__*/React.createElement("div", {
     className: "small"
-  }, "These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated ", /*#__PURE__*/React.createElement("code", null, "login"), " function may not be deployed yet.")), !attBlocked && attendanceSection === 'live' && /*#__PURE__*/React.createElement(AttendanceLiveView, {
+  }, "These tables require a Supabase Auth session. Sign out and sign in again to pick one up; if it still fails, the Phase 2 SQL and the updated ", /*#__PURE__*/React.createElement("code", null, "login"), " function may not be deployed yet.")), attendanceSection === 'marks' && /*#__PURE__*/React.createElement(ClassMarksView, {
+    sessions: sessions,
+    options: options,
+    onReloadSessions: loadSessions
+  }), !attBlocked && attendanceSection === 'live' && /*#__PURE__*/React.createElement(AttendanceLiveView, {
     shifts: attToday,
     punches: attPunches,
     locations: attLocations,
@@ -27860,6 +27867,226 @@ function AttendanceReportView({
 // recorded minutes; the alert gains a decision and a remark alongside them.
 // That is the §4 rule — "Late 12 min · No deduction · accident on Jalan Kuala
 // Kangsar" is the whole record, not a correction of it.
+// ── Class marks ───────────────────────────────────────────────────────────
+// The screen mark_attendance has been telling coaches about for months.
+//
+// A coach may only mark on the day. After midnight the function answers
+// "That day has closed. Ask the office to change it." — and the office had
+// nowhere to go. The database never had the limit; the office bypasses the
+// date check entirely. Only the button was missing.
+//
+// It writes through mark_attendance like the poolside screen does, rather
+// than patching attendance_status directly, because that function is where
+// the credit moves and the ledger row is written. A direct patch would
+// change the mark and leave the credit where it was, which is worse than
+// not being able to correct it at all.
+function ClassMarksView({
+  sessions,
+  options,
+  onReloadSessions
+}) {
+  const [day, setDay] = useState(() => todayStr());
+  const [busy, setBusy] = useState(null);
+  const [note, setNote] = useState('');
+  const [onlyAbsent, setOnlyAbsent] = useState(false);
+  const poolName = useMemo(() => {
+    const m = {};
+    (options?.pools || []).forEach(p => {
+      m[p.id] = p.name;
+    });
+    return m;
+  }, [options]);
+
+  // weekStartDate is the Monday; day is 0-based from it, as the loader sets it.
+  const dateOf = s => {
+    try {
+      const d = new Date(s.weekStartDate + 'T00:00:00');
+      d.setDate(d.getDate() + Number(s.day || 0));
+      return d.toISOString().slice(0, 10);
+    } catch (_) {
+      return '';
+    }
+  };
+  const todaysSessions = useMemo(() => (sessions || []).filter(s => dateOf(s) === day && !s.cancelledAt).map(s => ({
+    ...s,
+    roster: (s.students || []).filter(st => !onlyAbsent || st.attendance === 'absent')
+  })).filter(s => s.roster.length).sort((a, b) => (a.startMinute || 0) - (b.startMinute || 0)), [sessions, day, onlyAbsent]);
+  const absentCount = useMemo(() => (sessions || []).filter(s => dateOf(s) === day).reduce((n, s) => n + (s.students || []).filter(st => st.attendance === 'absent').length, 0), [sessions, day]);
+  async function setMark(row, state) {
+    setNote('');
+    setBusy(row.id);
+    try {
+      const call = confirmIt => rest('rpc/mark_attendance', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_row_id: row.id,
+          p_state: state,
+          p_confirm: !!confirmIt
+        })
+      });
+      let out = await call(false);
+      // Asked rather than assumed: credit_move writes nothing when it
+      // answers needs_confirm, so the swimmer is still unmarked here.
+      if (out && out.needs_confirm) {
+        if (!window.confirm((out.error || 'This will take a credit they do not have.') + '\n\nGo ahead anyway?')) {
+          setBusy(null);
+          return;
+        }
+        out = await call(true);
+      }
+      if (out && out.ok === false) {
+        setNote(out.error || 'That did not go through.');
+        setBusy(null);
+        return;
+      }
+      const moved = Number(out?.credit_moved || 0);
+      setNote(`${row.name || 'Swimmer'} is now ${state === 'pending' ? 'unmarked' : state}.` + (moved > 0 ? ` One credit returned.` : moved < 0 ? ` One credit taken.` : ' No credit moved.') + (out?.balance != null ? ` Balance ${out.balance}.` : ''));
+      await onReloadSessions();
+    } catch (e) {
+      setNote(e.message || 'That did not go through.');
+    }
+    setBusy(null);
+  }
+  const MARKS = [['attended', 'Attended'], ['absent', 'Absent'], ['pending', 'Not marked']];
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 18,
+      fontWeight: 800
+    }
+  }, "Class marks"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 2
+    }
+  }, "Correct a swimmer's attendance after the day has closed. The credit follows the mark automatically — returning one to “Not marked” gives it back, and every move is written to the ledger."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginTop: 12
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: day,
+    style: {
+      width: 170
+    },
+    onChange: e => {
+      setDay(e.target.value);
+      setNote('');
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => {
+      setDay(todayStr());
+      setNote('');
+    }
+  }, "Today"), /*#__PURE__*/React.createElement("label", {
+    className: "small",
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: onlyAbsent,
+    onChange: e => setOnlyAbsent(e.target.checked)
+  }), "Only those marked absent"), /*#__PURE__*/React.createElement("span", {
+    className: "small subtle",
+    style: {
+      marginLeft: 'auto'
+    }
+  }, absentCount, " marked absent on this day")), note && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 10,
+      padding: '7px 10px',
+      borderRadius: 8,
+      background: '#ECFDF5',
+      border: '1px solid #A7F3D0',
+      color: '#065F46'
+    }
+  }, note)), !todaysSessions.length && /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, onlyAbsent ? 'Nobody is marked absent on this day.' : 'No classes with swimmers on this day.')), todaysSessions.map(s => /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    key: s.id,
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: 10,
+      flexWrap: 'wrap',
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700
+    }
+  }, minuteToTime(s.startMinute), " · ", s.type || 'Class'), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, poolName[s.poolId] || '')), /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 220
+    }
+  }, "Swimmer"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 120
+    }
+  }, "Now"), /*#__PURE__*/React.createElement("th", null, "Change to"))), /*#__PURE__*/React.createElement("tbody", null, s.roster.map(st => {
+    const cur = st.attendance || 'pending';
+    return /*#__PURE__*/React.createElement("tr", {
+      key: st.id,
+      style: cur === 'absent' ? {
+        background: '#FFF7F7'
+      } : undefined
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600,
+        whiteSpace: 'nowrap'
+      }
+    }, st.name || 'Swimmer', st.isReplacement && /*#__PURE__*/React.createElement("span", {
+      className: "small subtle"
+    }, " · replacement")), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+      className: "small",
+      style: {
+        fontWeight: 700,
+        color: cur === 'absent' ? '#DC2626' : cur === 'attended' ? '#059669' : '#64748B'
+      }
+    }, cur === 'pending' ? 'Not marked' : cur === 'attended' ? 'Attended' : 'Absent')), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 4,
+        flexWrap: 'wrap'
+      }
+    }, MARKS.filter(([k]) => k !== cur).map(([k, label]) => /*#__PURE__*/React.createElement("button", {
+      key: k,
+      className: "btn btn-ghost small",
+      disabled: busy === st.id,
+      style: {
+        padding: '2px 10px'
+      },
+      onClick: () => setMark(st, k)
+    }, busy === st.id ? '…' : label)))));
+  })))))));
+}
 function AttendanceAlertsView({
   alerts,
   shifts,
@@ -32635,7 +32862,7 @@ function MessagesView({
     setOpenId(openId === m.id ? null : m.id);
     if (m.status === 'new') onMarkRead(m.id);
   }
-  const tabs = [['in', '📥 Enquiries'], ['announce', '📣 Announcements'], ['remind', '⏰ Reminders'], ['auto', '🤖 Automatic'], ['owing', '💳 Outstanding']];
+  const tabs = [['in', '📥 Enquiries'], ['announce', '📣 Announcements'], ['remind', '⏰ Reminders'], ['auto', '🤖 Automatic'], ['owing', '💳 Outstanding'], ['sent', '📨 Sent']];
   return /*#__PURE__*/React.createElement("div", {
     style: {
       maxWidth: 860,
@@ -32652,7 +32879,7 @@ function MessagesView({
     key: k,
     className: `btn small ${tab === k ? 'btn-primary' : 'btn-ghost'}`,
     onClick: () => setTab(k)
-  }, label))), tab === 'announce' && /*#__PURE__*/React.createElement(ParentAnnouncements, null), tab === 'remind' && /*#__PURE__*/React.createElement(ParentReminders, null), tab === 'auto' && /*#__PURE__*/React.createElement(ParentAutoMessages, null), tab === 'owing' && /*#__PURE__*/React.createElement(ParentOutstanding, null), tab === 'in' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, label))), tab === 'sent' && /*#__PURE__*/React.createElement(ParentSent, null), tab === 'announce' && /*#__PURE__*/React.createElement(ParentAnnouncements, null), tab === 'remind' && /*#__PURE__*/React.createElement(ParentReminders, null), tab === 'auto' && /*#__PURE__*/React.createElement(ParentAutoMessages, null), tab === 'owing' && /*#__PURE__*/React.createElement(ParentOutstanding, null), tab === 'in' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       justifyContent: 'space-between',
@@ -33261,6 +33488,154 @@ function ParentAutoMessages() {
 // So: see who owes what, untick anybody who should not hear from us,
 // read the exact words, press send. What is on screen is what goes out.
 // ============================================================================
+// ── What was sent, whether it was opened, and what was disputed ──────────
+// read_at has been recorded since the inbox shipped and shown nowhere, so
+// "were they told?" has only ever been answerable as "we sent it".
+//
+// The flag is the half that matters more. An absence notice used to be a
+// statement with no reply to it: a parent who thought it wrong had to
+// telephone, and the ones who do not telephone simply conclude the centre
+// has their attendance wrong. One tap puts them here instead.
+function ParentSent() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  const [seg, setSeg] = useState('flagged');
+  async function load() {
+    setErr('');
+    try {
+      const out = await selectRows('parent_messages', 'id,kind,title,created_at,read_at,flagged_at,flag_note,parent_accounts(display_name,phone_primary)', '&order=created_at.desc&limit=200');
+      setRows(Array.isArray(out) ? out : []);
+    } catch (e) {
+      setErr(e.message);
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line
+
+  const list = (rows || []).filter(r => seg === 'all' ? true : seg === 'flagged' ? !!r.flagged_at : !r.read_at);
+  const flaggedCount = (rows || []).filter(r => r.flagged_at).length;
+  const unreadCount = (rows || []).filter(r => !r.read_at).length;
+  const when = ts => {
+    try {
+      return new Date(ts).toLocaleString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (_) {
+      return '';
+    }
+  };
+  const SEGS = [['flagged', `🚩 Disputed (${flaggedCount})`], ['unread', `📪 Not opened (${unreadCount})`], ['all', '📨 Everything']];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 10,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 16,
+      fontWeight: 800
+    }
+  }, "Sent messages"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Whether each one was opened, and anything a parent has told us looks wrong.")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: load
+  }, "Refresh")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      margin: '12px 0',
+      flexWrap: 'wrap'
+    }
+  }, SEGS.map(([k, label]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    className: `btn small ${seg === k ? 'btn-primary' : 'btn-ghost'}`,
+    onClick: () => setSeg(k)
+  }, label))), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      marginBottom: 8
+    }
+  }, err), rows === null && /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, "Loading…"), rows !== null && !list.length && /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, seg === 'flagged' ? 'Nothing disputed. Silence here means settled.' : seg === 'unread' ? 'Every message has been opened.' : 'Nothing sent yet.'), !!list.length && /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 190
+    }
+  }, "Family"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 130
+    }
+  }, "Kind"), /*#__PURE__*/React.createElement("th", null, "Message"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      width: 190
+    }
+  }, "Delivered / opened"))), /*#__PURE__*/React.createElement("tbody", null, list.map(r => {
+    const acct = r.parent_accounts || {};
+    return /*#__PURE__*/React.createElement("tr", {
+      key: r.id,
+      style: r.flagged_at ? {
+        background: '#FFFBEB'
+      } : undefined
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600,
+        whiteSpace: 'nowrap'
+      }
+    }, acct.display_name || '—', acct.phone_primary && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, acct.phone_primary)), /*#__PURE__*/React.createElement("td", {
+      className: "small subtle",
+      style: {
+        whiteSpace: 'nowrap'
+      }
+    }, PARENT_KIND_LABEL[r.kind] || r.kind), /*#__PURE__*/React.createElement("td", {
+      className: "small"
+    }, r.title, r.flagged_at && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 3,
+        color: '#B45309',
+        fontWeight: 700,
+        fontSize: 11.5
+      }
+    }, "🚩 Parent says this is wrong", r.flag_note ? ' — ' + r.flag_note : '')), /*#__PURE__*/React.createElement("td", {
+      className: "small subtle",
+      style: {
+        whiteSpace: 'nowrap'
+      }
+    }, when(r.created_at), /*#__PURE__*/React.createElement("div", {
+      style: {
+        color: r.read_at ? '#059669' : '#94A3B8'
+      }
+    }, r.read_at ? 'Opened ' + when(r.read_at) : 'Not opened')));
+  })))));
+}
+const PARENT_KIND_LABEL = {
+  reminder: 'Class reminder',
+  replacement: 'Replacement',
+  payment: 'Payment',
+  absence: 'Absence',
+  correction: 'Correction',
+  outstanding: 'Account',
+  announcement: 'Announcement'
+};
 function ParentOutstanding() {
   const [rows, setRows] = useState(null);
   const [picked, setPicked] = useState({});
