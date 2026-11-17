@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Star Swim — get the app</title>
+<meta name="description" content="Set up the Star Swim parent app on your phone.">
+<meta name="theme-color" content="#0EA5E9">
+<link rel="icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/guide.css">
+<style>
+  /* This page is read once, on a phone, probably standing up. Bigger than
+     the other two guides, and nothing on it that is not the next step. */
+  .hero{text-align:center; padding:26px 0 6px}
+  .hero h1{font-size:29px; margin:14px 0 6px}
+  .hero p{font-size:17px; color:var(--muted); margin:0 auto; max-width:440px}
+  .hero img{width:76px; height:76px; border-radius:50%; object-fit:contain;
+            box-shadow:0 8px 22px rgba(14,165,233,.3)}
+  .plat{display:flex; gap:8px; justify-content:center; margin:22px 0 16px}
+  .plat button{flex:1 1 0; max-width:170px; background:var(--surface);
+               border:1.5px solid var(--border); color:var(--muted);
+               border-radius:12px; padding:10px 8px; font-size:14.5px; font-weight:700;
+               font-family:inherit; cursor:pointer}
+  .plat button.on{border-color:var(--primary); color:var(--primary-on-soft);
+                  background:var(--primary-soft)}
+  .why{font-size:14.5px; color:var(--muted); text-align:center; margin:0 0 20px}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="top-in">
+  <img src="/logo.png" alt="">
+  <div>
+    <div class="name">Star Swim</div>
+    <div class="sub">Parent app · Ipoh, Perak</div>
+  </div>
+</div></header>
+
+<div class="wrap">
+
+  <div class="hero">
+    <img src="/logo.png" alt="">
+    <h1>Your swimmer, on your phone</h1>
+    <p>Class times, attendance, progress notes from the coach, credits and
+       receipts — all in one place. Nothing to download from a store.</p>
+  </div>
+
+  <a class="cta" href="https://app.mystarswim.com">
+    Open the app
+    <span class="small">app.mystarswim.com</span>
+  </a>
+  <p class="why">You sign in with your phone number. We send a code on WhatsApp —
+     no password to remember.</p>
+
+  <h2>Signing in</h2>
+  <ol class="steps">
+    <li>
+      <h3>Tap “Open the app”</h3>
+      <p>It opens in your browser. There is nothing to install first.</p>
+    </li>
+    <li>
+      <h3>Type the phone number the centre has for you</h3>
+      <p>The same one we call you on. Any format is fine — <b>012-345 6789</b>
+         or <b>+60 12-345 6789</b> both work.</p>
+      <div class="note warn">
+        <b>“We do not have that number on file”</b>
+        Then we are holding a different number for your family. Tell anyone at
+        the centre and they will fix it in a moment.
+      </div>
+    </li>
+    <li>
+      <h3>Enter the 6-digit code</h3>
+      <p>It arrives on <b>WhatsApp</b>, usually within a few seconds.</p>
+    </li>
+    <li>
+      <h3>That is it</h3>
+      <p>Your children, their classes and your account are already there.
+         You will not have to do this again on this phone.</p>
+    </li>
+  </ol>
+
+  <h2>Keep it one tap away</h2>
+  <p>Adding it to your home screen gives it its own icon, opens it full screen
+     with no address bar, and means you never have to find the link again.</p>
+
+  <div class="plat noprint">
+    <button id="bIos" type="button">iPhone / iPad</button>
+    <button id="bAnd" type="button">Android</button>
+  </div>
+
+  <div id="ios">
+    <ol class="steps">
+      <li>
+        <h3>Open it in Safari</h3>
+        <p>This only works in Safari on an iPhone. If you are in Chrome,
+           copy the address and open it in Safari first.</p>
+      </li>
+      <li>
+        <h3>Tap the Share button</h3>
+        <p>The square with an arrow coming out of the top. It sits at the
+           bottom of the screen on an iPhone, at the top on an iPad.</p>
+        <figure class="shot" style="max-width:150px;margin:8px 0 0">
+          <svg viewBox="0 0 120 120" role="img" aria-label="The Share button: a square with an arrow pointing up out of it">
+            <rect x="8" y="8" width="104" height="104" rx="22" fill="#fff" stroke="#DAEDF8" stroke-width="2"/>
+            <path d="M60 30 L60 74" stroke="#0EA5E9" stroke-width="7" stroke-linecap="round"/>
+            <path d="M44 46 L60 29 L76 46" fill="none" stroke="#0EA5E9" stroke-width="7"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M38 56 H32 a6 6 0 0 0-6 6 v28 a6 6 0 0 0 6 6 h56 a6 6 0 0 0 6-6 V62 a6 6 0 0 0-6-6 h-6"
+                  fill="none" stroke="#0EA5E9" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </figure>
+      </li>
+      <li>
+        <h3>Scroll down and tap “Add to Home Screen”</h3>
+        <p>It is partway down the grey list, under the row of apps.
+           Then tap <b>Add</b> at the top right.</p>
+      </li>
+    </ol>
+  </div>
+
+  <div id="and" hidden>
+    <ol class="steps">
+      <li>
+        <h3>Open it in Chrome</h3>
+        <p>If a bar appears at the bottom offering to install it, tap that and
+           you are done — the next two steps are for when it does not.</p>
+      </li>
+      <li>
+        <h3>Tap the ⋮ menu, top right</h3>
+        <p>Three dots stacked vertically, beside the address bar.</p>
+        <figure class="shot" style="max-width:150px;margin:8px 0 0">
+          <svg viewBox="0 0 120 120" role="img" aria-label="The three-dot menu button">
+            <rect x="8" y="8" width="104" height="104" rx="22" fill="#fff" stroke="#DAEDF8" stroke-width="2"/>
+            <circle cx="60" cy="36" r="8" fill="#0EA5E9"/>
+            <circle cx="60" cy="60" r="8" fill="#0EA5E9"/>
+            <circle cx="60" cy="84" r="8" fill="#0EA5E9"/>
+          </svg>
+        </figure>
+      </li>
+      <li>
+        <h3>Tap “Install app”, or “Add to Home screen”</h3>
+        <p>Either wording means the same thing. Confirm, and the icon appears
+           with your other apps.</p>
+      </li>
+    </ol>
+  </div>
+
+  <div class="note tip">
+    <b>Signed in on one phone, want it on another?</b>
+    Do the same thing there. Your account works on as many phones as you like,
+    and you can share it with the other parent — the code goes to whichever
+    number we hold.
+  </div>
+
+  <h2>If something is not right</h2>
+  <p>Speak to anyone at the centre, or call us. Most sign-in trouble is one
+     wrong digit in the number we hold for you, and it takes seconds to put
+     right.</p>
+
+  <a class="cta" href="https://app.mystarswim.com">
+    Open the app
+    <span class="small">app.mystarswim.com</span>
+  </a>
+
+  <p class="foot">Star Swim Sdn Bhd (1602674-U) · No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak</p>
+</div>
+
+<script>
+// Show the instructions for the phone in the reader's hand, and let them
+// switch. Guessing wrong is worse than not guessing, so both are one tap
+// away and the choice is visible rather than hidden behind the detection.
+(function () {
+  var ios = document.getElementById('ios'), and = document.getElementById('and');
+  var bIos = document.getElementById('bIos'), bAnd = document.getElementById('bAnd');
+  function show(which) {
+    var isIos = which === 'ios';
+    ios.hidden = !isIos; and.hidden = isIos;
+    bIos.className = isIos ? 'on' : ''; bAnd.className = isIos ? '' : 'on';
+  }
+  bIos.addEventListener('click', function () { show('ios'); });
+  bAnd.addEventListener('click', function () { show('and'); });
+
+  var ua = navigator.userAgent || '';
+  // iPadOS reports itself as a Mac, and the touch points are what give it
+  // away. A desktop Mac has none.
+  var isApple = /iPhone|iPod/.test(ua) ||
+                (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ||
+                /iPad/.test(ua);
+  show(isApple ? 'ios' : 'and');
+})();
+</script>
+</body>
+</html>

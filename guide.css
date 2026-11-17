@@ -1,0 +1,164 @@
+/* ════════════════════════════════════════════════════════════════════════
+   Star Swim — the printed and on-screen guides
+   ════════════════════════════════════════════════════════════════════════
+   Shared by welcome.html, guide.html and staff-guide.html.
+
+   The palette is lifted from the parent app's own :root, not approximated.
+   A guide that is a slightly different blue from the thing it explains
+   reads as a third-party leaflet, and the first thing a parent decides
+   about an unfamiliar link is whether it is really from you.
+
+   Everything here has to survive two trips it was not designed for: a
+   phone held at arm's length in a noisy reception area, and a laser
+   printer. Hence the large tap targets, the generous line height, and a
+   print block that drops the furniture and keeps the substance.
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root{
+  --bg:#EEF7FD; --surface:#fff; --border:#DAEDF8; --text:#0C1E2E; --muted:#5B7488;
+  --primary:#0EA5E9; --primary-press:#0284C7; --primary-soft:#E0F2FE; --primary-on-soft:#0369A1;
+  --green-bg:#ECFDF5; --green-tx:#059669; --green-bd:#A7F3D0;
+  --amber-bg:#FFFBEB; --amber-tx:#B45309; --amber-bd:#FCD34D;
+  --red-bg:#FFF1F1;   --red-tx:#DC2626;   --red-bd:#FCA5A5;
+  --slate-bg:#F1F5F9; --slate-tx:#475569; --slate-bd:#CBD5E1;
+  --ink:#0C1E2E;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:760px; margin:0 auto; padding:0 16px 72px}
+
+/* ── Masthead ───────────────────────────────────────────────────────── */
+.top{background:var(--surface); border-bottom:1px solid var(--border)}
+.top-in{max-width:760px; margin:0 auto; padding:14px 16px;
+        display:flex; align-items:center; gap:11px}
+.top img{width:40px; height:40px; border-radius:50%; object-fit:contain; flex:0 0 auto;
+         box-shadow:0 4px 12px rgba(14,165,233,.28)}
+.top .name{font-weight:800; font-size:16px; letter-spacing:-.2px}
+.top .sub{font-size:12.5px; color:var(--muted); line-height:1.35}
+
+h1{font-size:27px; line-height:1.25; letter-spacing:-.5px; margin:28px 0 8px}
+h2{font-size:20px; line-height:1.3; letter-spacing:-.3px; margin:38px 0 10px;
+   padding-top:20px; border-top:1px solid var(--border)}
+h2:first-of-type{border-top:none; padding-top:0}
+h3{font-size:16px; margin:22px 0 6px}
+p{margin:0 0 13px}
+.lede{font-size:17.5px; color:var(--muted); margin-bottom:22px}
+a{color:var(--primary-on-soft)}
+
+/* ── Cards and callouts ─────────────────────────────────────────────── */
+.card{background:var(--surface); border:1px solid var(--border);
+      border-radius:16px; padding:18px; margin:0 0 14px}
+.note{border-radius:12px; padding:13px 15px; margin:0 0 14px; font-size:15px}
+/* Only the note's own heading is a block. Scoped, because an inline <b>
+   inside the body was being broken onto its own line — "Parents → Sent →
+   Disputed" landed alone and the sentence resumed with a stray full stop. */
+.note > b:first-child{display:block; margin-bottom:2px}
+.note.tip{background:var(--primary-soft); border:1px solid #BAE6FD; color:#075985}
+.note.warn{background:var(--amber-bg); border:1px solid var(--amber-bd); color:var(--amber-tx)}
+.note.stop{background:var(--red-bg); border:1px solid var(--red-bd); color:var(--red-tx)}
+.note.good{background:var(--green-bg); border:1px solid var(--green-bd); color:var(--green-tx)}
+
+/* ── Numbered steps ─────────────────────────────────────────────────── */
+.steps{list-style:none; margin:0; padding:0; counter-reset:s}
+.steps > li{counter-increment:s; position:relative; padding:0 0 22px 52px; margin:0}
+.steps > li::before{
+  content:counter(s); position:absolute; left:0; top:-2px;
+  width:34px; height:34px; border-radius:50%;
+  background:var(--primary); color:#fff;
+  font-weight:800; font-size:16px; display:flex; align-items:center; justify-content:center;
+  box-shadow:0 3px 9px rgba(14,165,233,.35);
+}
+/* The line joining one step to the next. Stops at the last. */
+.steps > li::after{
+  content:''; position:absolute; left:16.5px; top:36px; bottom:4px; width:2px;
+  background:linear-gradient(var(--border), var(--border));
+}
+.steps > li:last-child::after{display:none}
+.steps h3{margin:1px 0 5px; font-size:17px}
+.steps p{font-size:15.5px; margin-bottom:9px}
+
+/* ── Phone frames ───────────────────────────────────────────────────── */
+.shots{display:flex; gap:16px; flex-wrap:wrap; margin:4px 0 6px}
+.shot{flex:1 1 210px; min-width:0}
+.shot figcaption{font-size:13px; color:var(--muted); margin-top:7px; line-height:1.45}
+.shot svg{width:100%; height:auto; display:block;
+          filter:drop-shadow(0 8px 20px rgba(12,30,46,.13))}
+
+/* ── Tab reference ──────────────────────────────────────────────────── */
+.tabs{display:grid; grid-template-columns:repeat(auto-fit,minmax(224px,1fr)); gap:11px; margin:6px 0 4px}
+.tabrow{display:flex; gap:12px; align-items:flex-start;
+        background:var(--surface); border:1px solid var(--border);
+        border-radius:14px; padding:13px 15px}
+.tabrow .ic{font-size:24px; line-height:1.1; flex:0 0 auto}
+.tabrow .tt{font-weight:800; font-size:15px; margin-bottom:1px}
+.tabrow .td{font-size:13.5px; color:var(--muted); line-height:1.5}
+
+/* ── The thing you press ────────────────────────────────────────────── */
+.cta{display:block; text-align:center; background:var(--primary); color:#fff;
+     text-decoration:none; font-weight:800; font-size:18px;
+     padding:17px 20px; border-radius:15px; margin:4px 0 10px;
+     box-shadow:0 6px 18px rgba(14,165,233,.36)}
+.cta:active{background:var(--primary-press)}
+.cta .small{display:block; font-weight:600; font-size:13px; opacity:.92; margin-top:2px}
+
+/* ── Copy-and-paste blocks ──────────────────────────────────────────── */
+.paste{background:var(--surface); border:1px solid var(--border); border-radius:14px;
+       padding:15px 16px; font-size:15px; line-height:1.65; white-space:pre-wrap;
+       position:relative}
+/* Room kept for the button rather than letting the first line run under it.
+   Absolute positioning does not reserve space, and the first line of every
+   one of these blocks is the greeting — the part a reader checks first. */
+.paste{padding-top:42px}
+.paste .copy{position:absolute; top:9px; right:9px; background:var(--primary-soft);
+             border:1px solid #BAE6FD; color:var(--primary-on-soft);
+             border-radius:9px; padding:4px 11px; font-size:12.5px; font-weight:800;
+             cursor:pointer; font-family:inherit}
+.paste .copy:active{background:#BAE6FD}
+
+/* ── Q & A ──────────────────────────────────────────────────────────── */
+.qa{background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; padding:0; margin:0 0 11px; overflow:hidden}
+.qa > summary{cursor:pointer; padding:14px 16px; font-weight:700; font-size:15.5px;
+              list-style:none; display:flex; gap:10px; align-items:flex-start}
+.qa > summary::-webkit-details-marker{display:none}
+.qa > summary::before{content:'›'; font-size:21px; line-height:1; color:var(--primary);
+                      transform:rotate(90deg); transition:transform .15s; flex:0 0 auto}
+.qa[open] > summary::before{transform:rotate(270deg)}
+.qa .body{padding:0 16px 15px; font-size:15px}
+.qa .body p:last-child{margin-bottom:0}
+
+/* ── The QR card ────────────────────────────────────────────────────── */
+.qrcard{background:var(--surface); border:2px solid var(--ink); border-radius:18px;
+        padding:26px; text-align:center; max-width:400px; margin:0 auto 16px}
+.qrcard img{width:210px; height:210px; display:block; margin:12px auto 10px}
+.qrcard .big{font-size:21px; font-weight:800; letter-spacing:-.3px}
+.qrcard .url{font-size:16px; font-weight:800; color:var(--primary-on-soft); margin-top:4px}
+.qrcard .fine{font-size:13px; color:var(--muted); margin-top:9px; line-height:1.5}
+
+.foot{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
+      font-size:13px; color:var(--muted)}
+
+/* ── Print ──────────────────────────────────────────────────────────── */
+@media print{
+  :root{--bg:#fff}
+  body{background:#fff; font-size:11.5pt}
+  .top{border-bottom:1px solid #ccc}
+  .noprint{display:none !important}
+  .card,.qa,.tabrow,.paste{border-color:#ccc; box-shadow:none; break-inside:avoid}
+  .qrcard{border-color:#000; break-inside:avoid; page-break-inside:avoid}
+  .shot svg{filter:none}
+  .steps > li{break-inside:avoid}
+  h2{break-after:avoid}
+  a{color:#000; text-decoration:none}
+  .qa{border:none; padding:0}
+  .qa > summary{padding-left:0}
+  .qa .body{padding-left:0}
+  details{display:block}          /* every answer prints, open or not */
+  details > .body{display:block !important}
+}
