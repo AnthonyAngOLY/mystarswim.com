@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The coach app — Star Swim</title>
+<meta name="description" content="Checking in, marking the register, and writing progress notes in the Star Swim coach app.">
+<meta name="theme-color" content="#0EA5E9">
+<link rel="icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="stylesheet" href="/guide.css">
+<style>
+  .pair{display:grid; grid-template-columns:repeat(2,1fr); gap:14px;
+        align-items:start; margin:8px 0 4px; max-width:420px}
+  .pair figure{margin:0; min-width:0}
+  .pair svg{width:100%; height:auto; display:block;
+            filter:drop-shadow(0 8px 18px rgba(12,30,46,.13))}
+  .pair figcaption{font-size:13.5px; color:var(--muted); margin-top:8px; line-height:1.45}
+  .btnrow{display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 10px}
+  .fake{border-radius:9px; padding:5px 14px; font-size:14px; font-weight:800;
+        border:1.5px solid; display:inline-block}
+  .fake.here{background:var(--green-bg); border-color:var(--green-bd); color:var(--green-tx)}
+  .fake.away{background:var(--red-bg);   border-color:var(--red-bd);   color:var(--red-tx)}
+  .fake.blue{background:var(--primary);  border-color:var(--primary);  color:#fff}
+  .fake.grey{background:var(--slate-bg); border-color:var(--slate-bd); color:var(--slate-tx)}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="top-in">
+  <img src="/logo.png" alt="">
+  <div>
+    <div class="name">The coach app</div>
+    <div class="sub">Checking in · the register · progress notes</div>
+  </div>
+</div></header>
+
+<div class="wrap">
+
+  <h1>Everything you do on the pool deck</h1>
+  <p class="lede">Check in when you arrive, mark who is in the water, and write
+     a note home when a swimmer does something worth telling their parent
+     about. That is the whole app.</p>
+
+  <div class="note tip">
+    <b>Where it lives</b>
+    <b>attendance.mystarswim.com</b> — add it to your home screen and it opens
+    like any other app. Sign in once with your staff ID and password; it
+    remembers you after that.
+  </div>
+
+  <h2>Arriving: Today</h2>
+  <p>The first screen lists your shifts for today, in order. Each one is a
+     card with its time, the pool, and one button.</p>
+
+  <div class="pair">
+    <figure>
+      <svg viewBox="0 0 150 250" role="img" aria-label="A shift card with a blue Check in button">
+        <defs><clipPath id="cA"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
+        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
+        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
+        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
+        <g clip-path="url(#cA)">
+          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
+          <rect x="22" y="48" width="106" height="92" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+          <rect x="32" y="60" width="58" height="7" rx="3.5" fill="#0C1E2E"/>
+          <rect x="32" y="74" width="44" height="5" rx="2.5" fill="#9FC6DE"/>
+          <rect x="32" y="86" width="66" height="5" rx="2.5" fill="#CFE6F5"/>
+          <rect x="32" y="104" width="86" height="24" rx="8" fill="#0EA5E9"/>
+          <rect x="56" y="113" width="38" height="6" rx="3" fill="#fff"/>
+          <rect x="22" y="152" width="106" height="62" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+          <rect x="32" y="164" width="52" height="7" rx="3.5" fill="#0C1E2E"/>
+          <rect x="32" y="178" width="40" height="5" rx="2.5" fill="#9FC6DE"/>
+        </g>
+        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
+      </svg>
+      <figcaption><b>Blue</b> — you have not checked in yet.</figcaption>
+    </figure>
+    <figure>
+      <svg viewBox="0 0 150 250" role="img" aria-label="The same card after checking in, with a green Check out button">
+        <defs><clipPath id="cB"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
+        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
+        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
+        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
+        <g clip-path="url(#cB)">
+          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
+          <rect x="22" y="48" width="106" height="106" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+          <rect x="32" y="60" width="58" height="7" rx="3.5" fill="#0C1E2E"/>
+          <rect x="32" y="74" width="44" height="5" rx="2.5" fill="#9FC6DE"/>
+          <rect x="32" y="86" width="72" height="5" rx="2.5" fill="#86D9B6"/>
+          <rect x="32" y="98" width="60" height="5" rx="2.5" fill="#CFE6F5"/>
+          <rect x="32" y="118" width="86" height="24" rx="8" fill="#059669"/>
+          <rect x="52" y="127" width="46" height="6" rx="3" fill="#fff"/>
+          <rect x="22" y="166" width="106" height="48" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+          <rect x="32" y="178" width="52" height="7" rx="3.5" fill="#0C1E2E"/>
+        </g>
+        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
+      </svg>
+      <figcaption><b>Green</b> — you are in, and the only thing left is to check out.</figcaption>
+    </figure>
+  </div>
+
+  <p>The colour tells you where you are from across the deck, without reading
+     anything. <span class="fake grey">Done</span> and greyed out means that
+     shift is finished.</p>
+
+  <div class="note tip">
+    <b>It records where you were</b>
+    Checking in takes your location and shows it on the card. That is not
+    about trust — it is what settles a question months later when nobody
+    remembers. If it says you were far from the pool, your phone's GPS was
+    confused; check in anyway and mention it.
+  </div>
+
+  <div class="note warn">
+    <b>Leaving early asks you to confirm</b>
+    Checking out on time goes straight through. Checking out well before the
+    session ends asks first, because that one is usually a mis-tap.
+  </div>
+
+  <h2>The register: Classes</h2>
+  <p>The <b>🏊 Classes</b> tab appears when you have a class to mark. Each
+     swimmer has two buttons:</p>
+
+  <div class="btnrow">
+    <span class="fake here">Here</span>
+    <span class="fake away">Away</span>
+  </div>
+
+  <p>Tap one. That is it — it saves immediately, there is nothing to submit.</p>
+
+  <div class="note good">
+    <b>Tapped the wrong one? Tap it again.</b>
+    Tapping the state a swimmer is already in undoes it and puts them back to
+    unmarked. The class credit comes back with it. That is the whole
+    correction, and you can do it any time that day.
+  </div>
+
+  <h3>What a mark costs the family</h3>
+  <p><b>Here</b> and <b>Away</b> both use one class credit. Unmarked uses
+     none. That is why an absence matters and why undoing one returns the
+     credit — the family is not charged for a class you marked by mistake.</p>
+  <p>If a swimmer has no credits left, the app asks before taking one rather
+     than refusing. You are the person standing next to them; mark them and
+     say to have a word at the desk.</p>
+
+  <h3>After midnight it is not yours to change</h3>
+  <p>You can only mark on the day. After that the app says
+     <i>"That day has closed. Ask the office to change it."</i> — which is
+     deliberate, so a mistake reaches somebody rather than being quietly
+     rewritten a week later. The office can correct any day.</p>
+
+  <h2>The pencil: progress notes</h2>
+  <p>The <b>✎</b> beside a swimmer's name opens a note for that swimmer.</p>
+
+  <div class="note stop">
+    <b>Their parent reads it. Straight away.</b>
+    It is not an internal remark. It appears in the family's app the moment
+    you save it, under your name, with the date. Write it as if you were
+    saying it to them at the side of the pool — because that is what it is.
+  </div>
+
+  <p>Good notes are specific and short:</p>
+  <div class="card">
+    <p style="margin:0 0 8px"><b>Yes.</b> “Swam a full width unaided today for
+       the first time. Still turning her head late on the breath — we will work
+       on that next week.”</p>
+    <p style="margin:0"><b>No.</b> “Good session.” — true of every session, and
+       tells the parent nothing they did not assume.</p>
+  </div>
+
+  <p>You can see what other coaches have written for the same swimmer, and
+     edit your own. That matters when you are covering: read the last two
+     notes before the lesson and you can pick up where their usual coach left
+     off rather than starting again.</p>
+
+  <div class="note tip">
+    <b>Correcting a note</b>
+    Tap <b>edit</b> on one of your own and change it in place. A note cannot
+    be emptied — if it should not have been written, withdraw it instead.
+  </div>
+
+  <h2>When the app asks you something</h2>
+  <p>If a shift was late, ended early, or has no check-in or check-out
+     recorded, a box appears on the card asking why. One tap on a reason is
+     usually enough.</p>
+  <div class="tabs">
+    <div class="tabrow"><div class="ic">⏰</div><div>
+      <div class="tt">You were marked late</div>
+      <div class="td">Traffic, cover running over, anything — it is recorded, not judged.</div></div></div>
+    <div class="tabrow"><div class="ic">🚪</div><div>
+      <div class="tt">You left before the session ended</div>
+      <div class="td">Often the class genuinely finished early. Say so.</div></div></div>
+    <div class="tabrow"><div class="ic">❓</div><div>
+      <div class="tt">No check-in or check-out recorded</div>
+      <div class="td">Usually a forgotten tap. Answer it and it is closed.</div></div></div>
+  </div>
+  <p>Answer them the same day if you can. An unanswered one keeps appearing,
+     and the office is left guessing on your behalf.</p>
+
+  <h2>The rest of the tabs</h2>
+  <div class="tabs">
+    <div class="tabrow"><div class="ic">🗓</div><div>
+      <div class="tt">Week</div><div class="td">Your shifts for the week ahead.</div></div></div>
+    <div class="tabrow"><div class="ic">🕘</div><div>
+      <div class="tt">History</div><div class="td">What you worked, and anything still unanswered.</div></div></div>
+    <div class="tabrow"><div class="ic">🏖</div><div>
+      <div class="tt">Leave</div><div class="td">Apply, and see what is approved or waiting.</div></div></div>
+    <div class="tabrow"><div class="ic">📊</div><div>
+      <div class="tt">Summary</div><div class="td">Your hours and sessions over the month.</div></div></div>
+  </div>
+
+  <h2>Things that catch people out</h2>
+
+  <details class="qa">
+    <summary>I forgot to check in and the session has started</summary>
+    <div class="body"><p>Check in now. The app records that it was late and
+      asks why — answer it and that is the end of it. Not checking in at all
+      is the thing that makes work for somebody else.</p></div>
+  </details>
+
+  <details class="qa">
+    <summary>I am covering a class that is not mine</summary>
+    <div class="body"><p>You can mark any class running in water you are
+      rostered to at that hour. If the app says you are not rostered to it,
+      the roster has not been updated — the office needs to do that, and
+      until they have, nobody but the named coach can mark it.</p></div>
+  </details>
+
+  <details class="qa">
+    <summary>A swimmer is here but not on my list</summary>
+    <div class="body"><p>Teach them. The list comes from the schedule, so a
+      missing name is a scheduling matter, not a poolside one. Tell the
+      office after the session.</p></div>
+  </details>
+
+  <details class="qa">
+    <summary>The app looks out of date</summary>
+    <div class="body"><p>Close it completely and open it again — not just
+      switch away. It updates itself on opening.</p></div>
+  </details>
+
+  <details class="qa">
+    <summary>I marked someone absent and they had arranged a replacement</summary>
+    <div class="body"><p>Same day: tap <b>Away</b> again to undo it and the
+      credit returns. After midnight: tell the office. They can correct it,
+      the credit comes back, and the family is told it was corrected.</p></div>
+  </details>
+
+  <p class="foot">Star Swim Sdn Bhd (202501001260) · Anything the app will not
+     let you do, the office can. Ask rather than working around it.</p>
+</div>
+</body>
+</html>

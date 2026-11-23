@@ -117,10 +117,43 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
        'the staff guide lost the note about sending the invite by WhatsApp');
   });
 
+  await step('the coach guide names the buttons the coach app has', () => {
+    const app = read('attendance/app.js');
+    // The register's two buttons, read out of the app rather than
+    // remembered. A coach reading "tap Present" for a button that says
+    // "Here" is a coach who thinks the app is broken.
+    const marks = [...app.matchAll(/data-mk="(\w+)"[\s\S]{0,160}?>([A-Za-z]+)<\/button>/g)]
+      .map(m => m[2]);
+    eq(marks.length, 2, 'the register no longer has exactly two mark buttons');
+    const coach = read('coach-guide.html');
+    for (const label of marks) {
+      ok(new RegExp('>' + label + '<').test(coach),
+         'the coach guide never shows the "' + label + '" button');
+    }
+  });
+
+  await step('the coach guide is right that parents see notes at once', () => {
+    // The guide tells coaches, in a red box, that a note reaches the
+    // parent immediately. That claim has to keep matching the app's own
+    // wording, or we are telling staff something about the system that
+    // stopped being true.
+    ok(/They see it straight away/.test(read('attendance/app.js')),
+       'the note pad no longer promises parents see notes straight away');
+    ok(/reads it\. Straight away\.|straight away/i.test(read('coach-guide.html')),
+       'the coach guide no longer warns that parents read notes immediately');
+  });
+
+  await step('the staff guide points at both manuals', () => {
+    const staff = read('staff-guide.html');
+    ok(staff.includes('/guide.html'), 'no link to the parent manual');
+    ok(staff.includes('/coach-guide.html'), 'no link to the coach guide');
+  });
+
   // ── Rendered ─────────────────────────────────────────────────────────
   const browser = await B.launch({ args: ['--headless', '--no-sandbox'] });
 
-  for (const [page, width] of [['welcome', 390], ['guide', 390], ['staff-guide', 390]]) {
+  for (const [page, width] of [['welcome', 390], ['guide', 390], ['staff-guide', 390],
+                               ['coach-guide', 390]]) {
     await step('nothing on ' + page + ' overflows a phone', async () => {
       const p = await browser.newPage();
       const errs = [];
