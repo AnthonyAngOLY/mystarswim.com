@@ -107,3 +107,81 @@ asserts it.
 Void, do not delete. Attendance, leave and voucher history is the point
 of the system. The one documented exception is the test-data purge
 script, which says so in its own header.
+
+## The company's own particulars
+
+Kept here because they are asked for constantly — invoices, LHDN
+e-invoicing, provider sign-ups, compliance forms — and because getting
+one of them wrong is expensive. The Twilio registration failed its
+automated check twice on the strength of the wrong registration number
+alone.
+
+| | |
+|---|---|
+| Legal name | **STAR SWIM SDN BHD** |
+| SSM registration | **202501001260** (new 12-digit format) |
+| Former SSM number | 1602674-U (pre-2019 format) |
+| Incorporated | 8 January 2025 |
+| Registered address | 137, Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak, Malaysia |
+| TIN (LHDN) | C59796139050 |
+| Employer number | E9617129307 |
+| SST number | none registered |
+| MSIC code | 85411 — sports and recreation education |
+| Business email | starswimsb@gmail.com |
+| Class enquiries | 012 253 9655 |
+| Anthony | 012 524 3477 |
+| Website | https://www.mystarswim.com |
+
+**Use 202501001260 on anything official.** SSM reissued every company a
+12-digit number in 2019 and the old `1602674-U` is what most registries
+and verification services will fail to find. Where both are wanted the
+convention is `202501001260 (1602674-U)`.
+
+The invoice and receipt layouts in `app.js` still print only the old
+number, in `printInvoice`, `printInvoiceAndReceipt` and `printReceipt`.
+That is worth correcting — LHDN e-invoicing works off the new one.
+
+**Not recorded here, deliberately:** the Maybank account number. A
+payment instrument does not belong in version control, and nothing in
+this repository needs it. It lives wherever the finance documents live.
+
+### Twilio
+
+The parent app signs people in with a phone code, so an SMS provider is
+a hard dependency — Supabase does not send messages itself.
+
+| | |
+|---|---|
+| Trust Hub primary profile | BUa702a6d2a2bce8d60716a5e4a0eb87a9 |
+| Messaging Service | "Star Swim sign-in codes" |
+
+The account SID and auth token are **not** written down here. GitHub's
+push protection rejects an `AC...` account SID outright, and it is right
+to: these live in the Twilio console, which is the only place that can
+be authoritative about them anyway. The profile SID is kept because it
+is what a support ticket has to quote.
+
+Malaysia is a restricted destination and the rules are not optional.
+From Twilio's own Malaysia guidelines:
+
+- Every message **must** begin `RM 0.00`. Without it the content is
+  truncated or the message fails outright.
+- The message **must** carry the brand name, or operators filter it.
+- **URLs are blocked**, as are phone numbers in the body and requests
+  for personal details. Never put `mystarswim.com/get` in an SMS.
+- Alphanumeric sender IDs are **not supported**. The sender is
+  overwritten with a random approved shortcode whatever you register, so
+  there is no point registering a branded sender.
+- Malaysian long codes are person-to-person only. A2P traffic goes over
+  an **international** long code — a plain US local number is correct
+  and needs no regulatory bundle.
+
+So the sign-in template is:
+
+```
+RM 0.00 Star Swim: your sign-in code is {{ .Code }}. Valid 5 minutes. Do not share it.
+```
+
+Set the OTP expiry to **300** seconds, not the 60 Supabase defaults to.
+Sixty seconds is not enough time for a parent to find a message and type
+six digits.
