@@ -91,6 +91,32 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
        'the manual does not mention it');
   });
 
+  await step('no guide promises a channel the system does not send on', () => {
+    // The guides said the code arrives on WhatsApp. It does not: WhatsApp
+    // needs an approved Meta business sender, which takes weeks, so
+    // parent-signin falls back to SMS and SMS is what every parent will
+    // actually receive. Prose that describes a different system from the
+    // one running is worse than no prose — staff read it to customers.
+    //
+    // If WhatsApp is ever approved, this assertion is what reminds whoever
+    // flips the channel that three pages describe the old one.
+    for (const f of ['welcome.html', 'guide.html']) {
+      const text = read(f);
+      ok(!/arrives? (on|by) <b>WhatsApp/i.test(text),
+         f + ' still says the code arrives on WhatsApp');
+      ok(!/code on WhatsApp/i.test(text),
+         f + ' still promises a WhatsApp code');
+    }
+    const staff = read('staff-guide.html');
+    ok(!/code on WhatsApp/i.test(staff),
+       'staff-guide.html still promises a WhatsApp code');
+    ok(!/arrives on WhatsApp/i.test(staff),
+       'staff-guide.html still says the code arrives on WhatsApp');
+    // The one legitimate mention: staff send the invite over WhatsApp.
+    ok(/For WhatsApp, or anywhere else/.test(staff),
+       'the staff guide lost the note about sending the invite by WhatsApp');
+  });
+
   // ── Rendered ─────────────────────────────────────────────────────────
   const browser = await B.launch({ args: ['--headless', '--no-sandbox'] });
 
