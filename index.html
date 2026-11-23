@@ -44,6 +44,9 @@
     .hd-menu a{display:block;padding:9px 12px;border-radius:8px;white-space:nowrap;
                font-weight:600;color:var(--text-2)}
     .hd-menu a:hover{background:var(--sky,#EEF7FD);color:var(--primary)}
+    .hd-quiet{font-size:13px;font-weight:500;color:var(--text-3,#94A3B8)}
+    .hd-quiet:hover{color:var(--text-2)}
+    #parentAppLink{padding:8px 16px;font-size:13.5px;border-radius:9px}
     .btn{display:inline-block;padding:9px 18px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;border:1px solid transparent;transition:.15s;text-align:center}
     .btn-solid{background:var(--primary);color:#fff}
     .btn-solid:hover{background:var(--primary-dk)}
@@ -76,7 +79,8 @@
                box-shadow:none;min-width:0;background:none}
       .hd-menu::before{display:none}
       .hd-menu a{padding:11px 24px;border-radius:0;font-size:15px;border-bottom:1px solid #F1F7FD}
-      .hd-nav #loginLink{margin:10px 24px 0;text-align:center}
+      .hd-nav #parentAppLink{margin:12px 24px 2px;text-align:center;font-size:15px;padding:13px 20px}
+      .hd-nav #loginLink{text-align:center;border-bottom:none;padding-bottom:6px}
       header{position:sticky;top:0;z-index:50}
     }
     /* Anchor targets clear the sticky header */
@@ -610,10 +614,12 @@
       </div>
       <a class="hd-link" href="#contact">Contact</a>
       <!-- Parents looking for "login" were landing on the staff scheduler.
-           Theirs comes first and says whose it is; the staff one keeps the
-           same link and stops pretending to be the only one. -->
-      <a class="hd-link" href="./get">Parent App</a>
-      <a id="loginLink" class="btn btn-solid" href="./app.html" title="Staff login" style="padding:6px 14px;font-size:13px;border-radius:8px">Staff Login</a>
+           The weighting follows who is actually here: almost everyone on
+           this page is a parent, and a handful of staff know where their
+           own door is. So the app is the button and the staff link is
+           quiet — the reverse of how it started. -->
+      <a id="loginLink" class="hd-link hd-quiet" href="./app.html" title="Scheduler sign-in for Star Swim staff">Staff Login</a>
+      <a id="parentAppLink" class="btn btn-solid" href="./get">Parent App</a>
     </nav>
   </div>
 </header>
