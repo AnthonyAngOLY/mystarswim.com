@@ -13060,7 +13060,7 @@ thead th.td-amt{text-align:right}
 <div class="hdr">
   <div>
     <img class="brand-logo" src="${logoUrl}" onerror="this.style.display='none'">
-    <div class="brand-text">Star Swim Sdn Bhd (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak<br>TIN: C59796139050</div>
+    <div class="brand-text">Star Swim Sdn Bhd 202501001260 (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak<br>TIN: C59796139050</div>
   </div>
   <div style="text-align:right">
     <div class="inv-number">INVOICE</div>
@@ -13119,7 +13119,7 @@ body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9pt;color
 <div class="hdr">
   <div>
     <img class="brand-logo" src="${logoUrl}" onerror="this.style.display='none'">
-    <div class="brand-text">Star Swim Sdn Bhd (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak<br>TIN: C59796139050</div>
+    <div class="brand-text">Star Swim Sdn Bhd 202501001260 (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak<br>TIN: C59796139050</div>
   </div>
   <div style="text-align:right"><div class="rct-title">RECEIPT</div><div class="rct-num">${pmt.receipt_number||'—'}</div></div>
 </div>
@@ -13158,7 +13158,7 @@ function printInvoiceAndReceipt(invoice, lines, pmt, membersByGroup){
       : descText;
     return `<tr><td class="td-d">${descHtml}</td><td class="td-t">${pkgName}</td><td class="td-a">${amtHtml}</td></tr>`;
   }).join('');
-  const co = `<img class="logo" src="${logoUrl}" onerror="this.style.display='none'"><div class="co">Star Swim Sdn Bhd (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh<br>TIN: C59796139050</div>`;
+  const co = `<img class="logo" src="${logoUrl}" onerror="this.style.display='none'"><div class="co">Star Swim Sdn Bhd 202501001260 (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh<br>TIN: C59796139050</div>`;
   const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Invoice & Receipt</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -13461,7 +13461,11 @@ function ProgrammeSessionModal({ modal, setModal, busy, onSave, onDelete, onDupl
 
 const ADMIN_COMPANY = {
   name: 'STAR SWIM SDN BHD',
-  reg: '1602674-U',
+  // Both numbers, new first. SSM reissued every company a 12-digit
+  // registration in 2019 and LHDN e-invoicing works off that one; the old
+  // The pre-2019 number is kept beside it because it is what older
+  // paperwork, and anyone who has filed with us before, will recognise.
+  reg: '202501001260 (1602674-U)',
   address: 'No.137, Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak'
 };
 function adminFmtRM(n){ return 'RM ' + Number(n||0).toLocaleString('en-MY',{minimumFractionDigits:2,maximumFractionDigits:2}); }

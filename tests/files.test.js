@@ -178,5 +178,25 @@ step('payments are deleted in one place only, and it is the gated one', () => {
     throw new Error('payments deleted in: ' + unexpected.join(', '));
 });
 
+// ── The company's registration number ───────────────────────────────────
+// SSM reissued every company a 12-digit number in 2019, and LHDN
+// e-invoicing works off that one. A document going out with only
+// 1602674-U on it is a document with the number most registries cannot
+// find — which is exactly how the Twilio verification failed twice.
+step('every printed document carries the current SSM number', () => {
+  for (const f of ['app.js', 'app.compiled.js', 'welcome.html', 'guide.html',
+                   'staff-guide.html', 'coach-guide.html']) {
+    const src = read(f);
+    // The old number is fine beside the new one — that is the convention.
+    // What must not appear is the old number on its own.
+    const bare = (src.match(/1602674-U/g) || []).length
+               - (src.match(/202501001260 \(1602674-U\)/g) || []).length;
+    if (bare > 0) throw new Error(f + ' prints the pre-2019 number alone, ' +
+      bare + ' time' + (bare === 1 ? '' : 's'));
+  }
+  if (!read('app.js').includes('202501001260'))
+    throw new Error('app.js never prints the current registration number');
+});
+
 console.log(fail ? fail + ' FAILED' : 'all green');
 process.exit(fail ? 1 : 0);
