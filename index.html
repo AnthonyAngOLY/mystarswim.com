@@ -44,8 +44,6 @@
     .hd-menu a{display:block;padding:9px 12px;border-radius:8px;white-space:nowrap;
                font-weight:600;color:var(--text-2)}
     .hd-menu a:hover{background:var(--sky,#EEF7FD);color:var(--primary)}
-    .hd-quiet{font-size:13px;font-weight:500;color:var(--text-3,#94A3B8)}
-    .hd-quiet:hover{color:var(--text-2)}
     #parentAppLink{padding:8px 16px;font-size:13.5px;border-radius:9px}
     .btn{display:inline-block;padding:9px 18px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;border:1px solid transparent;transition:.15s;text-align:center}
     .btn-solid{background:var(--primary);color:#fff}
@@ -80,7 +78,6 @@
       .hd-menu::before{display:none}
       .hd-menu a{padding:11px 24px;border-radius:0;font-size:15px;border-bottom:1px solid #F1F7FD}
       .hd-nav #parentAppLink{margin:12px 24px 2px;text-align:center;font-size:15px;padding:13px 20px}
-      .hd-nav #loginLink{text-align:center;border-bottom:none;padding-bottom:6px}
       header{position:sticky;top:0;z-index:50}
     }
     /* Anchor targets clear the sticky header */
@@ -613,12 +610,11 @@
         </div>
       </div>
       <a class="hd-link" href="#contact">Contact</a>
-      <!-- Parents looking for "login" were landing on the staff scheduler.
-           The weighting follows who is actually here: almost everyone on
-           this page is a parent, and a handful of staff know where their
-           own door is. So the app is the button and the staff link is
-           quiet — the reverse of how it started. -->
-      <a id="loginLink" class="hd-link hd-quiet" href="./app.html" title="Scheduler sign-in for Star Swim staff">Staff Login</a>
+      <!-- No staff link up here. It was the solid blue button on a page
+           where almost every visitor is a parent, and even made quiet it
+           still drew the eye. The footer has carried the same link all
+           along, on every page, which is where this convention lives and
+           where the handful of people who need it will look. -->
       <a id="parentAppLink" class="btn btn-solid" href="./get">Parent App</a>
     </nav>
   </div>
@@ -1355,7 +1351,7 @@
 <footer>
   <div class="wrap ft">
     <span>© <span id="yr"></span> Star Swim Sdn Bhd. All rights reserved.</span>
-    <span><a href="#contact">Contact Us</a> · <a id="loginLinkFt" href="./app.html">Staff Login</a></span>
+    <span><a href="#contact">Contact Us</a> · <a id="loginLinkFt" href="./app.html" title="Scheduler sign-in for Star Swim staff">Staff</a></span>
   </div>
 </footer>
 
@@ -1489,9 +1485,10 @@ document.querySelectorAll('.faq details').forEach(function(d){
 </script>
 <script>
 // Since the merger, everyone signs in at /app.html — the app itself lands
-// admins on Directory and everyone else on Schedule. The website Login button
-// just points there. Kept the id hooks in case we ever need role-based routing
-// again (e.g. a marketing-only login area for a future portal).
+// admins on Directory and everyone else on Schedule. The footer's Staff link
+// just points there; the header no longer carries one. Both id hooks are kept
+// in case we ever need role-based routing again, and the loop tolerates either
+// being absent, which is why removing the header link broke nothing.
 (function(){
   var target = './app.html';
   var els = [document.getElementById('loginLink'), document.getElementById('loginLinkFt')];
