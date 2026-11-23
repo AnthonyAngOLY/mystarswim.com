@@ -149,6 +149,34 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
     ok(staff.includes('/coach-guide.html'), 'no link to the coach guide');
   });
 
+  await step('every way in actually leads somewhere', () => {
+    // Three doors, and until now the site had none of them. A parent
+    // looking for a login was landing on the staff scheduler.
+    const home = read('index.html');
+    ok(/href="\.\/get"/.test(home), 'the homepage does not link the parent app');
+    ok(/Staff Login/.test(home), 'the staff login is still labelled as if it were the only one');
+
+    // The intake form creates the account, so the family can sign in the
+    // moment they finish. The screen has to say so or the moment is lost.
+    ok(/mystarswim\.com\/get/.test(read('intake.js')),
+       'the registration success screen does not point at the app');
+    ok(/mystarswim\.com\/get/.test(read('intake.compiled.js')),
+       'intake.compiled.js was not rebuilt after that change');
+  });
+
+  await step('the manual and the setup page do not repeat each other', () => {
+    const guide = read('guide.html');
+    ok(!/<h2>Getting in<\/h2>/.test(guide),
+       'guide.html still carries its own sign-in walkthrough');
+    ok(!/Putting it on your home screen/.test(guide),
+       'guide.html still carries its own install instructions');
+    ok(/mystarswim\.com\/get/.test(guide),
+       'guide.html does not send an unregistered reader to the setup page');
+    // The illustration moved rather than being deleted.
+    ok(/class="trio"/.test(read('welcome.html')),
+       'the sign-in illustration did not land on the setup page');
+  });
+
   // ── Rendered ─────────────────────────────────────────────────────────
   const browser = await B.launch({ args: ['--headless', '--no-sandbox'] });
 

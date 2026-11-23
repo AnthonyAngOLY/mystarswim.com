@@ -162,3 +162,15 @@ a{color:var(--primary-on-soft)}
   details{display:block}          /* every answer prints, open or not */
   details > .body{display:block !important}
 }
+
+/* ── The three sign-in phones ────────────────────────────────────────
+   Three across at every width, never wrapping. They are one sequence;
+   wrapped two-and-one the third stretches to the full column and stops
+   looking like the third step of anything. Small is fine — they are
+   diagrams, not screenshots. */
+.trio{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
+      align-items:start; margin:6px 0 2px}
+.trio figure{margin:0; min-width:0}
+.trio svg{width:100%; height:auto; display:block;
+          filter:drop-shadow(0 7px 16px rgba(12,30,46,.12))}
+.trio figcaption{font-size:13.5px; color:var(--muted); margin-top:8px; line-height:1.45}

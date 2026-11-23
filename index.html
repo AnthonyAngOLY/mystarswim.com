@@ -566,7 +566,11 @@
       <a class="hd-link" href="#how">Getting Started</a>
       <a class="hd-link" href="#faq">FAQ</a>
       <a class="hd-link" href="#contact">Contact Us</a>
-      <a id="loginLink" class="btn btn-solid" href="./app.html" title="Staff login" style="padding:6px 14px;font-size:13px;border-radius:8px">Login</a>
+      <!-- Parents looking for "login" were landing on the staff scheduler.
+           Theirs comes first and says whose it is; the staff one keeps the
+           same link and stops pretending to be the only one. -->
+      <a class="hd-link" href="./get">Parent App</a>
+      <a id="loginLink" class="btn btn-solid" href="./app.html" title="Staff login" style="padding:6px 14px;font-size:13px;border-radius:8px">Staff Login</a>
     </nav>
   </div>
 </header>
@@ -1164,6 +1168,26 @@
             <path d="m13 6 6 6-6 6" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Already a Star Swim family ─────────────────────────────────────
+       The site had no door to the parent app at all: the only Login went
+       to the staff scheduler. A family who has registered has an account
+       already — created by the intake form — so this is not a sign-up,
+       it is telling them the thing exists. ───────────────────────────── -->
+  <section id="parentapp" style="padding-top:26px">
+    <div class="wrap">
+      <div class="kicker">Already with us</div>
+      <h2 class="sec-title">Your swimmer, <em>on your phone</em></h2>
+      <p class="sec-sub">Class times, your coach&rsquo;s progress notes, credits
+         remaining and your receipts &mdash; in one place, without ringing the
+         centre to ask. If you have registered with us, your account is already
+         there. Sign in with your phone number; we send a code by text.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+        <a class="btn btn-solid btn-lg" href="./get">Set up the app</a>
+        <a class="btn btn-lg" href="./guide.html" style="border:1.5px solid #cfeafa">What it does</a>
       </div>
     </div>
   </section>
