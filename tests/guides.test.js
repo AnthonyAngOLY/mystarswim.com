@@ -154,6 +154,20 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
     // looking for a login was landing on the staff scheduler.
     const home = read('index.html');
     ok(/href="\.\/get"/.test(home), 'the homepage does not link the parent app');
+
+    // Eight flat links became five top-level items. The regrouping is only
+    // worth having if nothing fell out of it, so every destination the nav
+    // used to offer must still be reachable from inside it.
+    const nav = home.slice(home.indexOf('<nav class="hd-nav"'),
+                           home.indexOf('</nav>', home.indexOf('<nav class="hd-nav"')));
+    for (const href of ['#programmes', './schedule.html', '#pricing', '#pathways',
+                        '#why', '#how', '#faq', '#contact', './get', './app.html']) {
+      ok(nav.includes('href="' + href + '"'),
+         'the nav lost ' + href + ' in the regrouping');
+    }
+    const topLevel = (nav.match(/class="hd-link"/g) || []).length
+                   + (nav.match(/class="hd-link hd-top"/g) || []).length * 0;
+    ok(topLevel <= 5, 'the nav is back up to ' + topLevel + ' top-level items');
     ok(/Staff Login/.test(home), 'the staff login is still labelled as if it were the only one');
 
     // The intake form creates the account, so the family can sign in the

@@ -27,6 +27,23 @@
     .hd-brand img{height:36px}
     .hd-nav{display:flex;align-items:center;gap:18px;font-size:14px;font-weight:600;color:var(--text-2)}
     .hd-nav a:hover{color:var(--primary)}
+    .hd-group{position:relative}
+    .hd-top{font:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer;
+            display:inline-flex;align-items:center;gap:5px}
+    .hd-top:hover,.hd-group:focus-within .hd-top{color:var(--primary)}
+    .chev{width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;
+          border-top:5px solid currentColor;transition:transform .18s ease;opacity:.65}
+    .hd-group:hover .chev,.hd-group.open .chev{transform:rotate(180deg)}
+    .hd-menu{display:none;position:absolute;top:calc(100% + 12px);left:-14px;min-width:190px;
+             background:#fff;border:1px solid var(--border);border-radius:12px;padding:6px;
+             box-shadow:0 18px 34px -16px rgba(15,23,42,.3)}
+    /* A gap between the button and the panel would close the menu as the
+       pointer crossed it. This bridges it without being visible. */
+    .hd-menu::before{content:'';position:absolute;left:0;right:0;top:-12px;height:12px}
+    .hd-group:hover .hd-menu,.hd-group:focus-within .hd-menu,.hd-group.open .hd-menu{display:block}
+    .hd-menu a{display:block;padding:9px 12px;border-radius:8px;white-space:nowrap;
+               font-weight:600;color:var(--text-2)}
+    .hd-menu a:hover{background:var(--sky,#EEF7FD);color:var(--primary)}
     .btn{display:inline-block;padding:9px 18px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;border:1px solid transparent;transition:.15s;text-align:center}
     .btn-solid{background:var(--primary);color:#fff}
     .btn-solid:hover{background:var(--primary-dk)}
@@ -48,6 +65,17 @@
       .nav-open .hd-nav{display:flex}
       .hd-nav .hd-link{display:block;padding:13px 24px;font-size:15px;border-bottom:1px solid #F1F7FD}
       .hd-nav .hd-link:last-of-type{border-bottom:none}
+      /* The panel is already a list. Opening a second list inside it is
+         one tap more for nothing, so the groups become headings and their
+         links sit under them, always visible. */
+      .hd-top{width:100%;text-align:left;pointer-events:none;
+              font-size:11.5px;letter-spacing:.8px;text-transform:uppercase;
+              color:var(--text-3,#94A3B8);padding:14px 24px 4px;border-bottom:none}
+      .chev{display:none}
+      .hd-menu{display:block;position:static;border:none;border-radius:0;padding:0;
+               box-shadow:none;min-width:0;background:none}
+      .hd-menu::before{display:none}
+      .hd-menu a{padding:11px 24px;border-radius:0;font-size:15px;border-bottom:1px solid #F1F7FD}
       .hd-nav #loginLink{margin:10px 24px 0;text-align:center}
       header{position:sticky;top:0;z-index:50}
     }
@@ -557,15 +585,30 @@
     <button class="hamburger" id="hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="site-nav">
       <span></span><span></span><span></span>
     </button>
+    <!-- Eight flat links read as a wall. Grouped into two menus, the two
+         things a visitor actually came for — the app and contacting us —
+         stay in plain sight. The groups open on hover, on keyboard focus
+         and on tap; below 820px they flatten into the stacked panel, so a
+         phone never has to open a menu inside a menu. -->
     <nav class="hd-nav" id="site-nav">
-      <a class="hd-link" href="#programmes">Programmes</a>
-      <a class="hd-link" href="./schedule.html">Schedule</a>
-      <a class="hd-link" href="#pricing" id="nav-pricing" style="display:none">Pricing</a>
-      <a class="hd-link" href="#pathways">Accreditations</a>
-      <a class="hd-link" href="#why">Why Us</a>
-      <a class="hd-link" href="#how">Getting Started</a>
-      <a class="hd-link" href="#faq">FAQ</a>
-      <a class="hd-link" href="#contact">Contact Us</a>
+      <div class="hd-group">
+        <button class="hd-link hd-top" type="button" aria-expanded="false">Lessons<span class="chev" aria-hidden="true"></span></button>
+        <div class="hd-menu">
+          <a href="#programmes">Programmes</a>
+          <a href="./schedule.html">Schedule</a>
+          <a href="#pricing" id="nav-pricing" style="display:none">Pricing</a>
+          <a href="#pathways">Accreditations</a>
+        </div>
+      </div>
+      <div class="hd-group">
+        <button class="hd-link hd-top" type="button" aria-expanded="false">About<span class="chev" aria-hidden="true"></span></button>
+        <div class="hd-menu">
+          <a href="#why">Why Us</a>
+          <a href="#how">Getting Started</a>
+          <a href="#faq">FAQ</a>
+        </div>
+      </div>
+      <a class="hd-link" href="#contact">Contact</a>
       <!-- Parents looking for "login" were landing on the staff scheduler.
            Theirs comes first and says whose it is; the staff one keeps the
            same link and stops pretending to be the only one. -->
@@ -1493,6 +1536,26 @@ document.querySelectorAll('.faq details').forEach(function(d){
       });
       document.querySelectorAll('.hd-nav a').forEach(function(a){
         a.addEventListener('click',function(){ hd.classList.remove('nav-open'); hb.setAttribute('aria-expanded','false'); });
+      });
+      // Hover opens the groups on a desktop. A touch screen has no hover,
+      // so the button toggles instead — and only one group at a time, or
+      // two panels overlap each other.
+      document.querySelectorAll('.hd-group .hd-top').forEach(function(b){
+        b.addEventListener('click',function(e){
+          e.stopPropagation();
+          var g=b.parentNode, was=g.classList.contains('open');
+          document.querySelectorAll('.hd-group.open').forEach(function(o){
+            o.classList.remove('open');
+            var t=o.querySelector('.hd-top'); if(t)t.setAttribute('aria-expanded','false');
+          });
+          if(!was){ g.classList.add('open'); b.setAttribute('aria-expanded','true'); }
+        });
+      });
+      document.addEventListener('click',function(){
+        document.querySelectorAll('.hd-group.open').forEach(function(o){
+          o.classList.remove('open');
+          var t=o.querySelector('.hd-top'); if(t)t.setAttribute('aria-expanded','false');
+        });
       });
     }
   })();
