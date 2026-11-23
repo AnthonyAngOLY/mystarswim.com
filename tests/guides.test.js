@@ -161,14 +161,20 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
     const nav = home.slice(home.indexOf('<nav class="hd-nav"'),
                            home.indexOf('</nav>', home.indexOf('<nav class="hd-nav"')));
     for (const href of ['#programmes', './schedule.html', '#pricing', '#pathways',
-                        '#why', '#how', '#faq', '#contact', './get', './app.html']) {
+                        '#why', '#how', '#faq', '#contact', './get']) {
       ok(nav.includes('href="' + href + '"'),
          'the nav lost ' + href + ' in the regrouping');
     }
     const topLevel = (nav.match(/class="hd-link"/g) || []).length
                    + (nav.match(/class="hd-link hd-top"/g) || []).length * 0;
     ok(topLevel <= 5, 'the nav is back up to ' + topLevel + ' top-level items');
-    ok(/Staff Login/.test(home), 'the staff login is still labelled as if it were the only one');
+    // The staff door belongs in the footer, not the header: on a page where
+    // almost every visitor is a parent, a second sign-in up top competes
+    // with the one they came for.
+    ok(!/<nav class="hd-nav"[\s\S]*?app\.html[\s\S]*?<\/nav>/.test(home),
+       'a staff link is back in the header nav');
+    ok(/id="loginLinkFt"[^>]*href="\.\/app\.html"/.test(home),
+       'the footer no longer carries the staff sign-in');
 
     // The intake form creates the account, so the family can sign in the
     // moment they finish. The screen has to say so or the moment is lost.
