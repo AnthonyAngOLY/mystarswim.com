@@ -21,16 +21,6 @@
              background:var(--primary); color:#fff; font-size:12px; font-weight:800;
              display:flex; align-items:center; justify-content:center; margin-top:2px}
   .legend b{display:block}
-  /* Three across at every width, never wrapping. These are one sequence —
-     wrapped two-and-one, the third stretches to the full column and stops
-     looking like the third step of anything. Small is fine; they are
-     diagrams, not screenshots. */
-  .trio{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
-        align-items:start; margin:6px 0 2px}
-  .trio figure{margin:0; min-width:0}
-  .trio svg{width:100%; height:auto; display:block;
-            filter:drop-shadow(0 7px 16px rgba(12,30,46,.12))}
-  .trio figcaption{font-size:13.5px; color:var(--muted); margin-top:8px; line-height:1.45}
 </style>
 </head>
 <body>
@@ -55,121 +45,17 @@
     <span class="small">mystarswim.com/get</span>
   </a>
 
-  <h2>Getting in</h2>
-  <p>There is no password and nothing to download from an app store. You sign
-     in with your phone number, once.</p>
+  <h2>Not set up yet?</h2>
+  <p>Setting up takes about a minute — your phone number, a code by text, and
+     that is it. The short version, with the steps for putting it on your home
+     screen, is on its own page:</p>
 
-  <div class="trio">
-    <figure>
-      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing a box to type your phone number and a button to send the code">
-        <defs><clipPath id="scrA"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
-        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
-        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
-        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
-        <g clip-path="url(#scrA)">
-          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
-          <circle cx="75" cy="62" r="17" fill="#0EA5E9" opacity=".15"/>
-          <circle cx="75" cy="62" r="9" fill="#0EA5E9"/>
-          <rect x="30" y="94" width="90" height="7" rx="3.5" fill="#CFE6F5"/>
-          <rect x="26" y="116" width="98" height="27" rx="9" fill="#fff" stroke="#0EA5E9" stroke-width="2"/>
-          <rect x="35" y="126" width="54" height="6" rx="3" fill="#9FC6DE"/>
-          <rect x="26" y="155" width="98" height="27" rx="9" fill="#0EA5E9"/>
-          <rect x="49" y="165" width="52" height="6" rx="3" fill="#fff"/>
-        </g>
-        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
-      </svg>
-      <figcaption><b>1.</b> Type the phone number the centre has for you.</figcaption>
-    </figure>
-    <figure>
-      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing a text message arriving above six empty boxes for the code">
-        <defs><clipPath id="scrB"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
-        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
-        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
-        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
-        <g clip-path="url(#scrB)">
-          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
-          <rect x="24" y="46" width="102" height="36" rx="11" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.5"/>
-          <circle cx="39" cy="64" r="7.5" fill="#059669"/>
-          <rect x="53" y="55" width="62" height="5" rx="2.5" fill="#8FDCBB"/>
-          <rect x="53" y="66" width="44" height="5" rx="2.5" fill="#8FDCBB"/>
-          <path d="M75 92 L75 104" stroke="#0EA5E9" stroke-width="3" stroke-linecap="round"/>
-          <path d="M70 99 L75 105 L80 99" fill="none" stroke="#0EA5E9" stroke-width="3"
-                stroke-linecap="round" stroke-linejoin="round"/>
-          <g fill="#fff" stroke="#0EA5E9" stroke-width="1.8">
-            <rect x="25" y="116" width="15" height="21" rx="5"/>
-            <rect x="43" y="116" width="15" height="21" rx="5"/>
-            <rect x="61" y="116" width="15" height="21" rx="5"/>
-            <rect x="79" y="116" width="15" height="21" rx="5"/>
-            <rect x="97" y="116" width="15" height="21" rx="5"/>
-            <rect x="115" y="116" width="15" height="21" rx="5"/>
-          </g>
-          <rect x="28.5" y="123" width="8" height="7" rx="2" fill="#0C1E2E"/>
-          <rect x="46.5" y="123" width="8" height="7" rx="2" fill="#0C1E2E"/>
-        </g>
-        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
-      </svg>
-      <figcaption><b>2.</b> A 6-digit code arrives by <b>text message</b>. Type it in.</figcaption>
-    </figure>
-    <figure>
-      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing the app open with the swimmers listed">
-        <defs><clipPath id="scrC"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
-        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
-        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
-        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
-        <g clip-path="url(#scrC)">
-          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
-          <circle cx="75" cy="58" r="16" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.8"/>
-          <path d="M68 58 L73 64 L83 52" fill="none" stroke="#059669" stroke-width="3.5"
-                stroke-linecap="round" stroke-linejoin="round"/>
-          <rect x="24" y="88" width="102" height="32" rx="11" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-          <circle cx="40" cy="104" r="9" fill="#E0F2FE"/>
-          <rect x="55" y="96" width="42" height="6" rx="3" fill="#0C1E2E"/>
-          <rect x="55" y="108" width="58" height="5" rx="2.5" fill="#9FC6DE"/>
-          <rect x="24" y="128" width="102" height="32" rx="11" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-          <circle cx="40" cy="144" r="9" fill="#E0F2FE"/>
-          <rect x="55" y="136" width="34" height="6" rx="3" fill="#0C1E2E"/>
-          <rect x="55" y="148" width="52" height="5" rx="2.5" fill="#9FC6DE"/>
-          <rect x="11" y="205" width="128" height="34" fill="#fff"/>
-          <line x1="11" y1="205" x2="139" y2="205" stroke="#DAEDF8" stroke-width="1.2"/>
-          <g fill="#CFE6F5">
-            <circle cx="28" cy="220" r="5"/><circle cx="47" cy="220" r="5"/>
-            <circle cx="66" cy="220" r="5"/><circle cx="85" cy="220" r="5"/>
-            <circle cx="104" cy="220" r="5"/><circle cx="123" cy="220" r="5"/>
-          </g>
-          <circle cx="28" cy="220" r="5" fill="#0EA5E9"/>
-        </g>
-        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
-      </svg>
-      <figcaption><b>3.</b> You are in. Your children are already there.</figcaption>
-    </figure>
-  </div>
+  <a class="cta" href="https://www.mystarswim.com/get">
+    Set up the app
+    <span class="small">mystarswim.com/get</span>
+  </a>
 
-  <div class="note warn">
-    <b>“We do not have that number on file”</b>
-    We are holding a different number for your family — often an old one, or a
-    digit out. Tell anyone at the centre and it is fixed in a moment. Nothing
-    is wrong with your phone.
-  </div>
-
-  <div class="note tip">
-    <b>The message comes from a number you will not recognise</b>
-    Malaysian operators replace the sender on messages like this with a short
-    number of their own, so it will not arrive under our name. The message
-    itself says Star Swim. That is normal, and it is us.
-  </div>
-
-  <h2>Putting it on your home screen</h2>
-  <p>Optional, and worth the twenty seconds. It gets its own icon, opens full
-     screen without the address bar, and you never have to find the link again.</p>
-  <ul class="steps" style="counter-reset:s">
-    <li><h3>On an iPhone</h3>
-        <p>Open it in <b>Safari</b> → tap <b>Share</b> (the square with an arrow
-           out of the top) → scroll down → <b>Add to Home Screen</b> → <b>Add</b>.</p></li>
-    <li><h3>On Android</h3>
-        <p>Open it in <b>Chrome</b> → tap the <b>⋮</b> menu, top right →
-           <b>Install app</b> or <b>Add to Home screen</b>. Chrome often offers
-           this by itself in a bar at the bottom.</p></li>
-  </ul>
+  <p>The rest of this page is what the app does once you are in.</p>
 
   <h2>Finding your way around</h2>
   <p>Six buttons along the bottom. That is the whole app — everything is one

@@ -519,7 +519,42 @@ function IntakeForm() {
     }, done.children.map((c, i) => /*#__PURE__*/React.createElement("div", {
       key: i,
       className: "success-list-item"
-    }, "• ", c.name, " — ", ageDisplay(c.age), " · T&C signed (ID: ", c.acceptanceId, ")"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("button", {
+    }, "• ", c.name, " — ", ageDisplay(c.age), " · T&C signed (ID: ", c.acceptanceId, ")"))), /*#__PURE__*/React.createElement("div", {
+      style: {
+        margin: '18px 0 4px',
+        padding: '16px 18px',
+        borderRadius: 14,
+        background: '#E0F2FE',
+        border: '1px solid #BAE6FD',
+        textAlign: 'left'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 800,
+        fontSize: 15,
+        color: '#0369A1',
+        marginBottom: 4
+      }
+    }, "Your app is ready now"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 14,
+        color: '#075985',
+        lineHeight: 1.55
+      }
+    }, "Class times, your coach's progress notes, credits and receipts — all on your phone. Sign in with the number you just gave us and we'll send a code by text."), /*#__PURE__*/React.createElement("a", {
+      href: "https://www.mystarswim.com/get",
+      style: {
+        display: 'inline-block',
+        marginTop: 12,
+        background: '#0EA5E9',
+        color: '#fff',
+        fontWeight: 800,
+        fontSize: 15,
+        textDecoration: 'none',
+        padding: '11px 20px',
+        borderRadius: 11
+      }
+    }, "Set up the app")), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("button", {
       className: "success-reset",
       onClick: resetForm
     }, "Register Another Family"))), /*#__PURE__*/React.createElement("div", {
