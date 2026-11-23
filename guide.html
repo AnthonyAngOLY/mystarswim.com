@@ -61,68 +61,84 @@
 
   <div class="trio">
     <figure>
-      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing a box to type your phone number and a Send me a code button">
-        <rect x="6" y="6" width="138" height="238" rx="20" fill="#0C1E2E"/>
-        <rect x="12" y="12" width="126" height="226" rx="15" fill="#EEF7FD"/>
-        <rect x="56" y="16" width="38" height="6" rx="3" fill="#0C1E2E"/>
-        <circle cx="75" cy="56" r="16" fill="#0EA5E9" opacity=".18"/>
-        <circle cx="75" cy="56" r="9" fill="#0EA5E9"/>
-        <rect x="26" y="88" width="98" height="9" rx="4.5" fill="#CFE6F5"/>
-        <rect x="26" y="112" width="98" height="26" rx="8" fill="#fff" stroke="#0EA5E9" stroke-width="2"/>
-        <rect x="34" y="122" width="52" height="6" rx="3" fill="#9FC6DE"/>
-        <rect x="26" y="150" width="98" height="26" rx="8" fill="#0EA5E9"/>
-        <rect x="48" y="160" width="54" height="6" rx="3" fill="#fff"/>
+      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing a box to type your phone number and a button to send the code">
+        <defs><clipPath id="scrA"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
+        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
+        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
+        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
+        <g clip-path="url(#scrA)">
+          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
+          <circle cx="75" cy="62" r="17" fill="#0EA5E9" opacity=".15"/>
+          <circle cx="75" cy="62" r="9" fill="#0EA5E9"/>
+          <rect x="30" y="94" width="90" height="7" rx="3.5" fill="#CFE6F5"/>
+          <rect x="26" y="116" width="98" height="27" rx="9" fill="#fff" stroke="#0EA5E9" stroke-width="2"/>
+          <rect x="35" y="126" width="54" height="6" rx="3" fill="#9FC6DE"/>
+          <rect x="26" y="155" width="98" height="27" rx="9" fill="#0EA5E9"/>
+          <rect x="49" y="165" width="52" height="6" rx="3" fill="#fff"/>
+        </g>
+        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
       </svg>
       <figcaption><b>1.</b> Type the phone number the centre has for you.</figcaption>
     </figure>
     <figure>
-      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing six empty boxes for the code, with a text message arriving">
-        <rect x="6" y="6" width="138" height="238" rx="20" fill="#0C1E2E"/>
-        <rect x="12" y="12" width="126" height="226" rx="15" fill="#EEF7FD"/>
-        <rect x="56" y="16" width="38" height="6" rx="3" fill="#0C1E2E"/>
-        <rect x="24" y="40" width="102" height="34" rx="10" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="2"/>
-        <circle cx="38" cy="57" r="7" fill="#059669"/>
-        <rect x="52" y="49" width="62" height="5" rx="2.5" fill="#86D9B6"/>
-        <rect x="52" y="60" width="40" height="5" rx="2.5" fill="#86D9B6"/>
-        <path d="M75 82 L75 96" stroke="#0EA5E9" stroke-width="3" stroke-linecap="round"/>
-        <path d="M69 90 L75 97 L81 90" fill="none" stroke="#0EA5E9" stroke-width="3"
-              stroke-linecap="round" stroke-linejoin="round"/>
-        <g fill="#fff" stroke="#0EA5E9" stroke-width="2">
-          <rect x="24" y="106" width="14" height="20" rx="4"/>
-          <rect x="42" y="106" width="14" height="20" rx="4"/>
-          <rect x="60" y="106" width="14" height="20" rx="4"/>
-          <rect x="78" y="106" width="14" height="20" rx="4"/>
-          <rect x="96" y="106" width="14" height="20" rx="4"/>
-          <rect x="114" y="106" width="12" height="20" rx="4"/>
+      <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing a text message arriving above six empty boxes for the code">
+        <defs><clipPath id="scrB"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
+        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
+        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
+        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
+        <g clip-path="url(#scrB)">
+          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
+          <rect x="24" y="46" width="102" height="36" rx="11" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.5"/>
+          <circle cx="39" cy="64" r="7.5" fill="#059669"/>
+          <rect x="53" y="55" width="62" height="5" rx="2.5" fill="#8FDCBB"/>
+          <rect x="53" y="66" width="44" height="5" rx="2.5" fill="#8FDCBB"/>
+          <path d="M75 92 L75 104" stroke="#0EA5E9" stroke-width="3" stroke-linecap="round"/>
+          <path d="M70 99 L75 105 L80 99" fill="none" stroke="#0EA5E9" stroke-width="3"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <g fill="#fff" stroke="#0EA5E9" stroke-width="1.8">
+            <rect x="25" y="116" width="15" height="21" rx="5"/>
+            <rect x="43" y="116" width="15" height="21" rx="5"/>
+            <rect x="61" y="116" width="15" height="21" rx="5"/>
+            <rect x="79" y="116" width="15" height="21" rx="5"/>
+            <rect x="97" y="116" width="15" height="21" rx="5"/>
+            <rect x="115" y="116" width="15" height="21" rx="5"/>
+          </g>
+          <rect x="28.5" y="123" width="8" height="7" rx="2" fill="#0C1E2E"/>
+          <rect x="46.5" y="123" width="8" height="7" rx="2" fill="#0C1E2E"/>
         </g>
-        <rect x="27" y="113" width="8" height="6" rx="2" fill="#0C1E2E"/>
-        <rect x="45" y="113" width="8" height="6" rx="2" fill="#0C1E2E"/>
+        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
       </svg>
       <figcaption><b>2.</b> A 6-digit code arrives by <b>text message</b>. Type it in.</figcaption>
     </figure>
     <figure>
       <svg viewBox="0 0 150 250" role="img" aria-label="A phone showing the app open with the swimmers listed">
-        <rect x="6" y="6" width="138" height="238" rx="20" fill="#0C1E2E"/>
-        <rect x="12" y="12" width="126" height="226" rx="15" fill="#EEF7FD"/>
-        <rect x="56" y="16" width="38" height="6" rx="3" fill="#0C1E2E"/>
-        <circle cx="75" cy="52" r="15" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="2"/>
-        <path d="M68 52 L73 58 L83 47" fill="none" stroke="#059669" stroke-width="3.5"
-              stroke-linecap="round" stroke-linejoin="round"/>
-        <rect x="24" y="80" width="102" height="30" rx="9" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-        <circle cx="39" cy="95" r="8" fill="#E0F2FE"/>
-        <rect x="53" y="88" width="42" height="6" rx="3" fill="#0C1E2E"/>
-        <rect x="53" y="99" width="58" height="5" rx="2.5" fill="#9FC6DE"/>
-        <rect x="24" y="118" width="102" height="30" rx="9" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-        <circle cx="39" cy="133" r="8" fill="#E0F2FE"/>
-        <rect x="53" y="126" width="36" height="6" rx="3" fill="#0C1E2E"/>
-        <rect x="53" y="137" width="52" height="5" rx="2.5" fill="#9FC6DE"/>
-        <rect x="12" y="206" width="126" height="32" fill="#fff"/>
-        <g fill="#CFE6F5">
-          <circle cx="29" cy="222" r="5"/><circle cx="47" cy="222" r="5"/>
-          <circle cx="65" cy="222" r="5"/><circle cx="85" cy="222" r="5"/>
-          <circle cx="103" cy="222" r="5"/><circle cx="121" cy="222" r="5"/>
+        <defs><clipPath id="scrC"><rect x="11" y="11" width="128" height="228" rx="16"/></clipPath></defs>
+        <rect x="5" y="5" width="140" height="240" rx="22" fill="#0C1E2E"/>
+        <rect x="142" y="74" width="6" height="26" rx="3" fill="#0C1E2E"/>
+        <rect x="11" y="11" width="128" height="228" rx="16" fill="#EEF7FD"/>
+        <g clip-path="url(#scrC)">
+          <rect x="11" y="11" width="128" height="26" fill="#fff"/>
+          <circle cx="75" cy="58" r="16" fill="#ECFDF5" stroke="#A7F3D0" stroke-width="1.8"/>
+          <path d="M68 58 L73 64 L83 52" fill="none" stroke="#059669" stroke-width="3.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="24" y="88" width="102" height="32" rx="11" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+          <circle cx="40" cy="104" r="9" fill="#E0F2FE"/>
+          <rect x="55" y="96" width="42" height="6" rx="3" fill="#0C1E2E"/>
+          <rect x="55" y="108" width="58" height="5" rx="2.5" fill="#9FC6DE"/>
+          <rect x="24" y="128" width="102" height="32" rx="11" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+          <circle cx="40" cy="144" r="9" fill="#E0F2FE"/>
+          <rect x="55" y="136" width="34" height="6" rx="3" fill="#0C1E2E"/>
+          <rect x="55" y="148" width="52" height="5" rx="2.5" fill="#9FC6DE"/>
+          <rect x="11" y="205" width="128" height="34" fill="#fff"/>
+          <line x1="11" y1="205" x2="139" y2="205" stroke="#DAEDF8" stroke-width="1.2"/>
+          <g fill="#CFE6F5">
+            <circle cx="28" cy="220" r="5"/><circle cx="47" cy="220" r="5"/>
+            <circle cx="66" cy="220" r="5"/><circle cx="85" cy="220" r="5"/>
+            <circle cx="104" cy="220" r="5"/><circle cx="123" cy="220" r="5"/>
+          </g>
+          <circle cx="28" cy="220" r="5" fill="#0EA5E9"/>
         </g>
-        <circle cx="29" cy="222" r="5" fill="#0EA5E9"/>
+        <rect x="59" y="15" width="32" height="5" rx="2.5" fill="#0C1E2E"/>
       </svg>
       <figcaption><b>3.</b> You are in. Your children are already there.</figcaption>
     </figure>
@@ -162,63 +178,65 @@
   <div class="map">
     <svg viewBox="0 0 326 430" role="img"
          aria-label="The parent app with its six bottom tabs numbered: Home, Classes, Progress, Credits, Billing and Inbox">
-      <rect x="31" y="6" width="264" height="418" rx="28" fill="#0C1E2E"/>
-      <rect x="39" y="14" width="248" height="402" rx="21" fill="#EEF7FD"/>
-      <rect x="141" y="19" width="44" height="7" rx="3.5" fill="#0C1E2E"/>
+      <defs><clipPath id="scrMap"><rect x="39" y="14" width="248" height="402" rx="22"/></clipPath></defs>
 
-      <rect x="39" y="34" width="248" height="40" fill="#fff"/>
-      <circle cx="61" cy="54" r="12" fill="#E0F2FE"/>
-      <rect x="81" y="47" width="78" height="7" rx="3.5" fill="#0C1E2E"/>
-      <rect x="81" y="59" width="110" height="5" rx="2.5" fill="#9FC6DE"/>
+      <rect x="31" y="6" width="264" height="418" rx="30" fill="#0C1E2E"/>
+      <rect x="26" y="104" width="7" height="46" rx="3" fill="#0C1E2E"/>
+      <rect x="26" y="164" width="7" height="46" rx="3" fill="#0C1E2E"/>
+      <rect x="293" y="124" width="7" height="66" rx="3" fill="#0C1E2E"/>
+      <rect x="39" y="14" width="248" height="402" rx="22" fill="#EEF7FD"/>
 
-      <rect x="52" y="88" width="222" height="52" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-      <rect x="66" y="102" width="82" height="7" rx="3.5" fill="#0C1E2E"/>
-      <rect x="66" y="117" width="130" height="5" rx="2.5" fill="#9FC6DE"/>
-      <rect x="214" y="100" width="46" height="17" rx="8.5" fill="#E0F2FE"/>
+      <g clip-path="url(#scrMap)">
+        <rect x="39" y="14" width="248" height="62" fill="#fff"/>
+        <circle cx="63" cy="52" r="13" fill="#E0F2FE"/>
+        <rect x="85" y="44" width="78" height="7" rx="3.5" fill="#0C1E2E"/>
+        <rect x="85" y="57" width="110" height="5" rx="2.5" fill="#9FC6DE"/>
 
-      <rect x="52" y="152" width="222" height="52" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-      <rect x="66" y="166" width="68" height="7" rx="3.5" fill="#0C1E2E"/>
-      <rect x="66" y="181" width="116" height="5" rx="2.5" fill="#9FC6DE"/>
-      <rect x="214" y="164" width="46" height="17" rx="8.5" fill="#ECFDF5"/>
+        <rect x="52" y="90" width="222" height="54" rx="14" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+        <rect x="68" y="105" width="82" height="7" rx="3.5" fill="#0C1E2E"/>
+        <rect x="68" y="120" width="130" height="5" rx="2.5" fill="#9FC6DE"/>
+        <rect x="214" y="103" width="46" height="18" rx="9" fill="#E0F2FE"/>
 
-      <rect x="52" y="216" width="222" height="52" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-      <rect x="66" y="230" width="90" height="7" rx="3.5" fill="#0C1E2E"/>
-      <rect x="66" y="245" width="100" height="5" rx="2.5" fill="#9FC6DE"/>
+        <rect x="52" y="156" width="222" height="54" rx="14" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+        <rect x="68" y="171" width="68" height="7" rx="3.5" fill="#0C1E2E"/>
+        <rect x="68" y="186" width="116" height="5" rx="2.5" fill="#9FC6DE"/>
+        <rect x="214" y="169" width="46" height="18" rx="9" fill="#ECFDF5"/>
 
-      <rect x="52" y="280" width="222" height="52" rx="12" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
-      <rect x="66" y="294" width="76" height="7" rx="3.5" fill="#0C1E2E"/>
-      <rect x="66" y="309" width="118" height="5" rx="2.5" fill="#9FC6DE"/>
+        <rect x="52" y="222" width="222" height="54" rx="14" fill="#fff" stroke="#DAEDF8" stroke-width="1.5"/>
+        <rect x="68" y="237" width="90" height="7" rx="3.5" fill="#0C1E2E"/>
+        <rect x="68" y="252" width="100" height="5" rx="2.5" fill="#9FC6DE"/>
 
-      <!-- the tab bar -->
-      <rect x="39" y="356" width="248" height="60" fill="#fff"/>
-      <line x1="39" y1="356" x2="287" y2="356" stroke="#DAEDF8" stroke-width="1.5"/>
-      <g font-size="18" text-anchor="middle" dominant-baseline="central">
-        <text x="63" y="378">🏠</text>
-        <text x="102" y="378">📅</text>
-        <text x="141" y="378">📈</text>
-        <text x="180" y="378">⭐</text>
-        <text x="219" y="378">🧾</text>
-        <text x="258" y="378">✉️</text>
+        <rect x="39" y="358" width="248" height="58" fill="#fff"/>
+        <line x1="39" y1="358" x2="287" y2="358" stroke="#DAEDF8" stroke-width="1.5"/>
+        <g font-size="18" text-anchor="middle" dominant-baseline="central">
+          <text x="63" y="380">🏠</text>
+          <text x="102" y="380">📅</text>
+          <text x="141" y="380">📈</text>
+          <text x="180" y="380">⭐</text>
+          <text x="219" y="380">🧾</text>
+          <text x="258" y="380">✉️</text>
+        </g>
+        <g font-size="9.5" text-anchor="middle" fill="#5B7488" font-family="sans-serif">
+          <text x="63" y="401">Home</text>
+          <text x="102" y="401">Classes</text>
+          <text x="141" y="401">Progress</text>
+          <text x="180" y="401">Credits</text>
+          <text x="219" y="401">Billing</text>
+          <text x="258" y="401">Inbox</text>
+        </g>
+        <circle cx="266" cy="372" r="4.5" fill="#DC2626"/>
       </g>
-      <g font-size="9.5" text-anchor="middle" fill="#5B7488" font-family="sans-serif">
-        <text x="63" y="399">Home</text>
-        <text x="102" y="399">Classes</text>
-        <text x="141" y="399">Progress</text>
-        <text x="180" y="399">Credits</text>
-        <text x="219" y="399">Billing</text>
-        <text x="258" y="399">Inbox</text>
-      </g>
-      <!-- numbers, tying the drawing to the list underneath -->
+
+      <rect x="140" y="20" width="46" height="7" rx="3.5" fill="#0C1E2E"/>
+
       <g font-size="10" font-weight="700" text-anchor="middle" fill="#fff" font-family="sans-serif">
-        <circle cx="63" cy="345" r="9" fill="#0EA5E9"/><text x="63" y="348.5">1</text>
-        <circle cx="102" cy="345" r="9" fill="#0EA5E9"/><text x="102" y="348.5">2</text>
-        <circle cx="141" cy="345" r="9" fill="#0EA5E9"/><text x="141" y="348.5">3</text>
-        <circle cx="180" cy="345" r="9" fill="#0EA5E9"/><text x="180" y="348.5">4</text>
-        <circle cx="219" cy="345" r="9" fill="#0EA5E9"/><text x="219" y="348.5">5</text>
-        <circle cx="258" cy="345" r="9" fill="#0EA5E9"/><text x="258" y="348.5">6</text>
+        <circle cx="63" cy="345" r="9.5" fill="#0EA5E9"/><text x="63" y="348.5">1</text>
+        <circle cx="102" cy="345" r="9.5" fill="#0EA5E9"/><text x="102" y="348.5">2</text>
+        <circle cx="141" cy="345" r="9.5" fill="#0EA5E9"/><text x="141" y="348.5">3</text>
+        <circle cx="180" cy="345" r="9.5" fill="#0EA5E9"/><text x="180" y="348.5">4</text>
+        <circle cx="219" cy="345" r="9.5" fill="#0EA5E9"/><text x="219" y="348.5">5</text>
+        <circle cx="258" cy="345" r="9.5" fill="#0EA5E9"/><text x="258" y="348.5">6</text>
       </g>
-      <!-- a red dot on the Inbox, which is what it looks like with something unread -->
-      <circle cx="266" cy="370" r="4.5" fill="#DC2626"/>
     </svg>
 
     <ul class="legend">
