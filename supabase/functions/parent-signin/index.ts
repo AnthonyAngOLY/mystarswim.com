@@ -47,11 +47,21 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
 
-// How the code travels. Supabase defaults this to SMS and only sends by
-// WhatsApp if asked, so not asking is how a centre that chose WhatsApp
-// quietly pays SMS rates. Set PARENT_OTP_CHANNEL to "sms" to switch back
-// without touching this file.
-const CHANNEL = (Deno.env.get("PARENT_OTP_CHANNEL") ?? "whatsapp").toLowerCase();
+// How the code travels. SMS, because SMS is what is registered: an
+// international long code, a Messaging Service, and a Supabase Phone
+// provider holding Twilio credentials. There is no WhatsApp sender.
+//
+// This said "whatsapp" for months, which was the intention at the time
+// and never became true. Asking Twilio for a channel it has no sender
+// for does not fail cleanly — the request can be accepted and dropped
+// after the fact, so Supabase answers 200, this function reports
+// success, the app tells a parent their code is on its way, and nothing
+// ever arrives. A default that lies is worse than one that is merely
+// wrong, because the failure it produces looks like somebody else's.
+//
+// Set PARENT_OTP_CHANNEL to "whatsapp" to switch, once a WhatsApp sender
+// is actually registered and tested. Not before.
+const CHANNEL = (Deno.env.get("PARENT_OTP_CHANNEL") ?? "sms").toLowerCase();
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -181,10 +191,13 @@ Deno.serve(async (req) => {
 
   let out = await send(CHANNEL);
 
-  // A parent with no WhatsApp is uncommon in Ipoh and not imaginary, and
-  // Twilio refuses that send rather than silently dropping it. One SMS
-  // costs more than one WhatsApp and far less than a family locked out,
-  // so it falls back once and says which way it went.
+  // Only ever a fallback OUT of WhatsApp, never into it. A parent with no
+  // WhatsApp is uncommon in Ipoh and not imaginary, and one SMS costs
+  // more than one WhatsApp and far less than a family locked out.
+  //
+  // With the default above this branch does not run at all, and that is
+  // correct: there is nowhere to fall back to from SMS. If SMS fails,
+  // the send failed, and saying so is the only honest answer.
   let usedChannel = CHANNEL;
   if (!out.ok && CHANNEL === "whatsapp") {
     console.error("whatsapp send failed, falling back to sms", out.status, out.text);

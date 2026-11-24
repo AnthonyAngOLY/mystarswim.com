@@ -27,12 +27,16 @@ const path = require('path');
 const babel = require('@babel/core');
 const vm = require('vm');
 
-const SRC = path.join(__dirname, '..', 'supabase', 'functions', 'public-intake', 'index.ts');
+const SRC = (fn) =>
+  path.join(__dirname, '..', 'supabase', 'functions', fn, 'index.ts');
 
 // Builds a handler from the real file. `client` is what createClient
-// returns; `env` fills Deno.env.get.
-function load(client, env) {
-  const ts = fs.readFileSync(SRC, 'utf8');
+// returns; `env` fills Deno.env.get; `opts.fn` names the function
+// (public-intake unless told otherwise) and `opts.fetch` stands in for
+// the outbound fetch a function makes to Supabase's own API.
+function load(client, env, opts) {
+  const o = opts || {};
+  const ts = fs.readFileSync(SRC(o.fn || 'public-intake'), 'utf8');
 
   const { code } = babel.transformSync(ts, {
     filename: 'index.ts',
@@ -52,6 +56,10 @@ function load(client, env) {
     createClient: () => client,
     crypto,
     console,
+    // Left undefined unless a test supplies one, so a function that
+    // reaches the network unexpectedly throws rather than quietly
+    // talking to the real internet from a test run.
+    fetch: o.fetch,
     Response, Request, Headers, URL, JSON, Math, Date, Object, Array, String, Number, Boolean, Error,
     Deno: {
       env: { get: (k) => (env || {})[k] },
@@ -60,7 +68,7 @@ function load(client, env) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(code, sandbox, { filename: 'public-intake/index.ts' });
+  vm.runInContext(code, sandbox, { filename: (o.fn || 'public-intake') + '/index.ts' });
 
   if (typeof handler !== 'function') throw new Error('the function never called Deno.serve');
   return handler;
@@ -68,7 +76,7 @@ function load(client, env) {
 
 // POST a JSON body and read the JSON back, the way the browser does.
 async function post(handler, body) {
-  const res = await handler(new Request('https://x/functions/v1/public-intake', {
+  const res = await handler(new Request('https://x/functions/v1/fn', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body)
   }));

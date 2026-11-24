@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 3;
+  var BUILD = 4;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -177,7 +177,8 @@
   // Swim family, and that is the question worth asking.
   //
   // It also means a stranger cannot make us send a single message. With
-  // WhatsApp that is not only a security line, it is the bill.
+  // SMS that is not only a security line, it is the bill — an
+  // international long code charges per message, every message.
   function sendCode(phone) {
     return fetch(cfg.supabaseUrl + '/functions/v1/parent-signin', {
       method: 'POST',
@@ -192,7 +193,11 @@
       body: JSON.stringify({ phone: phone })
     }).catch(asOffline).then(function (r) {
       return r.json().catch(function () { return {}; }).then(function (d) {
-        if (r.ok && d && d.known === true && !d.error) return d.channel || 'whatsapp';
+        // 'sms' if the server did not say, because SMS is what is
+        // registered. This read 'whatsapp' while no WhatsApp sender
+        // existed, which would have had the app tell a parent to look
+        // somewhere no message was ever going to arrive.
+        if (r.ok && d && d.known === true && !d.error) return d.channel || 'sms';
         throw new Error((d && d.error)
           || 'We could not send a code just now. Please try again shortly.');
       });

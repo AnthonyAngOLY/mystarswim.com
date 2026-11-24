@@ -9,14 +9,13 @@
 --  parent-signin checks a number against parent_accounts BEFORE asking
 --  Supabase to send a code. That is deliberate — an ungated send endpoint
 --  is somebody else's bill to run up — but it means testing the sign-in
---  with your own number fails at the lookup and never reaches WhatsApp at
+--  with your own number fails at the lookup and never reaches Twilio at
 --  all. You would see "We do not have that number on file" and conclude
 --  delivery is broken, having never tested delivery.
 --
 --  So: one account, holding your number, belonging to no family. Signing
---  in to it proves the whole chain end to end — Twilio, the WhatsApp
---  message, the code, the verify, and claim_parent_account linking the
---  session. The app will open on an empty Home, because this account has
+--  in to it proves the whole chain end to end — Twilio, the SMS, the
+--  code, the verify, and claim_parent_account linking the session. The app will open on an empty Home, because this account has
 --  no children. That is the correct result. You are testing the door,
 --  not the house.
 --
@@ -84,7 +83,7 @@ select z.thing, z.detail
   union all
   select 3, 'now do this',
          'Open mystarswim.com/get on the phone holding that number, tap '
-      || 'Open the app, and enter it. A code should arrive on WhatsApp '
+      || 'Open the app, and enter it. A code should arrive by SMS '
       || 'within seconds. If it does, the paid side is live and every '
       || 'family can sign in. If the app says it has no such number, this '
       || 'file did not do what it says. If it accepts the number and no '
