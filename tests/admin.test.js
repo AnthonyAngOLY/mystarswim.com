@@ -657,6 +657,134 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (!disabled) throw new Error('Send was live with nobody selected');
   });
 
+  // ── Refund documentation ───────────────────────────────────────────
+  // A refund is three artefacts and they are not the same statement:
+  // a refund receipt (money left the bank), a credit note (the sale was
+  // reduced — what LHDN e-invoicing reads), and the transfer slip proving
+  // it actually went back. The failure this guards against is the one the
+  // payment form already had once: a form that collects a field and a
+  // handler that destructures a different key, so the field is silently
+  // dropped on every refund ever taken and nothing throws.
+  const PAIDINV = { id:'r1', invoice_number:'INV-202611-010', account_name:'Lee Oy Yin',
+                    status:'paid', total_amount:300, amount_paid:300, issue_date:'2026-11-01' };
+  const ORIG = { id:'pm9', invoice_id:'r1', receipt_number:'RCT-202611-0099',
+                 amount:300, payment_date:'2026-11-03', payment_method:'transfer' };
+
+  const refundForm = () => page.evaluate(([inv, orig]) => {
+    let host = document.getElementById('rf-host');
+    if (!host) { host = document.createElement('div'); host.id = 'rf-host'; document.body.appendChild(host); }
+    window.__refund = null;
+    const root = window.__rfRoot || (window.__rfRoot = ReactDOM.createRoot(host));
+    root.render(React.createElement(InvoiceDetailPanel, {
+      key: 'rf', invoice: inv, lines: [], pmts: [orig], pendingCredits: [], isOverdue: false,
+      membersByGroup: {}, products: [],
+      onVoid: () => {}, onDelete: null, onEditVoidReason: null,
+      onRefund: (d) => { window.__refund = Object.assign({}, d, { _proofName: d.proofFile && d.proofFile.name }); return Promise.resolve(); },
+      onUpdateStatus: () => {}, onRecordPayment: () => Promise.resolve({}),
+      onConfirmCredit: () => {}, onReverseCredit: () => {},
+      onAddLine: () => {}, onUpdateLine: () => {}, onDeleteLine: () => {}
+    }));
+  }, [PAIDINV, ORIG]);
+
+  await step('the refund form carries the reference and the proof file', async () => {
+    await refundForm();
+    await page.waitForTimeout(500);
+    await page.locator('#rf-host button').filter({ hasText: /^Refund$/ }).first().click();
+    await page.waitForTimeout(350);
+    const form = page.locator('#rf-host .inv-pay-form').last();
+    await form.locator('input[type="number"], input').first().fill('300');
+    await form.locator('input[type="file"]').setInputFiles({
+      name: 'transfer-slip.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 slip')
+    });
+    // The Reference box, by its placeholder — the only text input that has one.
+    const ref = form.locator('input[placeholder*="reference" i], input[placeholder*="cheque" i]').first();
+    if (!(await ref.count())) throw new Error('the refund form has no Reference field');
+    await ref.fill('MBB-778899');
+    await page.waitForTimeout(150);
+    await form.locator('button').filter({ hasText: /Refund/i }).last().click();
+    await page.waitForTimeout(500);
+    const sent = await page.evaluate(() => window.__refund);
+    if (!sent) throw new Error('the refund form handed over nothing');
+    if (sent.reference !== 'MBB-778899')
+      throw new Error('the reference is under a key refundInvoice does not read: ' + JSON.stringify(Object.keys(sent)));
+    if (sent._proofName !== 'transfer-slip.pdf')
+      throw new Error('the proof file was dropped on the way: ' + JSON.stringify(sent._proofName));
+    if (!sent.method) throw new Error('no refund method was sent');
+  });
+
+  await step('a refund prints as a Refund, naming the receipt it reverses', async () => {
+    const html = await page.evaluate(([inv, orig]) => {
+      let out = '';
+      const real = window.open;
+      window.open = () => ({ document: { write: (h) => { out = h; }, close(){} } });
+      try {
+        printReceipt({ id:'pm10', invoice_id:'r1', receipt_number:'RCT-202611-0100', kind:'refund',
+                       amount:-300, payment_date:'2026-11-20', payment_method:'transfer',
+                       reference_number:'MBB-778899', notes:'Refund: withdrew' },
+                     inv, { againstReceipt: orig.receipt_number });
+      } finally { window.open = real; }
+      return out;
+    }, [PAIDINV, ORIG]);
+    if (!html) throw new Error('nothing was printed');
+    if (/RECEIPT<\/div>/.test(html)) throw new Error('a refund still prints headed RECEIPT');
+    if (!/REFUND<\/div>/.test(html)) throw new Error('the document is not headed REFUND');
+    if (!html.includes('RCT-202611-0099'))
+      throw new Error('the refund does not name the receipt it reverses');
+    if (!/RM 300\.00/.test(html)) throw new Error('the amount is not RM 300.00: a negative leaked into the print');
+    if (/RM -300/.test(html)) throw new Error('the printed amount is negative');
+    if (!/REFUNDED/.test(html)) throw new Error('it still stamps the refund PAID IN FULL');
+    if (!/MBB-778899/.test(html)) throw new Error('the bank reference is not on the document');
+  });
+
+  await step('an ordinary receipt is untouched by all of that', async () => {
+    const html = await page.evaluate(([inv, orig]) => {
+      let out = ''; const real = window.open;
+      window.open = () => ({ document: { write: (h) => { out = h; }, close(){} } });
+      try { printReceipt(orig, inv); } finally { window.open = real; }
+      return out;
+    }, [PAIDINV, ORIG]);
+    if (!/RECEIPT<\/div>/.test(html)) throw new Error('a payment no longer prints headed RECEIPT');
+    if (!/PAID IN FULL/.test(html)) throw new Error('the paid stamp is gone');
+    if (/Against receipt/.test(html)) throw new Error('a plain receipt reverses something');
+  });
+
+  await step('the credit note states the invoice it reduces and by how much', async () => {
+    const html = await page.evaluate(([inv, orig]) => {
+      let out = ''; const real = window.open;
+      window.open = () => ({ document: { write: (h) => { out = h; }, close(){} } });
+      try {
+        printCreditNote({ credit_note_number:'CN-202611-001', invoice_id:'r1', amount:300,
+                          reason:'Parent withdrew', issue_date:'2026-11-20' },
+                        inv,
+                        { receipt_number:'RCT-202611-0100', payment_method:'transfer', reference_number:'MBB-778899' },
+                        orig.receipt_number);
+      } finally { window.open = real; }
+      return out;
+    }, [PAIDINV, ORIG]);
+    if (!/CREDIT NOTE/.test(html)) throw new Error('it is not headed CREDIT NOTE');
+    if (!html.includes('CN-202611-001')) throw new Error('the credit note has no number on it');
+    if (!html.includes('INV-202611-010')) throw new Error('it does not name the invoice it reduces');
+    if (!html.includes('RCT-202611-0099')) throw new Error('it does not name the original receipt');
+    if (!/RM 300\.00/.test(html)) throw new Error('the credited amount is not on it');
+    if (!/Parent withdrew/.test(html)) throw new Error('the reason is not on the document');
+  });
+
+  await step('the original receipt is picked out of the invoice, not guessed', async () => {
+    const r = await page.evaluate(() => {
+      const refund = { id:'x2', kind:'refund', amount:-300, receipt_number:'RCT-0100' };
+      const paid   = { id:'x1', amount:300, receipt_number:'RCT-0099' };
+      return {
+        found: originalReceiptNumber([paid, refund], refund),
+        // Asked about the payment itself, it must not answer with it.
+        self: originalReceiptNumber([paid], paid),
+        none: originalReceiptNumber([], null)
+      };
+    });
+    if (r.found !== 'RCT-0099') throw new Error('wrong original receipt: ' + JSON.stringify(r.found));
+    if (r.self) throw new Error('a receipt was reported as reversing itself');
+    if (r.none) throw new Error('an invoice with no payments produced a receipt number');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

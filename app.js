@@ -143,6 +143,34 @@ async function rest(path, opts={}){
   return txt ? JSON.parse(txt) : null;
 }
 async function selectRows(table, select='*', extra=''){ return rest(`${table}?select=${select}${extra}`); }
+
+// A refund proof lives in a private bucket, so it is reached through a
+// short-lived signed URL rather than a public link. Module scope because
+// the button that opens one sits in a detail panel, outside the app
+// component that uploads it.
+async function refundProofUrl(path){
+  const res = await fetch(`${cfg.supabaseUrl}/storage/v1/object/sign/refund-proofs/${encodeURI(path)}`, {
+    method:'POST', headers: authHeadersFor(), body: JSON.stringify({ expiresIn: 300 }),
+  });
+  if(!res.ok) throw new Error('Could not open that file.');
+  const d = await res.json();
+  return `${cfg.supabaseUrl}/storage/v1${d.signedURL || d.signedUrl}`;
+}
+
+// Opens the stored proof in a new tab. The window is opened first, before
+// the await: a popup blocker stops a window opened from a resolved
+// promise, because by then the click is no longer what opened it.
+async function openRefundProof(path){
+  if(!path){ alert('No proof was uploaded with this refund.'); return; }
+  const w = window.open('', '_blank');
+  try{
+    const url = await refundProofUrl(path);
+    if(w) w.location.href = url; else window.location.href = url;
+  }catch(err){
+    if(w) w.close();
+    alert(err.message || 'Could not open that file.');
+  }
+}
 // PostgREST wraps a raise from a function as {code, details, hint, message}.
 // Only the message was written for a person to read.
 function leaveErrText(err){
@@ -693,6 +721,21 @@ function App({ currentUser, onLogout }){
     return `${sett.receipt_prefix||'RCT'}${datePart}-${seqStr}`;
   }
 
+  function formatCreditNoteNumber(sett, seq){
+    const now = new Date();
+    const y = now.getFullYear(), m = String(now.getMonth()+1).padStart(2,'0');
+    const yy = String(y).slice(-2);
+    const datePart = sett.include_date !== false ? {
+      YYYYMM: `-${y}${m}`,
+      YYYY:   `-${y}`,
+      MM:     `-${m}`,
+      MMYY:   `-${m}${yy}`,
+      none:   '',
+    }[sett.date_format||'YYYYMM'] ?? `-${y}${m}` : '';
+    const pad = Math.max(1, Number(sett.leading_zeros)||3);
+    return `${sett.credit_note_prefix||'CN'}${datePart}-${String(seq).padStart(pad,'0')}`;
+  }
+
   // Save invoice settings (upsert on id=1)
   async function saveInvoiceSettings(patch){
     try{
@@ -821,6 +864,36 @@ function App({ currentUser, onLogout }){
     let skipped = 0;
     while(taken.has(formatReceiptNumber(sett, seq))){ seq++; skipped++; }
     return { seq, number: formatReceiptNumber(sett, seq), skipped, from };
+  }
+
+  async function nextFreeCreditNoteNumber(sett, startSeq){
+    let seq = Math.max(1, Number(startSeq)||1);
+    const rows = await selectRows('credit_notes','credit_note_number').catch(()=>null);
+    const taken = new Set((rows||[]).map(c=>c.credit_note_number).filter(Boolean));
+    const from = formatCreditNoteNumber(sett, seq);
+    let skipped = 0;
+    while(taken.has(formatCreditNoteNumber(sett, seq))){ seq++; skipped++; }
+    return { seq, number: formatCreditNoteNumber(sett, seq), skipped, from };
+  }
+
+  // The transfer slip for money paid back. Private bucket, office only —
+  // a slip carries a bank account number and a customer's name.
+  async function uploadRefundProof(invoiceId, file){
+    const safe = (file.name||'proof').replace(/[^\w.\- ]+/g,'_').slice(0,80);
+    const path = `${invoiceId}/${Date.now()}-${safe}`;
+    const res = await fetch(`${cfg.supabaseUrl}/storage/v1/object/refund-proofs/${encodeURI(path)}`, {
+      method:'POST',
+      headers: { ...authHeadersFor(), 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    });
+    if(!res.ok){
+      const t = await res.text();
+      throw new Error(/mime|content type/i.test(t)
+        ? 'That kind of file is not accepted — PDF, JPG, PNG or WebP.'
+        : /exceeded|too large/i.test(t) ? 'That file is over the 10 MB limit.'
+        : 'Could not upload that file.');
+    }
+    return path;
   }
 
   // ── Invoice CRUD ───────────────────────────────────────────────────
@@ -1064,24 +1137,65 @@ function App({ currentUser, onLogout }){
   // it and marks the invoice 'refunded'. Because every cash report and the
   // Receipts list read the payments table, the negative entry nets the cash out
   // automatically. (For invoices raised in error, use Void instead.)
-  async function refundInvoice({ invoiceId, amount, refundDate, method, reference, reason }){
+  async function refundInvoice({ invoiceId, amount, refundDate, method, reference, reason, proofFile }){
     const amt = Math.abs(Number(amount) || 0);
     if(!amt){ alert('Enter a valid refund amount.'); return; }
+    if(!method){
+      // The same failure as the payment form had: a missing method that
+      // silently became 'cash', and an accountant asking later where the
+      // cash went. Refuse rather than guess.
+      alert('Choose how the money is going back before recording the refund.');
+      return;
+    }
     try{
       const settRows = await selectRows('invoice_settings','*').catch(()=>[]);
       const sett = settRows?.[0] || invoiceSettings;
+
+      // The file goes up before anything is written. An upload that fails
+      // after the refund row exists leaves a refund claiming a proof that
+      // is not there, which is worse than a refund with none.
+      let proofPath = null;
+      if(proofFile) proofPath = await uploadRefundProof(invoiceId, proofFile);
+
       const startSeq = Number(sett.next_receipt_seq) || 1;
       // Walk forward past any receipt number already taken (counter drift / races).
       const { seq, number: receiptNumber, skipped, from } = await nextFreeReceiptNumber(sett, startSeq);
       await patchRows('invoice_settings',{id:1},{next_receipt_seq: seq+1}).catch(()=>{});
       if(skipped) setStatus(`Receipt # ${from} was already taken — skipped ${skipped} number${skipped===1?'':'s'} to ${receiptNumber}.`);
-      await insertRows('payments',{
+      const refundRows = await insertRows('payments',{
         invoice_id: invoiceId, receipt_number: receiptNumber, kind: 'refund',
         amount: -amt, payment_date: refundDate || todayStr(),
-        payment_method: method || 'cash',
+        payment_method: method,
         reference_number: reference || null,
+        proof_path: proofPath,
         notes: reason ? `Refund: ${reason}` : 'Refund'
       });
+
+      // The credit note reverses the sale; the receipt above covers the
+      // money. Two documents because they are two different statements,
+      // and LHDN e-invoicing wants the first one.
+      try{
+        const cnStart = Number(sett.next_credit_note_seq) || 1;
+        const cn = await nextFreeCreditNoteNumber(sett, cnStart);
+        await patchRows('invoice_settings',{id:1},{next_credit_note_seq: cn.seq+1}).catch(()=>{});
+        const inv = invoices.find(i=>i.id===invoiceId);
+        await insertRows('credit_notes',{
+          credit_note_number: cn.number,
+          invoice_id: invoiceId,
+          payment_id: (Array.isArray(refundRows) && refundRows[0] && refundRows[0].id) || null,
+          amount: amt,
+          reason: reason || null,
+          issue_date: refundDate || todayStr(),
+          branch_id: (inv && inv.branch_id) || null
+        });
+      }catch(cnErr){
+        // The refund itself has happened and the money has moved. Say the
+        // note failed rather than rolling back a payment that is real.
+        console.error('credit note', cnErr);
+        alert('The refund was recorded, but the credit note could not be raised. '
+            + 'Tell whoever keeps the books, and run supabase_refund_documents.sql '
+            + 'if it has not been run yet.');
+      }
       // Recompute amount_paid from all payments (the negative refund is included).
       const pays = await selectRows('payments','*',`&invoice_id=eq.${invoiceId}`).catch(()=>[]);
       const paid = (pays||[]).reduce((s,p)=>s+Number(p.amount||0),0);
@@ -10327,6 +10441,10 @@ function ReceiptsView({ pmts, invoices, branches, externalSearchQ }){
   const PAGE_SIZE = 100;
   const invoiceById = {};
   (invoices || []).forEach(inv => { invoiceById[inv.id] = inv; });
+  // Grouped so a refund row can name the receipt it reverses. `pmts` here
+  // is every payment in the system, not one invoice's.
+  const payByInvoice = {};
+  (pmts || []).forEach(p => { (payByInvoice[p.invoice_id] = payByInvoice[p.invoice_id] || []).push(p); });
   const knownCodes = new Set(allMethods().map(m=>m.code));
   const monthOptions = useMemo(()=>{
     const s=new Set();
@@ -10404,8 +10522,11 @@ function ReceiptsView({ pmts, invoices, branches, externalSearchQ }){
               <td style={{fontWeight:600}}>{inv.account_name||'—'}</td>
               <td><MethodPill code={p.payment_method} small/>{isRef?<span className="small subtle"> · Refund</span>:null}</td>
               <td style={{textAlign:'right',fontWeight:700,color:isRef?'#DC2626':'var(--green-tx)'}}>{isRef?'−':''}RM{Math.abs(Number(p.amount)).toFixed(2)}</td>
-              <td style={{textAlign:'center'}}>
-                <button className="btn btn-ghost small" title="Print receipt" onClick={()=>printReceipt(p, inv)}>🖨</button>
+              <td style={{textAlign:'center',whiteSpace:'nowrap'}}>
+                <button className="btn btn-ghost small" title={isRef?'Print refund document':'Print receipt'}
+                  onClick={()=>printReceipt(p, inv, {againstReceipt:originalReceiptNumber(payByInvoice[p.invoice_id],p)})}>🖨</button>
+                {isRef&&p.proof_path&&<button className="btn btn-ghost small" style={{marginLeft:3}} title="Open the uploaded proof of transfer"
+                  onClick={()=>openRefundProof(p.proof_path)}>📎</button>}
               </td>
             </tr>;
           })}
@@ -12341,6 +12462,8 @@ function InvoiceDetailPanel({ invoice, lines, pmts, pendingCredits, isOverdue, m
   const [refDate,setRefDate]=useState(todayStr());
   const [refMethod,setRefMethod]=useState('cash');
   const [refReason,setRefReason]=useState('');
+  const [refRef,setRefRef]=useState('');
+  const [refProof,setRefProof]=useState(null);
   const [refBusy,setRefBusy]=useState(false);
   const paidTotal=Number(invoice.amount_paid)||0;
 
@@ -12409,8 +12532,14 @@ function InvoiceDetailPanel({ invoice, lines, pmts, pendingCredits, isOverdue, m
     if(!amt){ alert('Enter a valid refund amount.'); return; }
     setRefBusy(true);
     try{
-      await onRefund({ amount:amt, refundDate:refDate, method:refMethod, reason:refReason.trim()||null });
-      setShowRefundForm(false); setRefAmt(''); setRefReason('');
+      // Every key here has to match what refundInvoice destructures. The
+      // form used to send four of six and the reference was dropped on
+      // every refund ever taken, exactly as the payment form once dropped
+      // the method.
+      await onRefund({ amount:amt, refundDate:refDate, method:refMethod,
+                       reference:refRef.trim()||null, reason:refReason.trim()||null,
+                       proofFile:refProof });
+      setShowRefundForm(false); setRefAmt(''); setRefReason(''); setRefRef(''); setRefProof(null);
     }catch(err){ alert(err.message||'Failed to record refund'); }
     finally{ setRefBusy(false); }
   }
@@ -12560,7 +12689,15 @@ function InvoiceDetailPanel({ invoice, lines, pmts, pendingCredits, isOverdue, m
             <td style={{fontFamily:'monospace',fontSize:11}}>{p.receipt_number||'—'}</td>
             <td><MethodPill code={p.payment_method} small/>{isRef?<span className="small subtle"> · Refund</span>:null}</td>
             <td style={{textAlign:'right',fontWeight:700,color:isRef?'#DC2626':'var(--green-tx)'}}>{isRef?'−':''}RM {Math.abs(Number(p.amount)).toFixed(2)}</td>
-            <td><button className="btn btn-ghost small" title="Print receipt" onClick={()=>printReceipt(p,invoice)}>🖨 Receipt</button></td>
+            <td style={{whiteSpace:'nowrap'}}>
+              <button className="btn btn-ghost small" title={isRef?'Print refund document':'Print receipt'}
+                onClick={()=>printReceipt(p,invoice,{againstReceipt:originalReceiptNumber(pmts,p)})}>🖨 {isRef?'Refund':'Receipt'}</button>
+              {isRef&&<button className="btn btn-ghost small" style={{marginLeft:4}} title="Print the credit note for this refund"
+                onClick={()=>printCreditNoteFor(p,invoice,originalReceiptNumber(pmts,p))}>🧾 Credit note</button>}
+              {isRef&&p.proof_path&&<button className="btn btn-ghost small" style={{marginLeft:4}} title="Open the uploaded proof of transfer"
+                onClick={()=>openRefundProof(p.proof_path)}>📎 Proof</button>}
+              {isRef&&!p.proof_path&&<span className="small subtle" style={{marginLeft:6}} title="No transfer slip was uploaded with this refund">no proof</span>}
+            </td>
           </tr>; })}</tbody>
         </table>
       </div>
@@ -12586,7 +12723,19 @@ function InvoiceDetailPanel({ invoice, lines, pmts, pendingCredits, isOverdue, m
         <div className="field"><label>Date</label><input className="input" type="date" value={refDate} onChange={e=>setRefDate(e.target.value)} /></div>
         <div className="field"><label>Method</label><select className="select" value={refMethod} onChange={e=>setRefMethod(e.target.value)}>{activeMethods().map(m=><option key={m.code} value={m.code}>{m.label}</option>)}</select></div>
       </div>
+      <div className="field" style={{marginTop:8}}><label>Reference{refMethod!=='cash' && <span style={{color:'#DC2626'}}> *</span>}</label>
+        <input className="input" value={refRef} onChange={e=>setRefRef(e.target.value)}
+               placeholder="Bank transfer reference, cheque no., TNG id…" /></div>
       <div className="field" style={{marginTop:8}}><label>Reason (optional)</label><input className="input" value={refReason} onChange={e=>setRefReason(e.target.value)} placeholder="e.g. Parent withdrew, class cancelled" /></div>
+      <div className="field" style={{marginTop:8}}>
+        <label>Proof of payment back {refProof ? '' : <span className="small subtle">(recommended)</span>}</label>
+        <input className="input" type="file" accept="application/pdf,image/*"
+               onChange={e=>setRefProof(e.target.files?.[0]||null)} />
+        <div className="small subtle" style={{marginTop:4}}>
+          {refProof ? `\u2713 ${refProof.name}`
+            : 'The transfer slip, or a photo of the signed acknowledgement. PDF or image, up to 10 MB.'}
+        </div>
+      </div>
       <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:10}}>
         <button className="btn btn-ghost small" onClick={()=>setShowRefundForm(false)}>Cancel</button>
         <button className="btn btn-primary small" onClick={submitRefund} disabled={refBusy} style={{background:'#7C3AED',borderColor:'#7C3AED'}}>{refBusy?'Processing…':'Confirm Refund'}</button>
@@ -13094,9 +13243,21 @@ ${invoice.notes?`<div class="notes">${invoice.notes}</div>`:''}
   const w=window.open('','_blank'); if(w){w.document.write(html);w.document.close();}
 }
 
-function printReceipt(pmt, invoice){
+// `opts.againstReceipt` is the number of the receipt this refund reverses.
+// A refund printed without it is a piece of paper saying money left the
+// company with nothing on it saying which sale it came back out of.
+function printReceipt(pmt, invoice, opts){
   const logoUrl = window.location.origin + '/logo.png';
-  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${pmt.receipt_number||''}</title>
+  const isRefund = pmt.kind === 'refund' || Number(pmt.amount) < 0;
+  const againstReceipt = (opts && opts.againstReceipt) || '';
+  const docTitle  = isRefund ? 'REFUND' : 'RECEIPT';
+  const amtLabel  = isRefund ? 'Amount Refunded' : 'Amount Paid';
+  const stampTx   = isRefund ? 'REFUNDED' : 'PAID IN FULL';
+  const stampCol  = isRefund ? '#DC2626' : '#059669';
+  const footNote  = isRefund
+    ? 'Refund issued \u00b7 Star Swim Sdn Bhd'
+    : 'Thank you for your payment \u00b7 Star Swim Sdn Bhd';
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${docTitle==='REFUND'?'Refund':'Receipt'} ${pmt.receipt_number||''}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9pt;color:#1a1a1a;background:#fff}
@@ -13121,17 +13282,103 @@ body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9pt;color
     <img class="brand-logo" src="${logoUrl}" onerror="this.style.display='none'">
     <div class="brand-text">Star Swim Sdn Bhd 202501001260 (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak<br>TIN: C59796139050</div>
   </div>
-  <div style="text-align:right"><div class="rct-title">RECEIPT</div><div class="rct-num">${pmt.receipt_number||'—'}</div></div>
+  <div style="text-align:right"><div class="rct-title">${docTitle}</div><div class="rct-num">${pmt.receipt_number||'—'}</div></div>
 </div>
 <div class="row"><span class="row-label">Invoice</span><span class="row-val">${invoice.invoice_number||'—'}</span></div>
+${isRefund&&againstReceipt?`<div class="row"><span class="row-label">Against receipt</span><span class="row-val">${adminEsc(againstReceipt)}</span></div>`:''}
 <div class="row"><span class="row-label">Account</span><span class="row-val">${invoice.account_name||'—'}</span></div>
 <div class="row"><span class="row-label">Date</span><span class="row-val">${pmt.payment_date||'—'}</span></div>
-<div class="row"><span class="row-label">Payment Method</span><span class="row-val">${methodLabel(pmt.payment_method)}</span></div>
-${pmt.reference_number?`<div class="row"><span class="row-label">Reference</span><span class="row-val">${pmt.reference_number}</span></div>`:''}
-${pmt.notes?`<div class="row"><span class="row-label">Notes</span><span class="row-val">${pmt.notes}</span></div>`:''}
-<div class="row amount"><span>Amount Paid</span><span>RM ${Number(pmt.amount).toFixed(2)}</span></div>
-<div><span class="paid-stamp">PAID IN FULL</span></div>
-<div class="footer"><span>Thank you for your payment · Star Swim Sdn Bhd</span><span>Generated ${new Date().toLocaleDateString(undefined,{dateStyle:'long'})}</span></div>
+<div class="row"><span class="row-label">${isRefund?'Refunded By':'Payment Method'}</span><span class="row-val">${methodLabel(pmt.payment_method)}</span></div>
+${pmt.reference_number?`<div class="row"><span class="row-label">Reference</span><span class="row-val">${adminEsc(pmt.reference_number)}</span></div>`:''}
+${pmt.notes?`<div class="row"><span class="row-label">Notes</span><span class="row-val">${adminEsc(pmt.notes)}</span></div>`:''}
+<div class="row amount"><span>${amtLabel}</span><span>RM ${Math.abs(Number(pmt.amount)).toFixed(2)}</span></div>
+<div><span class="paid-stamp" style="border-color:${stampCol};color:${stampCol}">${stampTx}</span></div>
+<div class="footer"><span>${footNote}</span><span>Generated ${new Date().toLocaleDateString(undefined,{dateStyle:'long'})}</span></div>
+</div></body></html>`;
+  const w=window.open('','_blank'); if(w){w.document.write(html);w.document.close();}
+}
+
+// ── Credit note ────────────────────────────────────────────────────
+// A refund is two separate statements and they are not interchangeable.
+// The refund receipt says money left the bank. The credit note says the
+// sale itself was reduced — it is what LHDN e-invoicing wants against
+// the original invoice, and what an auditor reads to see why a paid
+// invoice no longer counts as revenue.
+//
+// `pmt` is the refund payment row (optional) — it supplies the method
+// and reference, so the note can say how the money actually went back.
+// The receipt a refund reverses: the first real payment on the invoice.
+// Partial payments mean there can be several; the earliest is the one a
+// customer will have in hand, and the credit note names the invoice
+// anyway, so an ambiguous case is still traceable.
+function originalReceiptNumber(pmts, exclude){
+  const rows = (pmts||[]).filter(p =>
+    p !== exclude && p.kind !== 'refund' && Number(p.amount) > 0 && p.receipt_number);
+  return rows.length ? rows[0].receipt_number : '';
+}
+
+// Fetched on click rather than held in state: credit notes are read once
+// in the life of a refund, and loading every one of them on every page
+// load to serve a button nobody presses is not worth the round trip.
+async function printCreditNoteFor(pmt, invoice, origReceipt){
+  let rows = await selectRows('credit_notes','*',`&payment_id=eq.${pmt.id}`).catch(()=>null);
+  if(!rows || !rows.length){
+    rows = await selectRows('credit_notes','*',
+      `&invoice_id=eq.${invoice.id}&order=issue_date.asc`).catch(()=>null);
+  }
+  if(!rows || !rows.length){
+    alert('No credit note was found for this refund. If the refund predates '
+        + 'credit notes, or supabase_refund_documents.sql has not been run, '
+        + 'there will not be one.');
+    return;
+  }
+  printCreditNote(rows[0], invoice, pmt, origReceipt);
+}
+
+function printCreditNote(cn, invoice, pmt, origReceipt){
+  const logoUrl = window.location.origin + '/logo.png';
+  const party = invoiceParty(invoice);
+  const amt = Math.abs(Number(cn.amount) || 0);
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Credit Note ${cn.credit_note_number||''}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:9pt;color:#1a1a1a;background:#fff}
+@page{size:A5 landscape;margin:6mm 9mm}
+.page{width:210mm;height:148mm;padding:5mm 7mm;display:flex;flex-direction:column;overflow:hidden}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:5pt;border-bottom:1pt solid #1a1a1a;margin-bottom:8pt}
+.brand-logo{height:28pt;object-fit:contain;display:block}
+.brand-text{font-size:6.5pt;color:#555;margin-top:3pt;line-height:1.5}
+.cn-title{font-size:10pt;font-weight:300;letter-spacing:.8px;color:#DC2626;margin-bottom:1pt}
+.cn-num{font-size:12pt;font-weight:300;letter-spacing:1px}
+.bill{font-size:7.5pt;color:#555;line-height:1.5;margin-bottom:7pt}
+.bill strong{font-size:9pt;color:#1a1a1a}
+.row{display:flex;justify-content:space-between;padding:4pt 0;border-bottom:1pt solid #f0f0f0;font-size:8.5pt}
+.row-label{color:#777}
+.row-val{font-weight:500}
+.row.amount{border-bottom:none;border-top:1.5pt solid #DC2626;margin-top:6pt;padding-top:6pt;font-size:12pt;font-weight:700;color:#DC2626}
+.note{margin-top:8pt;font-size:7pt;color:#777;line-height:1.6}
+.footer{margin-top:auto;padding-top:4pt;border-top:1pt solid #e5e5e5;font-size:6pt;color:#aaa;display:flex;justify-content:space-between}
+</style>
+<script>window.onload=function(){setTimeout(function(){window.print()},350)}<\/script>
+</head><body><div class="page">
+<div class="hdr">
+  <div>
+    <img class="brand-logo" src="${logoUrl}" onerror="this.style.display='none'">
+    <div class="brand-text">Star Swim Sdn Bhd 202501001260 (1602674-U)<br>No.137 Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak<br>TIN: C59796139050</div>
+  </div>
+  <div style="text-align:right"><div class="cn-title">CREDIT NOTE</div><div class="cn-num">${adminEsc(cn.credit_note_number)||'—'}</div></div>
+</div>
+<div class="bill"><strong>${adminEsc(invoice.account_name)||'—'}</strong>${party.line?`<br>${party.line}`:''}</div>
+<div class="row"><span class="row-label">Against invoice</span><span class="row-val">${adminEsc(invoice.invoice_number)||'—'}</span></div>
+${origReceipt?`<div class="row"><span class="row-label">Original receipt</span><span class="row-val">${adminEsc(origReceipt)}</span></div>`:''}
+${pmt&&pmt.receipt_number?`<div class="row"><span class="row-label">Refund receipt</span><span class="row-val">${adminEsc(pmt.receipt_number)}</span></div>`:''}
+<div class="row"><span class="row-label">Issue date</span><span class="row-val">${adminEsc(cn.issue_date)||'—'}</span></div>
+${pmt&&pmt.payment_method?`<div class="row"><span class="row-label">Refunded by</span><span class="row-val">${methodLabel(pmt.payment_method)}${pmt.reference_number?` &middot; ${adminEsc(pmt.reference_number)}`:''}</span></div>`:''}
+<div class="row"><span class="row-label">Reason</span><span class="row-val">${adminEsc(cn.reason)||'—'}</span></div>
+<div class="row amount"><span>Credit</span><span>RM ${amt.toFixed(2)}</span></div>
+<div class="note">This credit note reduces invoice ${adminEsc(invoice.invoice_number)||'—'} by RM ${amt.toFixed(2)}.
+The invoice is not cancelled and its original receipt remains valid for the amount actually kept.</div>
+<div class="footer"><span>Credit note &middot; Star Swim Sdn Bhd</span><span>Generated ${new Date().toLocaleDateString(undefined,{dateStyle:'long'})}</span></div>
 </div></body></html>`;
   const w=window.open('','_blank'); if(w){w.document.write(html);w.document.close();}
 }
