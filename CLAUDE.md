@@ -118,11 +118,15 @@ alone.
 
 | | |
 |---|---|
-| Legal name | **STAR SWIM SDN BHD** |
+| Legal name | **STAR SWIM SDN. BHD.** — with the full stops, as the certificate prints it |
 | SSM registration | **202501001260** (new 12-digit format) |
 | Former SSM number | 1602674-U (pre-2019 format) |
 | Incorporated | 8 January 2025 |
-| Registered address | 137, Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak, Malaysia |
+| **Registered address** | **B-2-13, Tingkat 2, Intan Business Centre 2, Lebuh Medan Ipoh, Bandar Baru Medan, 31400 Ipoh, Perak, Malaysia** |
+| Operating address | 137, Jalan Sultan Abdul Jalil, 30000 Ipoh, Perak — where lessons and the office are, and **not on the SSM register**: the Section 14 form records Business Address as NIL |
+| Director / authorised representative | **ANG KANG KEAM** (Anthony), Director |
+| Other directors | Chan Cheong Pin, Clara Chung Lai Sze |
+| MSIC codes | 85411 sports instruction · 82301 event management · 47631 retail of sports goods |
 | TIN (LHDN) | C59796139050 |
 | Employer number | E9617129307 |
 | SST number | none registered |
@@ -136,6 +140,24 @@ alone.
 12-digit number in 2019 and the old `1602674-U` is what most registries
 and verification services will fail to find. Where both are wanted the
 convention is `202501001260 (1602674-U)`.
+
+**Which address depends on who is asking.** Anything that will be checked
+against a register — a provider's compliance profile, LHDN, a bank —
+takes the **registered address**, because that is the only one SSM holds
+and the only one an authoritative lookup can confirm. Anything a customer
+reads — an invoice, the website, a receipt — takes the **operating
+address**, because that is where they actually come to swim. Twilio
+rejected the profile with error 18603, "the address you provided could
+not be verified", on the operating address alone.
+
+**The legal name carries full stops.** `STAR SWIM SDN. BHD.`, not
+`STAR SWIM SDN BHD`. An exact-match registry lookup fails on the
+difference, and did.
+
+**An authorised representative is the name on the IC**, not the name
+people use. SSM and the NRIC both read ANG KANG KEAM; a form filled in
+as "Anthony Ang" cannot be reconciled with the photo ID uploaded beside
+it, which is what Twilio's error 18604 is about.
 
 The invoice and receipt layouts in `app.js` still print only the old
 number, in `printInvoice`, `printInvoiceAndReceipt` and `printReceipt`.
