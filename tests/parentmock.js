@@ -95,6 +95,12 @@ Object.assign(RPC, {
   my_credits: () => ([]),
   my_attendance: () => ([]),
   mark_message_read: () => true,
+  // Enough for a whole sign-in to complete, so the suite can drive the
+  // loop a parent actually walks: out, number, code, back in. Without
+  // these the verify succeeds and claim_parent_account answers nothing,
+  // which the app correctly treats as being let in to no family.
+  claim_parent_account: () => ({ ok: true }),
+  touch_parent_login: () => true,
   // p_id is honoured. Pass the wrong key and nothing is flagged, which is
   // what the assertion is for.
   flag_message: (a) => {
@@ -144,6 +150,19 @@ http.createServer((req, res) => {
       let args = null;
       try { args = body ? JSON.parse(body) : null; } catch (_e) { args = null; }
       send(res, 200, JSON.stringify(fn ? fn(args) : []));
+    });
+  }
+  // The gate in front of the code. Answers the way the deployed function
+  // does now: known, and by SMS. channel is returned explicitly because
+  // the screen prints it to the parent, and a mock that left it out would
+  // let the app's own fallback answer instead of the server.
+  if (p === '/functions/v1/parent-signin') {
+    let body = '';
+    req.on('data', c => { body += c; });
+    return req.on('end', () => {
+      let a = null;
+      try { a = body ? JSON.parse(body) : null; } catch (_e) { a = null; }
+      send(res, 200, JSON.stringify({ known: true, phone: (a && a.phone) || '', channel: 'sms' }));
     });
   }
   if (p.startsWith('/auth/')) return send(res, 200, JSON.stringify({ access_token: 'demo' }));

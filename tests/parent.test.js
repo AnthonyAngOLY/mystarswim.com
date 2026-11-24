@@ -185,6 +185,110 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (n.offer !== 1)   throw new Error('the dispute button did not come back');
   });
 
+  // ── Getting out ───────────────────────────────────────────────────────
+  // The app had no sign-out at all. signOut() existed and nothing called
+  // it, so a parent who wanted off a shared phone had to clear site data,
+  // and anyone wanting to sign in as somebody else could not. Found by
+  // the person testing it, not by anything here.
+  await step('the signed-in family is a button, not just a label', async () => {
+    const b = page.locator('#whoBtn');
+    if (!(await b.count())) throw new Error('there is nothing to tap in the header');
+    if (!(await b.isVisible())) throw new Error('the account button is not visible');
+    if (!(await page.locator('#whoMenu').isHidden()))
+      throw new Error('the menu is open before anybody opened it');
+  });
+
+  await step('it opens on the number signed in, which settles whose app it is', async () => {
+    await page.locator('#whoBtn').click();
+    await page.waitForTimeout(250);
+    if (await page.locator('#whoMenu').isHidden()) throw new Error('the menu did not open');
+    const t = await page.locator('#whoPhone').innerText();
+    if (!/\d{6,}/.test(t)) throw new Error('it does not show the number: ' + JSON.stringify(t));
+  });
+
+  await step('tapping elsewhere shuts it', async () => {
+    // Low on the screen, clear of the header and the menu under it.
+    await page.mouse.click(60, 600);
+    await page.waitForTimeout(250);
+    if (!(await page.locator('#whoMenu').isHidden()))
+      throw new Error('a menu that only closes by its own button is closed by reloading');
+  });
+
+  // One handler for the rest of the suite. Registering a fresh `once` per
+  // step leaves the unfired one from a failed step behind, and the next
+  // dialog is then answered twice.
+  let answer = 'dismiss';
+  let asked = '';
+  page.on('dialog', d => {
+    asked = d.message();
+    if (answer === 'accept') d.accept(); else d.dismiss();
+  });
+
+  await step('signing out asks first, and a refusal keeps you in', async () => {
+    await page.locator('#whoBtn').click();
+    await page.waitForTimeout(200);
+    answer = 'dismiss'; asked = '';
+    await page.locator('#signOutBtn').click();
+    await page.waitForTimeout(400);
+    if (!asked) throw new Error('it signed out without asking');
+    if (!/text message|sms|code/i.test(asked))
+      throw new Error('it did not say getting back in costs a code: ' + JSON.stringify(asked));
+    if (!(await page.locator('#s-app').isVisible()))
+      throw new Error('saying no signed the parent out anyway');
+  });
+
+  await step('accepting signs out, and the typed number is not left behind', async () => {
+    await page.locator('#whoBtn').click();
+    await page.waitForTimeout(200);
+    answer = 'accept';
+    await page.locator('#signOutBtn').click();
+    await page.waitForTimeout(500);
+    if (!(await page.locator('#s-login').isVisible()))
+      throw new Error('it did not return to the sign-in screen');
+    const v = await page.locator('#phone').inputValue();
+    if (v) throw new Error('the last number is still in the box for the next person: ' + v);
+    const held = await page.evaluate(() => {
+      try { return localStorage.getItem('ssb.parent.session'); } catch (e) { return 'unreadable'; }
+    });
+    if (held) throw new Error('the session is still on the device after signing out');
+  });
+
+  await step('and signing back in is the same code-by-text it always was', async () => {
+    await page.locator('#phone').fill('0123456001');
+    await page.locator('#sendCode').click();
+    await page.waitForTimeout(600);
+    if (!(await page.locator('#s-otp').isVisible()))
+      throw new Error('it did not ask for a code after signing out');
+    const to = await page.locator('#otpSentTo').innerText();
+    if (!/text|sms/i.test(to))
+      throw new Error('it does not say the code comes by text: ' + JSON.stringify(to));
+  });
+
+  await step('the code gets you back in, which is the whole loop', async () => {
+    await page.locator('#code').fill('123456');
+    await page.locator('#verifyCode').click();
+    await page.waitForTimeout(800);
+    if (!(await page.locator('#s-app').isVisible()))
+      throw new Error('the code was accepted and the app did not open');
+    if (!(await page.locator('#whoBtn').isVisible()))
+      throw new Error('back in, but with no way out again');
+  });
+
+  await step('and the second sign-out clears the number the first one left', async () => {
+    // This is the assertion the first sign-out could not make: nothing
+    // had been typed into the box yet, so an empty box proved nothing.
+    // Now a number has been through it.
+    const before = await page.evaluate(() => document.getElementById('phone').value);
+    if (!before) throw new Error('the box was already empty, so this proves nothing again');
+    await page.locator('#whoBtn').click();
+    await page.waitForTimeout(200);
+    answer = 'accept';
+    await page.locator('#signOutBtn').click();
+    await page.waitForTimeout(500);
+    const after = await page.locator('#phone').inputValue();
+    if (after) throw new Error('the last person\u2019s number is waiting for the next: ' + after);
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

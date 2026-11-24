@@ -41,8 +41,22 @@
     display:flex; align-items:center; gap:10px;
   }
   header img{height:26px; width:auto}
-  header .who{margin-left:auto; text-align:right; font-size:12.5px; color:var(--muted); line-height:1.3}
+  header .who{margin-left:auto; display:flex; align-items:center; gap:6px;
+    text-align:right; font-size:12.5px; color:var(--muted); line-height:1.3;
+    background:none; border:0; padding:4px 2px 4px 8px; font-family:inherit; cursor:pointer}
   header .who b{display:block; color:var(--text); font-size:13.5px}
+  header .who .who-chev{font-size:10px; color:var(--muted); transition:transform .15s}
+  header .who[aria-expanded="true"] .who-chev{transform:rotate(180deg)}
+  /* Anchored to the header, which is the sticky positioned ancestor. */
+  .who-menu{position:absolute; top:100%; right:12px; z-index:30; min-width:180px;
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    box-shadow:0 8px 24px rgba(16,42,67,.14); overflow:hidden; margin-top:4px}
+  .who-menu-num{padding:10px 14px 8px; font-size:12px; color:var(--muted);
+    border-bottom:1px solid var(--border)}
+  .who-menu-item{display:block; width:100%; text-align:left; padding:12px 14px;
+    font-size:14px; font-weight:600; font-family:inherit; color:var(--text);
+    background:none; border:0; cursor:pointer}
+  .who-menu-item:active{background:var(--slate-bg,#F1F5F9)}
 
   main{padding:14px 16px 90px; max-width:520px; margin:0 auto}
   .card{
@@ -199,7 +213,18 @@
 <section id="s-app" class="hidden">
   <header>
     <img src="../logo.png" alt="Star Swim">
-    <div class="who"><b id="whoName">—</b><span id="whoKids"></span></div>
+    <!-- The name is the button. It is where a person taps to ask "who am
+         I signed in as", which is the same question that precedes wanting
+         out, so the two live together rather than in a settings screen
+         this app does not otherwise need. -->
+    <button class="who" id="whoBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+      <span class="who-txt"><b id="whoName">—</b><span id="whoKids"></span></span>
+      <span class="who-chev" aria-hidden="true">▾</span>
+    </button>
+    <div class="who-menu hidden" id="whoMenu" role="menu">
+      <div class="who-menu-num" id="whoPhone"></div>
+      <button class="who-menu-item" id="signOutBtn" type="button" role="menuitem">Sign out</button>
+    </div>
   </header>
 
   <main>

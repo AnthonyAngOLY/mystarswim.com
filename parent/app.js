@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 4;
+  var BUILD = 5;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -164,7 +164,29 @@
   function signOut() {
     session = null; family = null;
     try { localStorage.removeItem(KEY); } catch (e) {}
+    closeWhoMenu();
+    // Left blank on purpose. Signing out is most often about handing the
+    // phone to somebody else, and a number already in the box invites
+    // the next person to tap Send and wait for a code that goes to a
+    // phone they are not holding.
+    if ($('phone')) $('phone').value = '';
+    note($('loginNote'), '');
+    note($('otpNote'), '');
     hide($('s-app')); hide($('s-otp')); show($('s-login'));
+  }
+
+  // ── The account menu ─────────────────────────────────────────────────
+  function closeWhoMenu() {
+    var m = $('whoMenu'), b = $('whoBtn');
+    if (m) m.classList.add('hidden');
+    if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  function toggleWhoMenu() {
+    var m = $('whoMenu'), b = $('whoBtn');
+    if (!m) return;
+    var open = m.classList.contains('hidden');
+    m.classList.toggle('hidden', !open);
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
 
   // ── Signing in ───────────────────────────────────────────────────────
@@ -251,6 +273,11 @@
       $('whoName').textContent = family.name;
       var n = (family.children || []).length;
       $('whoKids').textContent = n === 1 ? '1 swimmer' : n + ' swimmers';
+      // The number in the menu, not on the header. On a phone two people
+      // share it is the thing that settles whose app this is, and it is
+      // worth a tap to see rather than a permanent line of small print.
+      $('whoPhone').textContent = family.phone
+        ? 'Signed in as ' + family.phone : 'Signed in';
       wkStart = mondayOf(todayKL());
       wkDay = todayKL();
       setView('home');
@@ -727,6 +754,30 @@
     }).then(function () {
       btn.disabled = false; btn.textContent = 'Send it again';
     });
+  });
+
+  $('whoBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleWhoMenu();
+  });
+  // Anywhere else, and Escape, shuts it. A menu that only closes by
+  // tapping the thing that opened it is a menu people close by reloading.
+  document.addEventListener('click', function (e) {
+    if ($('whoMenu').classList.contains('hidden')) return;
+    if ($('whoMenu').contains(e.target)) return;
+    closeWhoMenu();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeWhoMenu();
+  });
+  $('signOutBtn').addEventListener('click', function () {
+    // Confirmed, because getting back in is not free: it costs an SMS,
+    // a wait, and six of them an hour is the whole allowance.
+    if (!window.confirm('Sign out?\n\nYou will need a new code by text message to sign back in.')) {
+      closeWhoMenu();
+      return;
+    }
+    signOut();
   });
 
   $('backToPhone').addEventListener('click', function () {
