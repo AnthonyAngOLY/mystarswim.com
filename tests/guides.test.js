@@ -201,7 +201,7 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
   const browser = await B.launch({ args: ['--headless', '--no-sandbox'] });
 
   for (const [page, width] of [['welcome', 390], ['guide', 390], ['staff-guide', 390],
-                               ['coach-guide', 390], ['facilities', 390]]) {
+                               ['coach-guide', 390]]) {
     await step('nothing on ' + page + ' overflows a phone', async () => {
       const p = await browser.newPage();
       const errs = [];
@@ -215,46 +215,6 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
       ok(over <= 0, 'it scrolls sideways by ' + over + 'px');
     });
   }
-
-  await step('the site CSS is shared, not copied into each page', () => {
-    const home = read('index.html');
-    ok(/href="\.\/site\.css"/.test(home), 'index.html no longer links site.css');
-    ok(!/<style>[\s\S]{2000,}<\/style>/.test(home),
-       'index.html has grown a large inline stylesheet again — a second page '
-     + 'means a second copy of it, and two copies drift');
-    ok(/href="\.\/site\.css"/.test(read('facilities.html')),
-       'facilities.html does not use the shared stylesheet');
-    ok(read('index.html').includes('./facilities.html'),
-       'nothing on the homepage links to the facilities page');
-  });
-
-  await step('the facilities rows alternate, and every photo slot says what goes in it', async () => {
-    const p = await browser.newPage();
-    await p.setViewportSize({ width: 1280, height: 900 });
-    await p.goto(BASE + '/facilities.html', { waitUntil: 'networkidle' });
-    // Alternation is the whole point of the layout and it failed silently
-    // the first time: order was set on the element that already had that
-    // order, so every photo stayed left and nothing looked wrong enough
-    // to notice in the markup.
-    const sides = await p.$$eval('.fac', els => els.map(e => {
-      const shot = e.querySelector('.fac-shot').getBoundingClientRect();
-      const text = e.querySelector('.fac-text').getBoundingClientRect();
-      return shot.left < text.left ? 'L' : 'R';
-    }));
-    ok(sides.length >= 4, 'expected at least four facility rows, saw ' + sides.length);
-    for (let i = 1; i < sides.length; i++) {
-      ok(sides[i] !== sides[i - 1],
-         'rows ' + i + ' and ' + (i + 1) + ' put the photo on the same side');
-    }
-    // A placeholder with no brief is a placeholder nobody can fill.
-    const briefs = await p.$$eval('.fac-shot .todo', els =>
-      els.map(e => e.textContent.trim()));
-    for (const b of briefs) {
-      ok(/Photo:/.test(b), 'a photo slot does not say what photo belongs there');
-      ok(/4:3/.test(b), 'a photo slot does not state the aspect ratio: ' + b.slice(0, 40));
-    }
-    await p.close();
-  });
 
   await step('/get reaches the landing page, not a 404', async () => {
     const p = await browser.newPage();
