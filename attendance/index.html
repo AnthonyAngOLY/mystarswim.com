@@ -230,6 +230,13 @@
   .wkrow:first-of-type{border-top:none}
   .wkrow-time{font-weight:700; font-size:14px}
   .wkrow-where{font-size:13px; color:var(--muted); flex:1 1 auto; min-width:0}
+  /* Who else is on. flex-basis:100% puts it on its own line under the
+     time and place rather than competing with them for the row. */
+  .wkrow-mates{flex:1 0 100%; font-size:12.5px; line-height:1.5; color:var(--text);
+    background:var(--slate-bg); border-radius:8px; padding:5px 8px; margin-top:3px}
+  .wkrow-mates b{font-weight:700}
+  .wkrow-mates .mate-when{color:var(--muted); font-weight:400}
+  .wkrow-alone{flex:1 0 100%; font-size:12.5px; color:var(--muted); margin-top:3px}
 
   .wk-head{display:flex; align-items:center; gap:8px; margin-bottom:10px}
   .wk-label{flex:1; text-align:center; font-size:15px; font-weight:700}

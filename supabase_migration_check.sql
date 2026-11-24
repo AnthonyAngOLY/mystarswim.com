@@ -254,6 +254,17 @@ chk (ord, file, adds, state) as (values
                                            and src like '%roster_week_is_live%')
              and exists (select 1 from fn where n='mark_attendance'
                                             and src like '%attendance_unpaid%')
+           then 'IN' else 'NOT IN' end),
+  (52, 'supabase_refund_documents.sql', 'credit notes, refund references, proof of transfer',
+      case when to_regclass('public.credit_notes') is not null
+           then 'IN' else 'NOT IN' end),
+  (53, 'supabase_roster_buddies_ahead.sql', 'who else is on, for tomorrow and after',
+      -- Two markers: the new span function, and the draft gate on the
+      -- old single-date one. The first without the second means an older
+      -- copy of this file, which answered about unpublished weeks.
+      case when exists (select 1 from fn where n='get_my_roster_buddies')
+             and exists (select 1 from fn where n='get_my_shift_buddies'
+                                            and src like '%roster_week_is_live%')
            then 'IN' else 'NOT IN' end)
 )
 -- ════════════════════════════════════════════════════════════════════════

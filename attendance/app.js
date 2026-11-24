@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 17;
+  var BUILD = 18;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -2275,13 +2275,34 @@
     box.innerHTML = '<p class="empty">Loading…</p>';
     $('wkmTotal').textContent = '';
 
-    api('/rest/v1/shifts?select=id,shift_date,start_time,end_time,status,is_void,'
-      + 'locations(name),shift_categories(name)'
-      + '&shift_date=gte.' + from + '&shift_date=lte.' + to + scope
-      + '&order=shift_date.asc,start_time.asc')
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (rows) {
-        rows = (rows || []).filter(function (s) { return !s.is_void; });
+    var tomorrow = addDaysISO(todayKL(), 1);
+    Promise.all([
+      api('/rest/v1/shifts?select=id,shift_date,start_time,end_time,status,is_void,'
+        + 'locations(name),shift_categories(name)'
+        + '&shift_date=gte.' + from + '&shift_date=lte.' + to + scope
+        + '&order=shift_date.asc,start_time.asc')
+        .then(function (r) { return r.ok ? r.json() : []; }),
+      // Who else is on, for tomorrow onward only. Today's answer is
+      // already on the Today screen beside the check-in button, and for a
+      // day already gone it tells a worker something they were there for.
+      //
+      // One call for the whole span rather than one per day: this screen
+      // opens on pool-deck wifi. A database without the function yet
+      // answers 404, which lands here as an empty list and leaves the
+      // week looking exactly as it did before.
+      (to < tomorrow ? Promise.resolve([])
+        : rpc('get_my_roster_buddies', {
+            p_from: from < tomorrow ? tomorrow : from, p_to: to
+          }).catch(function () { return []; })),
+      // Why the week is empty, when it is. "Nothing rostered" and "not
+      // published yet" look identical to the worker and mean opposite
+      // things: one is a day off, the other is a roster still being
+      // written.
+      rpc('roster_week_state', { p_week_start: wkStart }).catch(function () { return null; })
+    ]).then(function (res) {
+        var rows = (res[0] || []).filter(function (s) { return !s.is_void; });
+        var mates = res[1] || [];
+        var wkState = res[2] || null;
         var today = todayKL();
         var hours = 0;
         rows.forEach(function (s) { hours += spanHours(s.start_time, s.end_time); });
@@ -2289,13 +2310,26 @@
         $('wkmTotal').textContent = rows.length
           ? rows.length + (rows.length === 1 ? ' session · ' : ' sessions · ')
             + hours.toFixed(hours % 1 ? 1 : 0) + (hours === 1 ? ' hour' : ' hours')
-          : 'Nothing rostered this week.';
+          : (wkState && wkState.live === false
+              ? 'This week’s roster is not published yet.'
+              : 'Nothing rostered this week.');
 
         if (!rows.length) {
-          box.innerHTML = '<p class="empty">No sessions this week. '
-            + 'If that looks wrong, speak to your manager.</p>';
+          box.innerHTML = wkState && wkState.live === false
+            ? '<p class="empty">The roster for this week has not been published yet. '
+              + 'It appears here once your manager puts it up.</p>'
+            : '<p class="empty">No sessions this week. '
+              + 'If that looks wrong, speak to your manager.</p>';
           return;
         }
+
+        // Keyed by shift, not by day: two sessions on one day can be at
+        // two different pools, and the people at one are not the people
+        // at the other.
+        var mateBy = {};
+        mates.forEach(function (m) {
+          (mateBy[m.shift_id] = mateBy[m.shift_id] || []).push(m);
+        });
 
         var byDay = {};
         rows.forEach(function (s) { (byDay[s.shift_date] = byDay[s.shift_date] || []).push(s); });
@@ -2321,6 +2355,7 @@
                    +   '<div class="wkrow-time">' + esc(prettyTime(s.start_time))
                    +     ' – ' + esc(prettyTime(s.end_time)) + '</div>'
                    +   '<div class="wkrow-where">' + esc([place, cat].filter(Boolean).join(' · ')) + '</div>'
+                   +   matesLine(iso, today, mateBy[s.id])
                    // Only once a session is over does its outcome mean
                    // anything. A "Scheduled" chip on Thursday's work tells
                    // nobody anything they did not already know.
@@ -2337,6 +2372,27 @@
       .catch(function (e) {
         box.innerHTML = '<div class="note err">' + esc(readableError(e.message, OFFLINE)) + '</div>';
       });
+  }
+
+  // "Also here" under a session on the week screen.
+  //
+  // Only tomorrow onward: today's is on the Today screen next to the
+  // check-in button, and a past day is a day the worker was at.
+  //
+  // A future day with nobody else on it says so out loud rather than
+  // printing nothing. Nothing is what a missing feature looks like, and
+  // the difference matters at 7am: being the only one on deck is the
+  // thing worth knowing in advance.
+  function matesLine(iso, today, list) {
+    if (iso <= today) return '';
+    if (!list || !list.length) return '<div class="wkrow-alone">On your own at this session.</div>';
+    return '<div class="wkrow-mates">Also here: ' + list.map(function (m) {
+      return '<b>' + esc(m.buddy_name || '—') + '</b>'
+           + (m.buddy_start && m.buddy_end
+              ? ' <span class="mate-when">' + esc(prettyTime(m.buddy_start))
+                + '–' + esc(prettyTime(m.buddy_end)) + '</span>'
+              : '');
+    }).join(' · ') + '</div>';
   }
 
   function loadHistory() {
