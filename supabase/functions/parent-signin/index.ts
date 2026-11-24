@@ -31,11 +31,14 @@
 // often does not ring. A confused parent who calls the office is worth
 // more than a closed mouth.
 //
-// RATE LIMITED BY NUMBER AND BY CALLER
+// RATE LIMITED, AND LOGGED, IN THE DATABASE
 // The check is cheap but not free, and a known number could still be
-// used to spray messages at a real customer. Six sends per number per
-// hour, which is far more than a person needs and far less than a
-// nuisance requires.
+// used to spray messages at a real customer. A cooldown between codes,
+// a cap per hour and a cap per day, all counted in parent_otp_sends
+// where they survive this function being recycled, and all adjustable
+// from the admin screen. Every attempt is a row, refusals included:
+// a run of them against numbers that are not ours is what probing
+// looks like, and it is invisible if only successes are written.
 //
 // Deploy:  supabase functions deploy parent-signin
 // Secrets: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, both injected by
@@ -88,30 +91,16 @@ function e164(raw: unknown): string {
   return "+60" + d;
 }
 
-// In memory, per instance. Not a fortress — an edge function can be
-// recycled and the count goes with it — but enough to turn a script
-// that sends ten thousand messages into one that sends a handful.
-const recent = new Map<string, number[]>();
-const WINDOW_MS = 60 * 60 * 1000;
-const MAX_PER_WINDOW = 6;
-
-function tooMany(phone: string): boolean {
-  const now = Date.now();
-  const seen = (recent.get(phone) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (seen.length >= MAX_PER_WINDOW) {
-    recent.set(phone, seen);
-    return true;
-  }
-  seen.push(now);
-  recent.set(phone, seen);
-  // Keep the map from growing without bound on a long-lived instance.
-  if (recent.size > 5000) {
-    for (const [k, v] of recent) {
-      if (!v.some((t) => now - t < WINDOW_MS)) recent.delete(k);
-    }
-  }
-  return false;
-}
+// The gate and the caps live in the database now, in
+// parent_signin_check(). They were here, in a Map held in this
+// instance's memory, and Supabase recycles instances: the count went
+// with them, so "six an hour" was really six per instance lifetime,
+// which can be minutes. A limit that resets when the platform feels
+// like it is not a limit.
+//
+// Moving it also put the gate and the log in the same transaction as
+// the decision, so two requests arriving together cannot both read a
+// count below the cap and both send.
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -135,45 +124,28 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
-  // Either number on the account can be the one they sign in with, but
-  // only the active one receives the code — that is the rule the
-  // database already holds in parent_signin_phone().
-  const { data, error } = await db
-    .from("parent_accounts")
-    .select("id, phone_primary, phone_secondary, active_phone")
-    .or(`phone_primary.eq.${phone},phone_secondary.eq.${phone}`)
-    .limit(2);
+  // One call decides everything and records the attempt: the active
+  // number only, on an account with at least one active swimmer, inside
+  // the cooldown and the hourly and daily caps. The words of every
+  // refusal come from there too, so the rule and what a parent is told
+  // cannot drift apart.
+  const { data: gate, error } = await db.rpc("parent_signin_check", { p_phone: phone });
 
   if (error) {
-    console.error("lookup failed", error.message);
+    console.error("gate failed", error.message);
     return reply({ error: "We could not check that just now. Please try again." }, 500);
   }
-
-  if (!data || data.length === 0) {
+  if (!gate || gate.ok !== true) {
+    // An unknown number and an archived account answer identically, by
+    // design: telling them apart tells somebody trying numbers which
+    // ones are real. 429 only where waiting is the remedy.
+    const status = gate && gate.known === true ? 429 : 200;
     return reply({
-      known: false,
-      error: "We do not have that number on file. Call the centre and we will add it.",
-    });
-  }
-
-  // Two accounts answering to one number is a data fault, not a sign-in
-  // problem, and signing either of them in would be a guess about whose
-  // children to show. It is refused and the office is told.
-  if (data.length > 1) {
-    console.error("two accounts share", phone);
-    return reply({
-      known: false,
-      error:
-        "That number is on two accounts, so we cannot tell which family it is. " +
-        "Call the centre and we will sort it out.",
-    });
-  }
-
-  if (tooMany(phone)) {
-    return reply({
-      known: true,
-      error: "That is a lot of codes. Wait an hour, or call the centre.",
-    }, 429);
+      known: (gate && gate.known) === true,
+      wait_sec: gate ? gate.wait_sec : undefined,
+      error: (gate && gate.error) ||
+        "We could not send a code just now. Please try again shortly.",
+    }, status);
   }
 
   // Known, and allowed. Now ask Supabase to send the code. create_user is
@@ -205,6 +177,16 @@ Deno.serve(async (req) => {
     usedChannel = "sms";
   }
 
+  // What Twilio was actually asked to do, against the row the gate
+  // wrote. Without this the log says a message was allowed and never
+  // whether it went, which is the half that explains a bill.
+  await db.rpc("parent_signin_sent", {
+    p_log: gate.log_id,
+    p_ok: out.ok,
+    p_channel: usedChannel,
+    p_error: out.ok ? null : `${out.status} ${out.text}`.slice(0, 500),
+  }).catch((e: unknown) => console.error("could not record the send", e));
+
   if (!out.ok) {
     console.error("otp send failed", out.status, out.text);
     return reply({
@@ -213,5 +195,6 @@ Deno.serve(async (req) => {
     }, 502);
   }
 
-  return reply({ known: true, phone, channel: usedChannel });
+  return reply({ known: true, phone, channel: usedChannel,
+                 cooldown_sec: gate.cooldown_sec });
 });

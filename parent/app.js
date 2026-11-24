@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 5;
+  var BUILD = 6;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -219,9 +219,18 @@
         // registered. This read 'whatsapp' while no WhatsApp sender
         // existed, which would have had the app tell a parent to look
         // somewhere no message was ever going to arrive.
-        if (r.ok && d && d.known === true && !d.error) return d.channel || 'sms';
-        throw new Error((d && d.error)
+        // Resolves with both, because the caller needs the channel for
+        // what it tells the parent and the cooldown for how long it
+        // holds the resend button.
+        if (r.ok && d && d.known === true && !d.error) {
+          return { channel: d.channel || 'sms', cooldownSec: Number(d.cooldown_sec) || 0 };
+        }
+        var err = new Error((d && d.error)
           || 'We could not send a code just now. Please try again shortly.');
+        // Carried, not swallowed: the countdown on the resend button is
+        // the server's number when the server gave one.
+        if (d && d.wait_sec) err.waitSec = Number(d.wait_sec) || 0;
+        throw err;
       });
     });
   }
@@ -717,7 +726,8 @@
     note($('loginNote'), '');
     this.disabled = true; this.textContent = 'Sending…';
     var btn = this;
-    sendCode(p).then(function (channel) {
+    sendCode(p).then(function (out) {
+      var channel = out.channel;
       pendingPhone = p;
       // Which way it went matters: somebody waiting on WhatsApp will not
       // think to look in their text messages.
@@ -726,6 +736,7 @@
       note($('otpNote'), '');
       $('code').value = '';
       hide($('s-login')); show($('s-otp'));
+      holdResend(out.cooldownSec || RESEND_WAIT);
       $('code').focus();
     }).catch(function (e) {
       note($('loginNote'), e.message, true);
@@ -745,14 +756,58 @@
     });
   });
 
+  // ── Send it again, but not four times in ten seconds ─────────────────
+  // Every tap is a message Twilio charges for. A parent who does not see
+  // the SMS within a few seconds taps this again, and again — which is
+  // the ordinary way the bill grows, far more than anything deliberate.
+  //
+  // The server refuses inside its own cooldown anyway and says how long
+  // is left. This is the same rule said earlier and visibly, so the
+  // parent waits because the screen told them to rather than because a
+  // tap did nothing. Counting down beats a dead button: a button that
+  // does not respond reads as broken, and broken is what people tap
+  // harder.
+  var resendTimer = null;
+  // Only a fallback, for a server too old to say. The real number comes
+  // back with the permission to send.
+  var RESEND_WAIT = 60;
+
+  function holdResend(seconds) {
+    var btn = $('resendCode');
+    var left = Math.max(1, Math.ceil(seconds || RESEND_WAIT));
+    if (resendTimer) clearInterval(resendTimer);
+    btn.disabled = true;
+    var tick = function () {
+      btn.textContent = 'Send it again in ' + left + 's';
+      if (left <= 0) {
+        clearInterval(resendTimer); resendTimer = null;
+        btn.disabled = false; btn.textContent = 'Send it again';
+        return;
+      }
+      left--;
+    };
+    tick();
+    resendTimer = setInterval(tick, 1000);
+  }
+
+  function releaseResend() {
+    if (resendTimer) { clearInterval(resendTimer); resendTimer = null; }
+    var btn = $('resendCode');
+    btn.disabled = false; btn.textContent = 'Send it again';
+  }
+
   $('resendCode').addEventListener('click', function () {
     var btn = this; btn.disabled = true; btn.textContent = 'Sending…';
-    sendCode(pendingPhone).then(function (channel) {
-      note($('otpNote'), 'Sent again' + (channel === 'sms' ? ', by SMS.' : ', on WhatsApp.'));
+    sendCode(pendingPhone).then(function (out) {
+      note($('otpNote'), 'Sent again' + (out.channel === 'sms' ? ', by SMS.' : ', on WhatsApp.'));
+      holdResend(out.cooldownSec || RESEND_WAIT);
     }).catch(function (e) {
       note($('otpNote'), e.message, true);
-    }).then(function () {
-      btn.disabled = false; btn.textContent = 'Send it again';
+      // The server says how many seconds are left when it refuses for
+      // the cooldown. Honour its figure over ours: the two can differ if
+      // the office changes the setting, and the parent should be told
+      // the truth rather than our guess at it.
+      if (e.waitSec) holdResend(e.waitSec); else releaseResend();
     });
   });
 
@@ -781,6 +836,7 @@
   });
 
   $('backToPhone').addEventListener('click', function () {
+    releaseResend();
     hide($('s-otp')); show($('s-login')); note($('loginNote'), '');
   });
 

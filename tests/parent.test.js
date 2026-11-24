@@ -264,7 +264,76 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
       throw new Error('it does not say the code comes by text: ' + JSON.stringify(to));
   });
 
+  // ── Send it again, but not four times in ten seconds ──────────────────
+  // Every tap is a message Twilio charges for, and a parent who does not
+  // see the SMS in ten seconds taps it again. That, rather than anything
+  // deliberate, is the ordinary way the bill grows.
+  await step('the resend button is held, and says for how long', async () => {
+    const btn = page.locator('#resendCode');
+    if (!(await btn.isDisabled()))
+      throw new Error('it can be tapped the instant the first code is sent');
+    const t = await btn.innerText();
+    if (!/\d+\s*s/.test(t))
+      throw new Error('a dead button reads as broken, and broken is what people tap harder: '
+                      + JSON.stringify(t));
+  });
+
+  await step('and the countdown actually counts', async () => {
+    const read = async () => {
+      const m = (await page.locator('#resendCode').innerText()).match(/(\d+)\s*s/);
+      return m ? Number(m[1]) : null;
+    };
+    const first = await read();
+    if (first === null) throw new Error('no number on the button');
+    await page.waitForTimeout(1100);
+    const later = await read();
+    // Gone entirely is fine -- a two-second hold can finish inside the
+    // wait. Still showing the same number is not.
+    if (later !== null && later >= first) throw new Error('it is frozen at ' + first);
+  });
+
+  await step("the hold is the server's length, not a number in the app", async () => {
+    // The mock says two seconds. Sixty is the app's fallback, and if the
+    // button is still held after three seconds that fallback is what ran
+    // -- which means the office changing the setting would change
+    // nothing a parent experiences.
+    await page.waitForTimeout(3000);
+    if (await page.locator('#resendCode').isDisabled())
+      throw new Error('still held after 3s, so it used its own 60 rather than the server\u2019s 2');
+    const t = await page.locator('#resendCode').innerText();
+    if (/\d+\s*s/.test(t)) throw new Error('it is still counting: ' + JSON.stringify(t));
+  });
+
+  await step('and leaving the code screen cancels the hold', async () => {
+    await page.locator('#resendCode').click();     // starts another hold
+    await page.waitForTimeout(400);
+    await page.locator('#backToPhone').click();
+    await page.waitForTimeout(300);
+    if (await page.locator('#resendCode').isDisabled())
+      throw new Error('a timer from the last attempt is still holding the button down');
+  });
+
+  await step("a server cooldown is passed on in the server's own words", async () => {
+    // Refused on the FIRST send, which keeps the parent on the number
+    // screen -- so the message has to land there, not on the code screen
+    // they never reached.
+    await page.request.get(BASE + '/__cool?sec=2');
+    await page.locator('#phone').fill('0123456001');
+    await page.locator('#sendCode').click();
+    await page.waitForTimeout(800);
+    if (await page.locator('#s-otp').isVisible())
+      throw new Error('a refused send still moved them on to type a code that was never sent');
+    const said = await page.locator('#loginNote').innerText();
+    if (!/2 more seconds/.test(said))
+      throw new Error("it did not pass on the server's wait: " + JSON.stringify(said));
+    const btn = await page.locator('#sendCode').isDisabled();
+    if (btn) throw new Error('the send button was left disabled after a refusal');
+  });
+
   await step('the code gets you back in, which is the whole loop', async () => {
+    // The refusal above spent the mock's one cooldown; this send goes.
+    await page.locator('#sendCode').click();
+    await page.waitForTimeout(800);
     await page.locator('#code').fill('123456');
     await page.locator('#verifyCode').click();
     await page.waitForTimeout(800);

@@ -33,6 +33,10 @@ const BODY = [
 
 const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 
+// Set by /__cool, spent by the next send. Lets a test drive the
+// countdown without waiting the real sixty seconds.
+const COOL = { sec: 0 };
+
 const RPC = {
   my_family: () => ({
     ok: true, account_id: 'acct-1', display_name: 'Kwan Suk Lee',
@@ -156,13 +160,29 @@ http.createServer((req, res) => {
   // does now: known, and by SMS. channel is returned explicitly because
   // the screen prints it to the parent, and a mock that left it out would
   // let the app's own fallback answer instead of the server.
+  // Makes the next sign-in send answer with a cooldown refusal, so the
+  // countdown can be driven without a test that waits a real minute.
+  if (p === '/__cool') {
+    COOL.sec = Number(new URL(req.url, 'http://x').searchParams.get('sec') || 0);
+    return send(res, 200, JSON.stringify(COOL));
+  }
+
   if (p === '/functions/v1/parent-signin') {
     let body = '';
     req.on('data', c => { body += c; });
     return req.on('end', () => {
       let a = null;
       try { a = body ? JSON.parse(body) : null; } catch (_e) { a = null; }
-      send(res, 200, JSON.stringify({ known: true, phone: (a && a.phone) || '', channel: 'sms' }));
+      if (COOL.sec) {
+        const sec = COOL.sec; COOL.sec = 0;   // one refusal, then normal
+        return send(res, 429, JSON.stringify({ known: true, wait_sec: sec,
+          error: 'We have just sent one. Give it ' + sec + ' more seconds.' }));
+      }
+      // Two seconds rather than sixty, so the countdown and the release
+      // can both be driven inside a test run. The app must take this
+      // figure from here, not from its own fallback.
+      send(res, 200, JSON.stringify({ known: true, phone: (a && a.phone) || '',
+                                      channel: 'sms', cooldown_sec: 2 }));
     });
   }
   if (p.startsWith('/auth/')) return send(res, 200, JSON.stringify({ access_token: 'demo' }));

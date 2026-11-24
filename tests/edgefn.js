@@ -97,6 +97,12 @@ function stubClient(opts) {
       calls.rpc.push([name, args]);
       const f = (o.rpc || {})[name];
       if (!f) return { data: null, error: { message: 'no such function ' + name } };
+      // A test returns the whole supabase-js envelope, {data, error} --
+      // that is the convention the public-intake suite already uses, and
+      // it is passed through untouched. Wrapping bare values here
+      // instead broke every one of those tests, and sniffing for an
+      // `error` key to decide read a perfectly good refusal (which
+      // carries one) as a transport failure.
       return f(args);
     },
     // The query builder, as much of it as this function uses. Every
