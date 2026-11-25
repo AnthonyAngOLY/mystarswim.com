@@ -9670,6 +9670,120 @@ function PackageEditor({
 // the new thing; the database does that on its own, and this screen says
 // so before you save rather than after.
 // ============================================================================
+// The office's certificate list. Separate from the syllabus editor it
+// sits under, because one is set up once a year and the other is read
+// every week — and because a list that reloads whenever somebody renames
+// a task is a list nobody keeps open.
+function CertificatesPanel() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  const [showGiven, setShowGiven] = useState(false);
+  async function load() {
+    try {
+      setRows((await rest('rpc/certificates_pending', {
+        method: 'POST',
+        body: '{}'
+      })) || []);
+      setErr('');
+    } catch (e) {
+      setErr(e.message);
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, []);
+  async function toggle(r) {
+    const given = !!r.claimed_at;
+    if (given && !confirm(`Mark ${r.student_name}'s ${r.milestone} certificate as NOT given?\n\n` + 'Use this only if it was recorded by mistake.')) return;
+    try {
+      const res = await rest('rpc/claim_certificate', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_student: r.student_id,
+          p_milestone: r.milestone_id,
+          p_claimed: !given
+        })
+      });
+      if (!res || res.ok !== true) throw new Error(res?.error || 'Could not save that.');
+      await load();
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+  if (rows === null) return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…"));
+  const waiting = rows.filter(r => !r.claimed_at);
+  const given = rows.filter(r => r.claimed_at);
+  const shown = showGiven ? given : waiting;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      marginBottom: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800
+    }
+  }, "🏅 Certificates"), /*#__PURE__*/React.createElement("div", {
+    className: "tabs",
+    style: {
+      gap: 2,
+      padding: 2
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: `tab ${!showGiven ? 'active' : ''}`,
+    style: {
+      padding: '4px 10px',
+      fontSize: 11
+    },
+    onClick: () => setShowGiven(false)
+  }, "Waiting (", waiting.length, ")"), /*#__PURE__*/React.createElement("button", {
+    className: `tab ${showGiven ? 'active' : ''}`,
+    style: {
+      padding: '4px 10px',
+      fontSize: 11
+    },
+    onClick: () => setShowGiven(true)
+  }, "Given (", given.length, ")")), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: load
+  }, "Refresh")), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      marginBottom: 6
+    }
+  }, err), shown.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, showGiven ? 'None handed over yet.' : 'Nobody is owed a certificate. They appear here the moment a swimmer finishes a level that carries one.') : /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Swimmer"), /*#__PURE__*/React.createElement("th", null, "Family"), /*#__PURE__*/React.createElement("th", null, "Level"), /*#__PURE__*/React.createElement("th", null, "Earned"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, shown.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.student_id + r.milestone_id
+  }, /*#__PURE__*/React.createElement("td", {
+    style: {
+      fontWeight: 700
+    }
+  }, r.student_name), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, r.account_name), /*#__PURE__*/React.createElement("td", null, r.program_name, " · L", r.level_no, " ", r.milestone), /*#__PURE__*/React.createElement("td", {
+    className: "small subtle"
+  }, String(r.achieved_at || '').slice(0, 10), r.claimed_at && /*#__PURE__*/React.createElement("div", null, "given by ", r.claimed_by)), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
+    className: `btn ${r.claimed_at ? 'btn-ghost' : 'btn-primary'} small`,
+    onClick: () => toggle(r)
+  }, r.claimed_at ? 'Not given' : 'Mark given'))))))));
+}
 function GradingAdminView({
   programs,
   milestones,
@@ -9851,7 +9965,7 @@ function GradingAdminView({
     }
   }, /*#__PURE__*/React.createElement("div", {
     className: "small"
-  }, err)), /*#__PURE__*/React.createElement("div", {
+  }, err)), /*#__PURE__*/React.createElement(CertificatesPanel, null), /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       marginBottom: 12

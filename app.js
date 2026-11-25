@@ -6182,6 +6182,73 @@ function PackageEditor({ row, onSave, onCancel, training }){
 // the new thing; the database does that on its own, and this screen says
 // so before you save rather than after.
 // ============================================================================
+// The office's certificate list. Separate from the syllabus editor it
+// sits under, because one is set up once a year and the other is read
+// every week — and because a list that reloads whenever somebody renames
+// a task is a list nobody keeps open.
+function CertificatesPanel(){
+  const [rows,setRows]=useState(null);
+  const [err,setErr]=useState('');
+  const [showGiven,setShowGiven]=useState(false);
+
+  async function load(){
+    try{ setRows(await rest('rpc/certificates_pending',{ method:'POST', body:'{}' })||[]); setErr(''); }
+    catch(e){ setErr(e.message); setRows([]); }
+  }
+  useEffect(()=>{ load(); },[]);
+
+  async function toggle(r){
+    const given = !!r.claimed_at;
+    if(given && !confirm(`Mark ${r.student_name}'s ${r.milestone} certificate as NOT given?\n\n`
+      + 'Use this only if it was recorded by mistake.')) return;
+    try{
+      const res = await rest('rpc/claim_certificate',{ method:'POST',
+        body: JSON.stringify({ p_student:r.student_id, p_milestone:r.milestone_id, p_claimed:!given }) });
+      if(!res || res.ok !== true) throw new Error(res?.error || 'Could not save that.');
+      await load();
+    }catch(e){ alert(e.message); }
+  }
+
+  if(rows===null) return <div className="card"><div className="small subtle">Loading…</div></div>;
+
+  const waiting = rows.filter(r => !r.claimed_at);
+  const given = rows.filter(r => r.claimed_at);
+  const shown = showGiven ? given : waiting;
+
+  return <div className="card" style={{marginBottom:12}}>
+    <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:8}}>
+      <div style={{fontWeight:800}}>🏅 Certificates</div>
+      <div className="tabs" style={{gap:2,padding:2}}>
+        <button className={`tab ${!showGiven?'active':''}`} style={{padding:'4px 10px',fontSize:11}}
+                onClick={()=>setShowGiven(false)}>Waiting ({waiting.length})</button>
+        <button className={`tab ${showGiven?'active':''}`} style={{padding:'4px 10px',fontSize:11}}
+                onClick={()=>setShowGiven(true)}>Given ({given.length})</button>
+      </div>
+      <button className="btn btn-ghost small" onClick={load}>Refresh</button>
+    </div>
+    {err && <div className="small" style={{color:'#DC2626',marginBottom:6}}>{err}</div>}
+    {shown.length===0
+      ? <div className="small subtle">{showGiven
+          ? 'None handed over yet.'
+          : 'Nobody is owed a certificate. They appear here the moment a swimmer finishes a level that carries one.'}</div>
+      : <div className="table-wrap"><table>
+          <thead><tr><th>Swimmer</th><th>Family</th><th>Level</th><th>Earned</th><th></th></tr></thead>
+          <tbody>{shown.map(r=><tr key={r.student_id+r.milestone_id}>
+            <td style={{fontWeight:700}}>{r.student_name}</td>
+            <td className="small subtle">{r.account_name}</td>
+            <td>{r.program_name} · L{r.level_no} {r.milestone}</td>
+            {/* Oldest first, because the one earned in March is the one
+                somebody has been waiting for. */}
+            <td className="small subtle">{String(r.achieved_at||'').slice(0,10)}
+              {r.claimed_at && <div>given by {r.claimed_by}</div>}</td>
+            <td><button className={`btn ${r.claimed_at?'btn-ghost':'btn-primary'} small`}
+                        onClick={()=>toggle(r)}>
+              {r.claimed_at ? 'Not given' : 'Mark given'}</button></td>
+          </tr>)}</tbody>
+        </table></div>}
+  </div>;
+}
+
 function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }){
   const [progId, setProgId] = useState(null);
   const [openMs, setOpenMs] = useState(null);
@@ -6298,6 +6365,8 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
   return <div>
     {err && <div className="card" style={{borderColor:'var(--red-bd)',background:'#FFF5F5',marginBottom:10}}>
       <div className="small">{err}</div></div>}
+
+    <CertificatesPanel />
 
     <div className="card" style={{marginBottom:12}}>
       <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>

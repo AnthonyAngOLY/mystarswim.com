@@ -969,6 +969,41 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (!/CERTIFICATE/.test(t)) throw new Error('the certificate level is not marked');
   });
 
+  // ── Certificates ──────────────────────────────────────────────────────
+  // The parent app tells a family one is waiting. Until this existed
+  // nothing could record it being handed over, so the app would say it
+  // for ever and the only defence against printing a second one was
+  // somebody's memory of a Saturday morning.
+  const certPanel = () => page.evaluate(() => {
+    let host = document.getElementById('ct-host');
+    if (!host) { host = document.createElement('div'); host.id = 'ct-host'; document.body.appendChild(host); }
+    ReactDOM.createRoot(host).render(React.createElement(CertificatesPanel));
+  });
+
+  await step('the office list shows who is owed one', async () => {
+    await certPanel();
+    await page.waitForTimeout(900);
+    const t = await page.locator('#ct-host').innerText();
+    if (!/Waiting \(1\)/.test(t)) throw new Error('the waiting count is wrong: ' + t.slice(0, 160));
+    if (!/Given \(1\)/.test(t)) throw new Error('the given count is wrong: ' + t.slice(0, 160));
+    if (!/Mira Kwan/.test(t)) throw new Error('the swimmer owed one is not listed');
+  });
+
+  await step('and a certificate already handed over is not in the waiting list', async () => {
+    const t = await page.locator('#ct-host').innerText();
+    if (/Kobe Kwan/.test(t))
+      throw new Error('somebody who already has theirs is still being chased');
+  });
+
+  await step('the given tab names who handed it over', async () => {
+    await page.locator('#ct-host button').filter({ hasText: /^Given/ }).click();
+    await page.waitForTimeout(400);
+    const t = await page.locator('#ct-host').innerText();
+    if (!/Kobe Kwan/.test(t)) throw new Error('the given list is empty');
+    if (!/Coach Sally/.test(t))
+      throw new Error('it does not say who handed it over: ' + JSON.stringify(t.slice(0, 200)));
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

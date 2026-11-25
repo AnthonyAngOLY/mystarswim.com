@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 19;
+  var BUILD = 20;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1426,12 +1426,45 @@
               + '<span>' + esc(t.name) + '</span></button>';
           }).join('')
         + (total === 0 ? '<p class="cls-sub">No tasks on this level yet.</p>' : '')
-        + '</div></div>';
+        + '</div>'
+        // Handing the certificate over usually happens right here, at the
+        // poolside, by whoever is standing in front of the child. A
+        // button that only the office had would mean nobody records it.
+        + (m.certificate && m.activated
+            ? '<button class="gcert' + (m.certificate_claimed_at ? ' is-given' : '') + '"'
+              + ' data-cert="' + esc(m.id) + '"'
+              + ' data-given="' + (m.certificate_claimed_at ? '1' : '0') + '">'
+              + (m.certificate_claimed_at
+                  ? '\u2713 Certificate given'
+                    + (m.certificate_claimed_by ? ' \u00b7 ' + esc(m.certificate_claimed_by) : '')
+                  : '\u2605 Certificate waiting \u2014 tap when handed over')
+              + '</button>'
+            : '')
+        + '</div>';
     });
     return out;
   }
 
   function wireGradePad(studentId) {
+    Array.prototype.forEach.call($('gradeBody').querySelectorAll('[data-cert]'), function (b) {
+      b.addEventListener('click', function () {
+        if (b.disabled) return;
+        var given = b.getAttribute('data-given') === '1';
+        // Taking it back off is the fix for a mis-tap, so it asks. Giving
+        // one does not: that is the ordinary thing, done with a child
+        // waiting.
+        if (given && !confirm('Mark this certificate as NOT given?\n\n'
+              + 'Use this only if it was recorded by mistake.')) return;
+        b.disabled = true;
+        rpc('claim_certificate', {
+          p_student: studentId, p_milestone: b.getAttribute('data-cert'), p_claimed: !given
+        }).then(function (res) {
+          if (!res || res.ok !== true) throw new Error((res && res.error) || 'Could not save that.');
+          return loadGradePad(studentId);
+        }).catch(function (e) { b.disabled = false; alert(e.message); });
+      });
+    });
+
     Array.prototype.forEach.call($('gradeBody').querySelectorAll('[data-task]'), function (b) {
       b.addEventListener('click', function () {
         if (b.disabled) return;

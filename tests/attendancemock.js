@@ -98,6 +98,7 @@ const LADDER = {
         { id: 't1', name: 'Submerges whole head', done: false },
         { id: 't2', name: 'Blows bubbles', done: false } ] },
     { id: 'ms2', level_no: 2, name: 'Tortoise', certificate: true, activated: false,
+      certificate_claimed_at: null, certificate_claimed_by: null,
       total: 1, done: 0, tasks: [
         { id: 't3', name: 'Glides from the wall', done: false } ] },
     { id: 'ms3', level_no: 3, name: 'Crab', certificate: false, activated: false,
@@ -144,6 +145,16 @@ const RPC = {
   // Ticks into LADDER so the pad redraws from changed data, as it does
   // against the real thing. A mock that forgets cannot tell a screen
   // that re-reads from one that re-renders what it already had.
+  claim_certificate: (a) => {
+    const ms = LADDER.milestones.find(m => m.id === a.p_milestone);
+    if (!ms) return { ok: false, error: 'no such level' };
+    if (!ms.certificate) return { ok: false, error: 'That level does not come with a certificate.' };
+    if (!ms.activated) return { ok: false, error: 'This swimmer has not earned that level yet.' };
+    ms.certificate_claimed_at = a.p_claimed ? new Date().toISOString() : null;
+    ms.certificate_claimed_by = 'Lee Mei Ling';
+    return { ok: true, claimed: !!a.p_claimed, by: 'Lee Mei Ling' };
+  },
+
   mark_grading_task: (a) => {
     const ms = LADDER.milestones.find(m => m.tasks.some(t => t.id === a.p_task));
     if (!ms) return { ok: false, error: 'no such task' };

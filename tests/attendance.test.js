@@ -243,6 +243,36 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
       throw new Error('the header does not show the new level: ' + JSON.stringify(t.slice(0, 120)));
   });
 
+  await step('a level with no certificate offers no button', async () => {
+    // Guppy was completed above and carries no certificate.
+    const n = await page.locator('#gradePad .gms').first().locator('.gcert').count();
+    if (n) throw new Error('it offers a certificate on a level that has none');
+  });
+
+  await step('an unearned certificate level offers no button either', async () => {
+    const n = await page.locator('#gradePad .gms').nth(1).locator('.gcert').count();
+    if (n) throw new Error('it offers a certificate before the level is earned');
+  });
+
+  await step('earning a certificate level offers it, and tapping records it', async () => {
+    let said = '';
+    page.once('dialog', d => { said = d.message(); d.accept(); });
+    await page.locator('#gradePad .gms').nth(1).locator('.gtask').first().click();
+    await page.waitForTimeout(900);
+    void said;
+    const btn = page.locator('#gradePad .gms').nth(1).locator('.gcert');
+    if (!(await btn.count())) throw new Error('an earned certificate level offers nothing');
+    if (!/waiting/i.test(await btn.innerText()))
+      throw new Error('it does not say one is waiting: ' + JSON.stringify(await btn.innerText()));
+    await btn.click();
+    await page.waitForTimeout(900);
+    const after = await page.locator('#gradePad .gms').nth(1).locator('.gcert').innerText();
+    if (!/given/i.test(after))
+      throw new Error('tapping it did not record the hand-over: ' + JSON.stringify(after));
+    if (!/Lee Mei Ling/.test(after))
+      throw new Error('it does not name who handed it over: ' + JSON.stringify(after));
+  });
+
   await step('a swimmer this coach is not rostered to is refused', async () => {
     const r = await page.evaluate(async () => {
       const res = await fetch('/rest/v1/rpc/coach_student_grading', {

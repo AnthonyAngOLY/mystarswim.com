@@ -106,6 +106,20 @@ http.createServer((req, res) => {
     ]);
   }
 
+  // Two earned certificates: one waiting since March, one already given.
+  if (p === '/rest/v1/rpc/certificates_pending') {
+    return json(res, 200, [
+      { student_id: 's1', student_name: 'Mira Kwan', account_name: 'Kwan Suk Lee',
+        program_name: 'Swim Passport', milestone_id: 'ms2', level_no: 2, milestone: 'Tortoise',
+        achieved_at: '2026-03-04T02:00:00Z', claimed_at: null, claimed_by: null },
+      { student_id: 's2', student_name: 'Kobe Kwan', account_name: 'Kwan Suk Lee',
+        program_name: 'Swim Passport', milestone_id: 'ms2', level_no: 2, milestone: 'Tortoise',
+        achieved_at: '2026-10-01T02:00:00Z', claimed_at: '2026-10-02T02:00:00Z',
+        claimed_by: 'Coach Sally' }
+    ]);
+  }
+  if (p === '/rest/v1/rpc/claim_certificate') return json(res, 200, { ok: true, claimed: true });
+
   if (p === '/rest/v1/rpc/parent_otp_spend') {
     return json(res, 200, [
       { day: '2026-11-24', sent: 9, failed: 1, cooldown: 4, capped: 2,
