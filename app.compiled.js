@@ -9979,9 +9979,21 @@ function GradingAdminView({
     }
   }, (programs || []).map(p => {
     const on = p.id === prog?.id;
+    const c = p.colour || 'var(--primary)';
+    // The colour is the point of the pill: three programmes in one
+    // blue are three programmes a person has to read to tell apart.
     return /*#__PURE__*/React.createElement("button", {
       key: p.id,
-      className: `btn ${on ? 'btn-primary' : 'btn-ghost'} small`,
+      className: "btn small",
+      style: on ? {
+        background: c,
+        borderColor: c,
+        color: '#fff'
+      } : {
+        background: 'transparent',
+        borderColor: c,
+        color: c
+      },
       onClick: () => {
         setProgId(p.id);
         setOpenMs(null);
@@ -10036,7 +10048,38 @@ function GradingAdminView({
   }, "Rename"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: rename('grading_programs', prog, 'subtitle', 'Subtitle — e.g. "Learn to Swim"')
-  }, "Subtitle"), /*#__PURE__*/React.createElement("button", {
+  }, "Subtitle"), /*#__PURE__*/React.createElement("label", {
+    className: "btn btn-ghost small",
+    title: "The colour this programme is drawn in",
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 6,
+      cursor: 'pointer'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 14,
+      height: 14,
+      borderRadius: 4,
+      border: '1px solid var(--border)',
+      background: prog.colour || 'var(--primary)'
+    }
+  }), "Colour", /*#__PURE__*/React.createElement("input", {
+    type: "color",
+    value: prog.colour || '#0EA5E9',
+    style: {
+      width: 0,
+      height: 0,
+      opacity: 0,
+      position: 'absolute'
+    },
+    onChange: e => run(() => patchRows('grading_programs', {
+      id: prog.id
+    }, {
+      colour: e.target.value
+    }))
+  })), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: toggleActive('grading_programs', prog)
   }, prog.is_active === false ? 'Turn on' : 'Turn off')))), /*#__PURE__*/React.createElement("div", {
@@ -10069,7 +10112,21 @@ function GradingAdminView({
         cursor: 'pointer'
       },
       onClick: () => setOpenMs(open ? null : ms.id)
-    }, iconBox('grading_milestones', ms), /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        width: 5,
+        alignSelf: 'stretch',
+        minHeight: 34,
+        borderRadius: 3,
+        background: ms.colour || prog.colour || 'var(--primary)'
+      }
+    }), iconBox('grading_milestones', ms)), /*#__PURE__*/React.createElement("div", {
       style: {
         flex: 1,
         minWidth: 0
@@ -10131,7 +10188,46 @@ function GradingAdminView({
       }, {
         certificate: !ms.certificate
       }))
-    }, ms.certificate ? 'No certificate' : 'Offers a certificate'), /*#__PURE__*/React.createElement("button", {
+    }, ms.certificate ? 'No certificate' : 'Offers a certificate'), /*#__PURE__*/React.createElement("label", {
+      className: "btn btn-ghost small",
+      title: "This level's own colour — blank takes the programme's",
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        cursor: 'pointer'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        width: 14,
+        height: 14,
+        borderRadius: 4,
+        border: '1px solid var(--border)',
+        background: ms.colour || prog.colour || 'var(--primary)'
+      }
+    }), "Colour", /*#__PURE__*/React.createElement("input", {
+      type: "color",
+      value: ms.colour || prog.colour || '#0EA5E9',
+      style: {
+        width: 0,
+        height: 0,
+        opacity: 0,
+        position: 'absolute'
+      },
+      onChange: e => run(() => patchRows('grading_milestones', {
+        id: ms.id
+      }, {
+        colour: e.target.value
+      }))
+    })), ms.colour && /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "Go back to the programme's colour",
+      onClick: () => run(() => patchRows('grading_milestones', {
+        id: ms.id
+      }, {
+        colour: null
+      }))
+    }, "Use programme colour"), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost small",
       onClick: toggleActive('grading_milestones', ms)
     }, ms.is_active === false ? 'Turn on' : 'Turn off')), ms.description && /*#__PURE__*/React.createElement("div", {

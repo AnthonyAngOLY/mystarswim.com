@@ -1004,6 +1004,35 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       throw new Error('it does not say who handed it over: ' + JSON.stringify(t.slice(0, 200)));
   });
 
+  // ── Telling a dropdown from a text box ────────────────────────────────
+  // The lesson-type form has six dropdowns among a dozen inputs and they
+  // were drawn identically, so finding which offered a choice meant
+  // clicking each one. Asserted on computed style rather than on the
+  // stylesheet: a rule that exists and does not apply is the fault.
+  await step('a dropdown does not look like a text box', async () => {
+    const r = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.innerHTML = '<input class="input" id="probe-i">'
+                     + '<select class="input" id="probe-s"><option>a</option></select>';
+      document.body.appendChild(host);
+      const g = (id) => {
+        const c = getComputedStyle(document.getElementById(id));
+        return { bg: c.backgroundColor, border: c.borderTopColor,
+                 img: c.backgroundImage, pad: c.paddingRight };
+      };
+      const out = { input: g('probe-i'), select: g('probe-s') };
+      host.remove();
+      return out;
+    });
+    if (r.input.bg === r.select.bg && r.input.border === r.select.border)
+      throw new Error('a select and a text input are drawn identically: '
+                      + JSON.stringify(r.select));
+    if (!/url\(/.test(r.select.img))
+      throw new Error('the dropdown has no chevron of its own: ' + r.select.img);
+    if (parseFloat(r.select.pad) <= parseFloat(r.input.pad))
+      throw new Error('nothing is reserved for the chevron, so it will sit on the text');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

@@ -107,6 +107,25 @@
     .input,.select,.textarea{width:100%;background:var(--surface-2);border:1px solid var(--border-2);color:var(--text);border-radius:11px;padding:10px 12px;outline:none}
     .input:focus,.select:focus,.textarea:focus{border-color:var(--primary);background:#fff}
     .textarea{min-height:86px;resize:vertical}
+    /* A dropdown that looks exactly like a text box reads as one, and on
+       the lesson-type form -- which has six of them among a dozen inputs
+       -- a person has to click each to find out which is which. Given a
+       tinted face, a heavier border and a chevron of its own, so the
+       ones that offer a choice are the ones that look like they do.
+       appearance:none is what makes the chevron possible; without it
+       the browser draws its own on top. */
+    select.input,select.select{
+      appearance:none;-webkit-appearance:none;-moz-appearance:none;
+      background-color:#F3F8FD;
+      border-color:#BFD9EC;
+      padding-right:34px;cursor:pointer;
+      background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' fill='none' stroke='%23437FA8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;
+      background-position:right 12px center;
+    }
+    select.input:hover,select.select:hover{border-color:var(--primary)}
+    select.input:focus,select.select:focus{background-color:#fff;border-color:var(--primary)}
+    select.input:disabled{opacity:.6;cursor:default}
     .week-day-link{display:block;width:100%;background:transparent;border:none;color:var(--text);font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;padding:2px 0 4px;cursor:pointer}
     .week-day-link:hover{color:var(--primary)}
     .week-clear-btn{display:block;width:100%;background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red-tx);border-radius:8px;padding:5px 4px;font-size:10px;font-weight:700;cursor:pointer}

@@ -6372,7 +6372,13 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
       <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
         {(programs||[]).map(p => {
           const on = p.id === prog?.id;
-          return <button key={p.id} className={`btn ${on?'btn-primary':'btn-ghost'} small`}
+          const c = p.colour || 'var(--primary)';
+          // The colour is the point of the pill: three programmes in one
+          // blue are three programmes a person has to read to tell apart.
+          return <button key={p.id} className="btn small"
+                         style={on
+                           ? { background:c, borderColor:c, color:'#fff' }
+                           : { background:'transparent', borderColor:c, color:c }}
                          onClick={()=>{ setProgId(p.id); setOpenMs(null); }}>
             {p.name}{p.is_active===false ? ' (off)' : ''}
           </button>;
@@ -6398,6 +6404,14 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
           <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
             <button className="btn btn-ghost small" onClick={rename('grading_programs', prog, 'name', 'Programme name')}>Rename</button>
             <button className="btn btn-ghost small" onClick={rename('grading_programs', prog, 'subtitle', 'Subtitle — e.g. "Learn to Swim"')}>Subtitle</button>
+            <label className="btn btn-ghost small" title="The colour this programme is drawn in"
+                   style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+              <span style={{width:14,height:14,borderRadius:4,border:'1px solid var(--border)',
+                            background: prog.colour || 'var(--primary)'}} />
+              Colour
+              <input type="color" value={prog.colour || '#0EA5E9'} style={{width:0,height:0,opacity:0,position:'absolute'}}
+                     onChange={(e)=>run(()=>patchRows('grading_programs',{id:prog.id},{colour:e.target.value}))} />
+            </label>
             <button className="btn btn-ghost small" onClick={toggleActive('grading_programs', prog)}>
               {prog.is_active===false ? 'Turn on' : 'Turn off'}</button>
           </div>
@@ -6414,7 +6428,11 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
           return <div key={ms.id} className="card" style={{padding:0,opacity:ms.is_active===false?.55:1}}>
             <div style={{display:'flex',gap:10,alignItems:'center',padding:'10px 12px',cursor:'pointer'}}
                  onClick={()=>setOpenMs(open?null:ms.id)}>
-              {iconBox('grading_milestones', ms)}
+              <span style={{display:'inline-flex',alignItems:'center',gap:6}}>
+                <span style={{width:5,alignSelf:'stretch',minHeight:34,borderRadius:3,
+                              background: ms.colour || prog.colour || 'var(--primary)'}} />
+                {iconBox('grading_milestones', ms)}
+              </span>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:800}}>
                   <span className="small subtle" style={{marginRight:6}}>Level {ms.level_no}</span>
@@ -6437,6 +6455,18 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
                 <button className="btn btn-ghost small" disabled={busy}
                         onClick={()=>run(()=>patchRows('grading_milestones',{id:ms.id},{certificate: !ms.certificate}))}>
                   {ms.certificate ? 'No certificate' : 'Offers a certificate'}</button>
+                <label className="btn btn-ghost small" title="This level's own colour — blank takes the programme's"
+                       style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer'}}>
+                  <span style={{width:14,height:14,borderRadius:4,border:'1px solid var(--border)',
+                                background: ms.colour || prog.colour || 'var(--primary)'}} />
+                  Colour
+                  <input type="color" value={ms.colour || prog.colour || '#0EA5E9'}
+                         style={{width:0,height:0,opacity:0,position:'absolute'}}
+                         onChange={(e)=>run(()=>patchRows('grading_milestones',{id:ms.id},{colour:e.target.value}))} />
+                </label>
+                {ms.colour && <button className="btn btn-ghost small" title="Go back to the programme's colour"
+                        onClick={()=>run(()=>patchRows('grading_milestones',{id:ms.id},{colour:null}))}>
+                  Use programme colour</button>}
                 <button className="btn btn-ghost small" onClick={toggleActive('grading_milestones', ms)}>
                   {ms.is_active===false ? 'Turn on' : 'Turn off'}</button>
               </div>
