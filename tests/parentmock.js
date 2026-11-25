@@ -33,6 +33,35 @@ const BODY = [
 
 const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 
+// Guppy earned, Tortoise half done, Crab untouched. Tasks arrive
+// done-first, as the database sorts them.
+const LADDER = {
+  ok: true, graded: true,
+  program: { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', icon: null },
+  level: 1, levels_total: 3,
+  milestones: [
+    { id: 'ms1', level_no: 1, name: 'Guppy', icon: null, certificate: false,
+      activated: true, total: 2, done: 2, tasks: [
+        { id: 't1', name: 'Submerges whole head', done: true },
+        { id: 't2', name: 'Blows bubbles', done: true } ] },
+    { id: 'ms2', level_no: 2, name: 'Tortoise', icon: null, certificate: true,
+      activated: false, total: 10, done: 5, tasks: [
+        { id: 'a1', name: 'Glides from the wall', done: true },
+        { id: 'a2', name: 'Kicks 10 metres', done: true },
+        { id: 'a3', name: 'Floats on back', done: true },
+        { id: 'a4', name: 'Rolls front to back', done: true },
+        { id: 'a5', name: 'Jumps in and returns', done: true },
+        { id: 'b1', name: 'Front crawl 10 metres', done: false },
+        { id: 'b2', name: 'Backstroke 10 metres', done: false },
+        { id: 'b3', name: 'Treads water 30 seconds', done: false },
+        { id: 'b4', name: 'Retrieves an object', done: false },
+        { id: 'b5', name: 'Swims 25 metres', done: false } ] },
+    { id: 'ms3', level_no: 3, name: 'Crab', icon: null, certificate: true,
+      activated: false, total: 4, done: 0, tasks: [
+        { id: 'c1', name: 'Tumble turn', done: false } ] }
+  ]
+};
+
 // Set by /__cool, spent by the next send. Lets a test drive the
 // countdown without waiting the real sixty seconds.
 const COOL = { sec: 0 };
@@ -65,6 +94,11 @@ const RPC = {
   // argument cannot catch the app passing the wrong one — the Progress
   // view asking for a single swimmer would have looked identical here.
   my_child_notes: (a) => NOTES.filter(n => !a || !a.p_student || n.student_id === a.p_student),
+  // Only stu-1 is on a graded lesson type. stu-2 must draw no badge and
+  // no collection at all -- a hire or a one-off is not a child who has
+  // achieved nothing.
+  my_child_grading: (a) => (a && a.p_student === 'stu-1') ? LADDER
+                                                          : { ok: true, graded: false },
   __notes: () => ([])
 };
 

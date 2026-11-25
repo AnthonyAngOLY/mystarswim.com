@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 9;
+  var BUILD = 10;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -429,27 +429,158 @@
           if (!byKid[r.student_id]) byKid[r.student_id] = r;
         });
         var kids = family.children || [];
-        $('homeKids').innerHTML = kids.length ? kids.map(function (k, i) {
-          var nx = byKid[k.id];
-          return '<div class="card tapcard" data-kid="' + esc(k.id) + '"><div class="row">'
-            + '<div class="kid k' + ((i % 3) + 1) + '">' + esc(initials(k.name)) + '</div>'
-            + '<div class="grow"><div class="big">' + esc(k.name)
-            +   ' <span style="color:var(--muted);font-weight:400">\u203a</span></div>'
-            + '<div class="sub">' + (nx
-                ? esc(whenWord(nx.class_date) + ' · ' + hhmm(nx.start_time) + ' · ' + nx.lesson)
-                : 'No class booked') + '</div>'
-            + '</div></div></div>';
-        }).join('') : '<div class="card"><div class="sub">No swimmers on this account yet.</div></div>';
-
-        Array.prototype.forEach.call($('homeKids').querySelectorAll('[data-kid]'), function (c) {
-          c.addEventListener('click', function () {
-            var id = c.getAttribute('data-kid');
-            var k = kids.filter(function (x) { return x.id === id; })[0];
-            openChild(id, k && k.name, byKid[id], kids.indexOf(k));
+        var drawKids = function () {
+          $('homeKids').innerHTML = kids.length ? kids.map(function (k, i) {
+            var nx = byKid[k.id];
+            var g = homeLevels[k.id];
+            return '<div class="card tapcard" data-kid="' + esc(k.id) + '"><div class="row">'
+              + '<div class="kid k' + ((i % 3) + 1) + '">' + esc(initials(k.name)) + '</div>'
+              + '<div class="grow"><div class="big">' + esc(k.name)
+              +   ' <span style="color:var(--muted);font-weight:400">\u203a</span></div>'
+              + '<div class="sub">' + (nx
+                  ? esc(whenWord(nx.class_date) + ' · ' + hhmm(nx.start_time) + ' · ' + nx.lesson)
+                  : 'No class booked') + '</div>'
+              // The one thing a parent wants at a glance, on the first
+              // screen, without opening anything.
+              + (g ? '<div style="margin-top:7px"><span class="lvlchip">'
+                     + (g.icon ? '<img src="' + esc(iconUrl(g.icon)) + '" alt="">' : '')
+                     + esc(g.program) + ' \u00b7 '
+                     + (g.level ? 'Level ' + esc(String(g.level)) : 'Starting out')
+                     + '<small>' + esc(String(g.earned)) + '/' + esc(String(g.total)) + '</small>'
+                     + '</span></div>' : '')
+              + '</div></div></div>';
+          }).join('') : '<div class="card"><div class="sub">No swimmers on this account yet.</div></div>';
+          wireKidCards();
+        };
+        var wireKidCards = function () {
+          Array.prototype.forEach.call($('homeKids').querySelectorAll('[data-kid]'), function (c) {
+            c.addEventListener('click', function () {
+              var id = c.getAttribute('data-kid');
+              var k = kids.filter(function (x) { return x.id === id; })[0];
+              openChild(id, k && k.name, byKid[id], kids.indexOf(k));
+            });
           });
+        };
+        drawKids();
+
+        // Badges after the cards, not before: a ladder that has not
+        // loaded must never hold up the class times, which are what the
+        // screen is for.
+        kids.forEach(function (k) {
+          rpc('my_child_grading', { p_student: k.id }).then(function (g) {
+            if (!g || g.ok !== true || g.graded === false) return;
+            homeLevels[k.id] = {
+              program: g.program.name, icon: g.program.icon, level: g.level,
+              total: g.levels_total,
+              earned: (g.milestones || []).filter(function (m) { return m.activated; }).length
+            };
+            drawKids();
+          }).catch(function () {});
         });
+
       })
       .catch(function (e) { note($('appNote'), e.message, true); });
+  }
+
+  // ── The collection ───────────────────────────────────────────────────
+  // What a child has earned, and what is next. Drawn above the coaches'
+  // notes because a badge is the thing a parent came to look at and a
+  // note is the thing they read.
+  //
+  // Every milestone, earned or not, and every task inside it: the point
+  // of a ladder a family can see is that the next rung is visible. A
+  // list of only what is finished answers "how is she doing" with a
+  // number and nothing to do about it.
+  var gradeOpen = {};
+  // student_id -> the chip on the home screen.
+  var homeLevels = {};
+
+  function iconUrl(p) {
+    return p ? cfg.supabaseUrl + '/storage/v1/object/public/grading-icons/' + encodeURI(p) : null;
+  }
+
+  function loadChildGrading(studentId) {
+    return rpc('my_child_grading', { p_student: studentId }).then(function (g) {
+      var el = $('childGrading');
+      if (!el) return;
+      // Not graded is not an error and must not read as one. Plenty of
+      // lesson types are a hire or a one-off.
+      if (!g || g.ok !== true || g.graded === false) { el.innerHTML = ''; return; }
+      el.innerHTML = gradingHtml(g);
+      wireGrading(studentId, g);
+    }).catch(function () {
+      // Before the grading module is installed. Silent: the rest of the
+      // page is the page.
+      var el = $('childGrading'); if (el) el.innerHTML = '';
+    });
+  }
+
+  function gradingHtml(g) {
+    var earned = (g.milestones || []).filter(function (m) { return m.activated; }).length;
+    var out = '<div class="h" style="display:flex;align-items:center;gap:8px">'
+      + '<span>' + esc(g.program.name) + '</span>'
+      + '<span class="lvlchip">'
+      + (g.program.icon ? '<img src="' + esc(iconUrl(g.program.icon)) + '" alt="">' : '')
+      + (g.level ? 'Level ' + esc(String(g.level)) : 'Starting out')
+      + '<small>' + earned + '/' + esc(String(g.levels_total)) + '</small></span></div>';
+
+    (g.milestones || []).forEach(function (m) {
+      var done = Number(m.done) || 0, total = Number(m.total) || 0;
+      var pct = total ? Math.round(done * 100 / total) : 0;
+      var open = !!gradeOpen[m.id];
+      out += '<div class="msrow' + (m.activated ? ' is-on' : '') + '" data-ms="' + esc(m.id) + '">'
+        + '<div class="msrow-head" data-toggle="' + esc(m.id) + '">'
+        +   '<span class="msrow-badge">'
+        +     (m.icon ? '<img src="' + esc(iconUrl(m.icon)) + '" alt="">'
+                      : (m.activated ? '\u2605' : '\u25cb')) + '</span>'
+        +   '<span class="msrow-nm"><b>' + esc(m.name) + '</b>'
+        +     '<span>Level ' + esc(String(m.level_no))
+        +       (m.activated ? ' \u00b7 earned' : '') + '</span></span>'
+        +   '<span class="msrow-chev">' + (open ? '\u25b2' : '\u25bc') + '</span>'
+        + '</div>'
+        // The bar, with the count riding above the fill edge. Clamped
+        // away from both ends so the bubble never hangs off the card.
+        + '<div class="msbar-wrap">'
+        +   '<span class="msbubble" style="left:' + Math.min(93, Math.max(7, pct)) + '%">'
+        +     done + '/' + total + '</span>'
+        +   '<div class="msbar"><i style="width:' + pct + '%"></i></div>'
+        + '</div>'
+        + (open ? taskListHtml(m) : '')
+        + '</div>';
+    });
+    return out;
+  }
+
+  function taskListHtml(m) {
+    var ts = m.tasks || [];
+    if (!ts.length) return '<div class="mstasks"><span class="mstask todo">'
+      + 'Nothing set on this level yet.</span></div>';
+    // Done first, greyed ones after — the order the server already sorts
+    // them in, so what a parent sees is what their child can do, then
+    // what is next.
+    var out = '<div class="mstasks">' + ts.map(function (t) {
+      return '<div class="mstask ' + (t.done ? 'done' : 'todo') + '">'
+        + '<span class="tick">\u2713</span><span>' + esc(t.name) + '</span></div>';
+    }).join('') + '</div>';
+    if (m.certificate && m.activated) {
+      out += '<div class="mscert">'
+        + (m.certificate_claimed_at
+            ? '\u2713 Certificate collected'
+            : '\u2605 A certificate is waiting \u2014 ask at the centre next time you are in.')
+        + '</div>';
+    }
+    return out;
+  }
+
+  function wireGrading(studentId, g) {
+    Array.prototype.forEach.call($('childGrading').querySelectorAll('[data-toggle]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-toggle');
+        gradeOpen[id] = !gradeOpen[id];
+        $('childGrading').innerHTML = gradingHtml(g);
+        wireGrading(studentId, g);
+      });
+    });
   }
 
   // ── One child ────────────────────────────────────────────────────────
@@ -464,7 +595,9 @@
       ? whenWord(next.class_date) + ' · ' + hhmm(next.start_time) + ' · ' + next.lesson
       : 'No class booked';
     $('childNotes').innerHTML = '<div class="empty">Loading…</div>';
+    $('childGrading').innerHTML = '';
     setView('child');
+    loadChildGrading(id);
     rpc('my_child_notes', { p_student: id }).then(function (rows) {
       rows = rows || [];
       $('childNotes').innerHTML = rows.length ? rows.map(function (n) {

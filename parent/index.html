@@ -64,6 +64,57 @@
     font-size:13px; color:var(--muted); cursor:pointer}
   .showpw input{width:16px; height:16px; margin:0}
 
+  /* ── The collection ────────────────────────────────────────────────
+     A badge beside a child's name is the quickest answer to "how is she
+     getting on", so it is drawn before anything a parent has to read. */
+  .lvlchip{display:inline-flex; align-items:center; gap:5px; padding:3px 9px;
+    border-radius:999px; background:var(--sky,#EEF7FD); border:1px solid var(--border);
+    font-size:12px; font-weight:800; color:var(--primary); white-space:nowrap}
+  .lvlchip img{width:16px; height:16px; object-fit:contain; border-radius:3px}
+  .lvlchip small{font-weight:600; opacity:.65}
+
+  .msrow{border:1px solid var(--border); border-radius:14px; background:var(--surface);
+    padding:12px 13px; margin-bottom:9px}
+  .msrow.is-on{border-color:#34D399; background:#F0FDF9}
+  .msrow-head{display:flex; align-items:center; gap:9px; cursor:pointer}
+  .msrow-badge{flex:none; width:40px; height:40px; border-radius:11px;
+    display:flex; align-items:center; justify-content:center; font-size:18px;
+    background:var(--slate-bg,#F1F5F9); color:var(--muted); overflow:hidden}
+  .msrow.is-on .msrow-badge{background:#D1FAE5; color:#065F46}
+  .msrow-badge img{width:100%; height:100%; object-fit:contain}
+  .msrow-nm{flex:1; min-width:0}
+  .msrow-nm b{display:block; font-size:15px}
+  .msrow-nm span{font-size:12px; color:var(--muted)}
+  .msrow-chev{color:var(--muted); font-size:11px}
+
+  /* The bar, with the count riding above the fill edge. Tasks done over
+     tasks on this level -- not a percentage, because 5/10 is the thing a
+     parent can check against what their child can actually do. */
+  .msbar-wrap{position:relative; margin-top:16px; padding-top:4px}
+  .msbar{height:11px; border-radius:999px; background:#E2E8F0; overflow:hidden}
+  .msbar i{display:block; height:100%; border-radius:999px;
+    background:linear-gradient(90deg,#38BDF8,#34D399); transition:width .35s ease}
+  .msbubble{position:absolute; top:-13px; transform:translateX(-50%);
+    background:var(--primary); color:#fff; font-size:11px; font-weight:800;
+    padding:3px 9px; border-radius:999px; white-space:nowrap;
+    box-shadow:0 2px 6px rgba(12,30,46,.18)}
+  .msrow.is-on .msbubble{background:#059669}
+  .msbubble::after{content:''; position:absolute; left:50%; bottom:-4px;
+    transform:translateX(-50%); border-left:4px solid transparent;
+    border-right:4px solid transparent; border-top:5px solid var(--primary)}
+  .msrow.is-on .msbubble::after{border-top-color:#059669}
+
+  .mstasks{margin-top:12px; display:flex; flex-direction:column; gap:5px}
+  .mstask{display:flex; align-items:flex-start; gap:8px; font-size:13.5px; line-height:1.4}
+  .mstask .tick{flex:none; width:17px; height:17px; border-radius:5px; margin-top:1px;
+    display:flex; align-items:center; justify-content:center; font-size:11px;
+    background:#E2E8F0; color:transparent}
+  .mstask.done{color:var(--text); font-weight:600}
+  .mstask.done .tick{background:#10B981; color:#fff}
+  .mstask.todo{color:#94A3B8}
+  .mscert{margin-top:10px; font-size:12.5px; font-weight:700; color:#92400E;
+    background:#FEF3C7; border-radius:9px; padding:7px 10px}
+
   main{padding:14px 16px 90px; max-width:520px; margin:0 auto}
   .card{
     background:var(--surface); border:1px solid var(--border);
@@ -316,6 +367,9 @@
         <div class="grow"><div class="big" id="childName">–</div>
           <div class="sub" id="childNext"></div></div>
       </div>
+      <!-- The collection. Above the notes, because a badge is the thing a
+           parent came to look at and a note is the thing they read. -->
+      <div id="childGrading"></div>
       <div class="h">From the coaches</div>
       <div id="childNotes"></div>
     </div>

@@ -464,6 +464,100 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (after) throw new Error('the last person\u2019s number is waiting for the next: ' + after);
   });
 
+  // ── The collection ────────────────────────────────────────────────────
+  // A badge beside the child's name, and the ladder on their page. The
+  // bar under each level is that level's own tasks-done over tasks-total
+  // -- five of ten is half, not "in progress".
+  await step('back in, so there is an app to look at', async () => {
+    // The step before this one signed out. Without this the tabs do not
+    // exist and every assertion below fails on a timeout rather than on
+    // what it is about.
+    if (!(await page.locator('#s-app').isVisible())) {
+      await page.locator('#phone').fill('0123456001');
+      await page.locator('#pw').fill('swimtime2026');
+      await page.locator('#signIn').click();
+      await page.waitForTimeout(1200);
+    }
+    if (!(await page.locator('#s-app').isVisible()))
+      throw new Error('could not get back into the app');
+  });
+
+  await step('a badge sits beside a graded child on the first screen', async () => {
+    await page.locator('#tabs button[data-v="home"]').click();
+    await page.waitForTimeout(1200);
+    const chips = await page.locator('#homeKids .lvlchip').count();
+    if (chips === 0) throw new Error('no level shown beside any child');
+    if (chips !== 1)
+      throw new Error('a child on an ungraded lesson type was given one too: ' + chips);
+    const t = await page.locator('#homeKids .lvlchip').first().innerText();
+    if (!/Level 1/.test(t)) throw new Error('the chip does not name the level: ' + JSON.stringify(t));
+    if (!/1\/3/.test(t)) throw new Error('the chip does not show earned of total: ' + JSON.stringify(t));
+  });
+
+  await step('opening the child draws every level, earned and not', async () => {
+    await page.locator('#homeKids [data-kid]').first().click();
+    await page.waitForTimeout(1000);
+    const n = await page.locator('#childGrading .msrow').count();
+    if (n !== 3) throw new Error('expected 3 levels, drew ' + n);
+    const t = await page.locator('#childGrading').innerText();
+    if (!/Guppy/.test(t) || !/Crab/.test(t))
+      throw new Error('it only lists what is finished: ' + JSON.stringify(t.slice(0, 200)));
+  });
+
+  await step('the bubble reads 5/10, not a percentage', async () => {
+    const t = await page.locator('#childGrading .msrow').nth(1).innerText();
+    if (!/5\/10/.test(t)) throw new Error('the count is not 5/10: ' + JSON.stringify(t));
+    if (/%/.test(t)) throw new Error('it shows a percentage: ' + JSON.stringify(t));
+  });
+
+  await step('and the bar is filled to match, measured not described', async () => {
+    const row = page.locator('#childGrading .msrow').nth(1);
+    const fill = await row.locator('.msbar i').evaluate(el => el.getBoundingClientRect().width);
+    const track = await row.locator('.msbar').evaluate(el => el.getBoundingClientRect().width);
+    if (Math.abs(fill - track / 2) > track * 0.08)
+      throw new Error('5 of 10 did not draw as half: ' + Math.round(fill) + ' of ' + Math.round(track));
+    // An earned level is full; an untouched one is empty.
+    const full = await page.locator('#childGrading .msrow').nth(0).locator('.msbar i')
+      .evaluate(el => el.getBoundingClientRect().width);
+    const empty = await page.locator('#childGrading .msrow').nth(2).locator('.msbar i')
+      .evaluate(el => el.getBoundingClientRect().width);
+    if (full < track * 0.9) throw new Error('an earned level is not full: ' + Math.round(full));
+    if (empty > 1) throw new Error('an untouched level is not empty: ' + Math.round(empty));
+  });
+
+  await step('tapping a level shows what is done, then what is next', async () => {
+    await page.locator('#childGrading .msrow').nth(1).locator('.msrow-head').click();
+    await page.waitForTimeout(400);
+    const classes = await page.locator('#childGrading .msrow').nth(1)
+      .locator('.mstask').evaluateAll(els => els.map(e => e.className));
+    if (classes.length !== 10) throw new Error('expected 10 tasks, drew ' + classes.length);
+    const firstTodo = classes.findIndex(c => /todo/.test(c));
+    const lastDone = classes.map(c => /done/.test(c)).lastIndexOf(true);
+    if (firstTodo === -1 || lastDone === -1) throw new Error('no mix of done and not done');
+    if (lastDone > firstTodo)
+      throw new Error('finished tasks are not all above the unfinished ones');
+  });
+
+  await step('a level with a certificate waiting says so', async () => {
+    await page.locator('#childGrading .msrow').nth(0).locator('.msrow-head').click();
+    await page.waitForTimeout(400);
+    const t = await page.locator('#childGrading .msrow').nth(0).innerText();
+    // Guppy carries no certificate, so it must NOT offer one.
+    if (/certificate/i.test(t))
+      throw new Error('a level with no certificate offers one: ' + JSON.stringify(t));
+  });
+
+  await step('an ungraded child shows no collection at all', async () => {
+    await page.locator('#childBack').click();
+    await page.waitForTimeout(600);
+    const cards = page.locator('#homeKids [data-kid]');
+    if (await cards.count() < 2) throw new Error('the fixture has only one child');
+    await cards.nth(1).click();
+    await page.waitForTimeout(900);
+    const t = await page.locator('#childGrading').innerText();
+    if (t.trim()) throw new Error('an ungraded child was given a ladder: ' + JSON.stringify(t));
+  });
+
   // ── Archived while signed in ──────────────────────────────────────────
   // The sign-in gate refuses an archived family a code and a password.
   // Neither of those runs for a session that is already open: it renews
