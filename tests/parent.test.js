@@ -464,6 +464,46 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (after) throw new Error('the last person\u2019s number is waiting for the next: ' + after);
   });
 
+  // ── Archived while signed in ──────────────────────────────────────────
+  // The sign-in gate refuses an archived family a code and a password.
+  // Neither of those runs for a session that is already open: it renews
+  // itself quietly and keeps working. What the parent saw after their
+  // family was archived was their own name at the top and nothing
+  // underneath -- which reads as the system having lost them rather than
+  // as an account that has been closed.
+  await step('signing back in first, so there is a session to archive', async () => {
+    if (!(await page.locator('#s-app').isVisible())) {
+      await page.locator('#phone').fill('0123456001');
+      await page.locator('#pw').fill('swimtime2026');
+      await page.locator('#signIn').click();
+      await page.waitForTimeout(900);
+    }
+    if (!(await page.locator('#s-app').isVisible()))
+      throw new Error('could not get back into the app to run this');
+  });
+
+  await step('archiving the family signs the open session out', async () => {
+    await page.request.get(BASE + '/__archive?on=1');
+    // What a phone does when it is picked up again.
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await page.waitForTimeout(900);
+    if (await page.locator('#s-app').isVisible())
+      throw new Error('it kept showing the app to a family that is no longer ours');
+    if (!(await page.locator('#s-login').isVisible()))
+      throw new Error('it did not return to the sign-in screen');
+  });
+
+  await step("and says the server's words, not that anything was lost", async () => {
+    const said = await page.locator('#loginNote').innerText();
+    if (!/no longer active/i.test(said))
+      throw new Error('it does not say the account is closed: ' + JSON.stringify(said));
+    if (!/call the centre/i.test(said))
+      throw new Error('it does not tell them what to do next: ' + JSON.stringify(said));
+    if (/deleted|lost|removed/i.test(said.replace(/nothing has been lost/i, '')))
+      throw new Error('it suggests their records are gone, which they are not: ' + JSON.stringify(said));
+    await page.request.get(BASE + '/__archive?on=0');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

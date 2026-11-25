@@ -5908,6 +5908,24 @@ function App({
       alert('No swimmers found on this account.');
       return;
     }
+
+    // A family that leaves is still a family that swam here, and the
+    // record of it is the point of the system. So an account with money
+    // or attendance behind it cannot be deleted at all -- archiving
+    // already does everything deleting was reached for: no code, no
+    // password, no app, and the office keeps every document.
+    //
+    // Checked rather than written in a guide, because the one time this
+    // mattered the guide was not open.
+    const ids = new Set(pg.swimmers.map(s => s.id));
+    const invCount = pg.accountId ? (invoices || []).filter(i => i.account_id === pg.accountId).length : 0;
+    // Listed on a session is not the same as having swum one. Attendance
+    // that is still 'pending' is a plan; anything else happened.
+    const attCount = (sessions || []).reduce((n, ses) => n + ((ses.students || []).some(x => ids.has(x.studentId) && x.attendance && x.attendance !== 'pending') ? 1 : 0), 0);
+    if (invCount || attCount) {
+      alert(`"${pg.name}" cannot be deleted.\n\n` + (invCount ? `• ${invCount} invoice${invCount === 1 ? '' : 's'} or receipt${invCount === 1 ? '' : 's'}\n` : '') + (attCount ? `• ${attCount} session${attCount === 1 ? '' : 's'} of attendance\n` : '') + `\nArchive them instead. That removes the app, the sign-in code and ` + `the password — the number is answered exactly as one we do not hold — ` + `while every invoice, receipt, note and milestone stays here for you ` + `to re-issue when they ask.`);
+      return;
+    }
     const swimmerList = pg.swimmers.map(s => `• ${s.name}`).join('\n');
 
     // Every family group these swimmers belong to. Deleting them used to
@@ -5929,7 +5947,7 @@ function App({
         name: '(unnamed group)'
       });
     });
-    if (!confirm(`PERMANENTLY DELETE account "${pg.name}" and all ${pg.swimmers.length} swimmer${pg.swimmers.length === 1 ? '' : 's'}?\n\n${swimmerList}\n\n` + `This removes their enrollments, credit balances, and pending replacement entries.\n` + (doomed.length ? `\nAlso deleting ${doomed.length} family group${doomed.length === 1 ? '' : 's'}, which would otherwise be left behind with nobody in ${doomed.length === 1 ? 'it' : 'them'}:\n` + doomed.map(g => `• ${g.name}`).join('\n') + '\n' : '') + (shared.length ? `\nKeeping ${shared.length} group${shared.length === 1 ? '' : 's'} that other families are also in:\n` + shared.map(g => `• ${g.name}`).join('\n') + '\n' : '') + `\n⚠️ This cannot be undone. Session names on the timetable remain but become unlinked.`)) return;
+    if (!confirm(`PERMANENTLY DELETE account "${pg.name}" and all ${pg.swimmers.length} swimmer${pg.swimmers.length === 1 ? '' : 's'}?\n\n${swimmerList}\n\n` + `There is no invoice and no attendance against this account, so there is ` + `nothing to keep. For a family that has swum here, archive instead.\n\n` + `This removes their enrollments, credit balances, and pending replacement entries.\n` + (doomed.length ? `\nAlso deleting ${doomed.length} family group${doomed.length === 1 ? '' : 's'}, which would otherwise be left behind with nobody in ${doomed.length === 1 ? 'it' : 'them'}:\n` + doomed.map(g => `• ${g.name}`).join('\n') + '\n' : '') + (shared.length ? `\nKeeping ${shared.length} group${shared.length === 1 ? '' : 's'} that other families are also in:\n` + shared.map(g => `• ${g.name}`).join('\n') + '\n' : '') + `\n⚠️ This cannot be undone. Session names on the timetable remain but become unlinked.`)) return;
     try {
       setError('');
       for (const s of pg.swimmers) {

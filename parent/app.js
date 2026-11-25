@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 8;
+  var BUILD = 9;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -177,6 +177,39 @@
     if ($('pw')) $('pw').value = '';
   }
 
+  // ── Still ours? ──────────────────────────────────────────────────────
+  // A session already open does not pass the sign-in gate again, ever.
+  // It renews itself quietly and keeps working, so a family archived
+  // this morning went on opening the app -- their own name at the top
+  // and nothing underneath, which reads as the system having lost them
+  // rather than as an account that has been closed.
+  //
+  // Asked when the app is brought back to the front, which on a phone is
+  // every time it is opened. Cheap, and it is the same call the app
+  // already makes on the way in.
+  //
+  // Silent on a failure: no signal at the pool is not a reason to sign a
+  // parent out, and the next check is one tap away.
+  var recheckAt = 0;
+  function recheckAccess() {
+    if (!session) return;
+    var now = Date.now();
+    if (now - recheckAt < 30000) return;    // not on every flicker
+    recheckAt = now;
+    rpc('my_family').then(function (f) {
+      if (f && f.ok !== true) {
+        signOut();
+        note($('loginNote'), f.error
+          || 'This account is no longer active. Call the centre.', true);
+      }
+    }).catch(function () { /* offline; ask again next time */ });
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) recheckAccess();
+  });
+  window.addEventListener('focus', recheckAccess);
+
   // ── The account menu ─────────────────────────────────────────────────
   function closeWhoMenu() {
     var m = $('whoMenu'), b = $('whoBtn');
@@ -321,12 +354,14 @@
   function enter() {
     return rpc('my_family').then(function (f) {
       if (!f || f.ok !== true) {
-        // Signed in to Supabase, but no parent account answers to this
-        // user. Says so rather than showing an empty app.
+        // Either no account answers to this user, or the family has been
+        // archived. The server words both, because the words belong with
+        // the rule rather than in whatever build this phone happens to
+        // be running.
         signOut();
-        note($('loginNote'),
-          'That number signed in, but it is not linked to a family yet. '
-          + 'Call the centre and we will connect it.', true);
+        note($('loginNote'), (f && f.error)
+          || 'That number signed in, but it is not linked to a family yet. '
+           + 'Call the centre and we will connect it.', true);
         return;
       }
       family = f;

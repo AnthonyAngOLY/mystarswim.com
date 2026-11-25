@@ -42,8 +42,17 @@ const GOOD_PW = 'swimtime2026';
 const LOGIN = { off: false, mustUseCode: false, fails: 0 };
 const SETPW = { fail: false, saved: 0 };
 
+// Flipped by /__archive, so a signed-in session can be archived from
+// under the app exactly as archiving a family does.
+const ARCHIVED = { on: false };
+
 const RPC = {
-  my_family: () => ({
+  my_family: () => (ARCHIVED.on ? {
+    ok: false, archived: true,
+    error: 'This account is no longer active. Nothing has been lost \u2014 call '
+         + 'the centre and we can send you invoices, receipts or your '
+         + 'child\u2019s progress whenever you need them.'
+  } : {
     ok: true, account_id: 'acct-1', display_name: 'Kwan Suk Lee',
     phone: '+60123456001',
     children: [{ id: 'stu-1', name: 'Kobe Kwan', age: 4, lesson_type: 'Toddler Group' },
@@ -198,6 +207,10 @@ http.createServer((req, res) => {
       LOGIN.fails = 0;
       send(res, 200, JSON.stringify({ ok: true, access_token: 'demo', refresh_token: 'demo' }));
     });
+  }
+  if (p === '/__archive') {
+    ARCHIVED.on = new URL(req.url, 'http://x').searchParams.get('on') === '1';
+    return send(res, 200, JSON.stringify(ARCHIVED));
   }
   if (p === '/__login') {
     const q = new URL(req.url, 'http://x').searchParams;
