@@ -4028,10 +4028,35 @@ function App({ currentUser, onLogout }){
   async function deleteAccount(pg){
     if(!pg?.swimmers?.length){ alert('No swimmers found on this account.'); return; }
     const swimmerList = pg.swimmers.map(s => `• ${s.name}`).join('\n');
+
+    // Every family group these swimmers belong to. Deleting them used to
+    // leave each group standing with membership rows pointing at nobody,
+    // which the Groups screen could only report as "0 members" -- the
+    // same as a group that was never used. Six of them accumulated
+    // before anyone noticed.
+    const groupIds = new Set();
+    pg.swimmers.forEach(s => (groupIdsByStudent[s.id] || []).forEach(id => groupIds.add(id)));
+    // Only the groups that have nothing else in them. A group shared with
+    // another family is that family's group too, and is not ours to
+    // remove.
+    const doomed = [], shared = [];
+    groupIds.forEach(id => {
+      const mates = (membersByGroup[id] || []).filter(m => !pg.swimmers.some(x => x.id === m.id));
+      (mates.length ? shared : doomed).push(groupById[id] || { id, name: '(unnamed group)' });
+    });
+
     if(!confirm(
       `PERMANENTLY DELETE account "${pg.name}" and all ${pg.swimmers.length} swimmer${pg.swimmers.length===1?'':'s'}?\n\n${swimmerList}\n\n` +
-      `This removes their enrollments, credit balances, and pending replacement entries.\n\n` +
-      `⚠️ This cannot be undone. Session names on the timetable remain but become unlinked.`
+      `This removes their enrollments, credit balances, and pending replacement entries.\n` +
+      (doomed.length
+        ? `\nAlso deleting ${doomed.length} family group${doomed.length===1?'':'s'}, which would otherwise be left behind with nobody in ${doomed.length===1?'it':'them'}:\n`
+          + doomed.map(g => `• ${g.name}`).join('\n') + '\n'
+        : '') +
+      (shared.length
+        ? `\nKeeping ${shared.length} group${shared.length===1?'':'s'} that other families are also in:\n`
+          + shared.map(g => `• ${g.name}`).join('\n') + '\n'
+        : '') +
+      `\n⚠️ This cannot be undone. Session names on the timetable remain but become unlinked.`
     )) return;
     try{
       setError('');
@@ -4040,11 +4065,20 @@ function App({ currentUser, onLogout }){
         await deleteRows('student_enrollments',     { student_id: s.id }).catch(()=>{});
         await deleteRows('replacement_pending',     { student_id: s.id }).catch(()=>{});
         await deleteRows('pending_credits',         { student_id: s.id }).catch(()=>{});
+        await deleteRows('family_group_members',    { student_id: s.id }).catch(()=>{});
         await deleteRows('students',                { id: s.id });
       }
+      // After the swimmers, because a group cannot go while rows still
+      // point into it.
+      for(const g of doomed){
+        await deleteRows('family_groups', { id: g.id }).catch(()=>{});
+      }
       await loadStudents();
+      await loadGroups();
+      await loadGroupMemberships();
       await loadSessions();
-      setStatus(`Deleted account "${pg.name}" — ${pg.swimmers.length} swimmer${pg.swimmers.length===1?'':'s'} removed.`);
+      setStatus(`Deleted account "${pg.name}" — ${pg.swimmers.length} swimmer${pg.swimmers.length===1?'':'s'}`
+        + (doomed.length ? ` and ${doomed.length} empty group${doomed.length===1?'':'s'}` : '') + ' removed.');
     } catch(err){ handleErr(err); alert(err.message || 'Failed to delete account'); }
   }
 
@@ -4983,6 +5017,7 @@ function App({ currentUser, onLogout }){
                          : 'Search account, email, phone, swimmer…'} />
           </div>}
       {!loading && view==='accounts' && (accountSection==='accounts'||accountSection==='familyGroups') && <ParentsView
+        groupMemberships={groupMemberships}
         externalSearchQ={accountSearchQ}
         branches={options.branches||[]}
         accountSection={accountSection}
@@ -8604,7 +8639,7 @@ function BranchFilterPills({ branches, value, onChange }){
   </div>;
 }
 
-function ParentsView({ accountSection, setAccountSection, branches, parentGroups, lessonTypes, lessonTypeById, packages, packageById, products, familyGroups, groupById, membersByGroup, creditByKey, subscriptions, addStudent, updateStudent, deleteStudent, deleteAccount, addGroup, updateGroup, deleteGroup, setStudentGroup, addStudentToGroup, removeStudentFromGroup, groupIdsByStudent, addSubscription, cancelSubscription, adjustBalanceTo, scheduleByStudent, sessions, poolById, selectedWeekStart, createInvoice, setAdminSection, onJumpToSession, setView, externalSearchQ }){
+function ParentsView({ accountSection, setAccountSection, branches, parentGroups, lessonTypes, lessonTypeById, packages, packageById, products, familyGroups, groupById, membersByGroup, groupMemberships, creditByKey, subscriptions, addStudent, updateStudent, deleteStudent, deleteAccount, addGroup, updateGroup, deleteGroup, setStudentGroup, addStudentToGroup, removeStudentFromGroup, groupIdsByStudent, addSubscription, cancelSubscription, adjustBalanceTo, scheduleByStudent, sessions, poolById, selectedWeekStart, createInvoice, setAdminSection, onJumpToSession, setView, externalSearchQ }){
   // ── Sub-view driven by external accountSection prop (from nav dropdown) ──
   const adminView = accountSection || 'accounts';
   const setAdminView = (v) => { if(setAccountSection) setAccountSection(v); };
@@ -8769,6 +8804,7 @@ function ParentsView({ accountSection, setAccountSection, branches, parentGroups
     {adminView === 'familyGroups' && <FamilyGroupsAdminView
       familyGroups={familyGroups}
       membersByGroup={membersByGroup}
+      groupMemberships={groupMemberships}
       lessonTypes={lessonTypes}
       lessonTypeById={lessonTypeById}
       packages={packages}
@@ -9171,7 +9207,7 @@ function ParentsView({ accountSection, setAccountSection, branches, parentGroups
 // context, member names, and the guardian/account each member belongs to.
 // Use to audit and clean up legacy/test data without dropping to SQL.
 // ============================================================================
-function FamilyGroupsAdminView({ familyGroups, membersByGroup, lessonTypes, lessonTypeById, packages, packageById, deleteGroup, updateGroup, externalSearchQ }){
+function FamilyGroupsAdminView({ familyGroups, membersByGroup, groupMemberships, lessonTypes, lessonTypeById, packages, packageById, deleteGroup, updateGroup, externalSearchQ }){
   const [localSearchQ, setLocalSearchQ] = useState('');
   const searchQ = externalSearchQ !== undefined ? externalSearchQ : localSearchQ;
   const setSearchQ = setLocalSearchQ;
@@ -9180,16 +9216,53 @@ function FamilyGroupsAdminView({ familyGroups, membersByGroup, lessonTypes, less
   const [editingNameId, setEditingNameId] = useState(null);
   const [editingNameVal, setEditingNameVal] = useState('');
 
+  // How many membership ROWS each group holds, including the ones that
+  // point at swimmers who no longer exist.
+  //
+  // This is the whole difference between a group nobody ever used and a
+  // group whose family was deleted out from under it. membersByGroup
+  // only carries swimmers still in `students` -- a membership row whose
+  // swimmer has gone is skipped silently -- so both end up showing "0
+  // members" and reading identically. Deleting an account deletes its
+  // swimmers and nothing else, so the second kind is the one this screen
+  // exists to find.
+  //
+  // groupMemberships is null on a database where the junction table has
+  // not been migrated. Then there is nothing to count and every empty
+  // group is reported as never used, which is the honest answer rather
+  // than a guess.
+  const rowsByGroup = React.useMemo(() => {
+    const m = {};
+    (groupMemberships || []).forEach(x => { m[x.familyGroupId] = (m[x.familyGroupId] || 0) + 1; });
+    return m;
+  }, [groupMemberships]);
+  const canSeeGhosts = Array.isArray(groupMemberships);
+
   // Enrich each group with derived signals: package info, member rows, account names
   const enriched = (familyGroups || []).map(g => {
     const members = membersByGroup?.[g.id] || [];
     const pkg = g.packageId ? (typeof packageById === 'function' ? packageById(g.packageId) : packageById?.[g.packageId]) : null;
     const lt = pkg?.lesson_type_id ? (typeof lessonTypeById === 'function' ? lessonTypeById(pkg.lesson_type_id) : lessonTypeById?.[pkg.lesson_type_id]) : null;
     const accountNames = [...new Set(members.map(m => m.guardianName || m.guardian_name || '— No account —'))];
+    const ghosts = Math.max(0, (rowsByGroup[g.id] || 0) - members.length);
+    const liveMembers = members.filter(m => m.isActive !== false);
+
+    // live      — somebody is still swimming under it
+    // archived  — its swimmers are all switched off, as the Accounts
+    //             screen means archived
+    // orphaned  — its swimmers were deleted; the group was never told
+    // unused    — created and nothing ever joined it
+    const state = members.length
+      ? (liveMembers.length ? 'live' : 'archived')
+      : (ghosts > 0 ? 'orphaned' : 'unused');
+
     return {
       ...g,
       memberRows: members,
       memberCount: members.length,
+      liveCount: liveMembers.length,
+      ghosts,
+      state,
       pkg,
       pkgName: pkg?.name || null,
       ltName: lt?.name || null,
@@ -9204,12 +9277,29 @@ function FamilyGroupsAdminView({ familyGroups, membersByGroup, lessonTypes, less
   const counts = {
     all: enriched.length,
     empty: enriched.filter(g => g.isEmpty).length,
+    live: enriched.filter(g => g.state === 'live').length,
+    archived: enriched.filter(g => g.state === 'archived').length,
+    orphaned: enriched.filter(g => g.state === 'orphaned').length,
+    unused: enriched.filter(g => g.state === 'unused').length,
     configured: enriched.filter(g => g.isConfigured && !g.isEmpty).length,
     misconfigured: enriched.filter(g => g.isMisconfigured).length
   };
 
+  // What each state is, in the words the screen uses.
+  const STATE = {
+    live:     { label: 'Live',            colour: '#065F46', bg: '#D1FAE5',
+                why: 'at least one swimmer still active' },
+    archived: { label: 'Archived',        colour: '#92400E', bg: '#FEF3C7',
+                why: 'has swimmers, none of them active' },
+    orphaned: { label: 'Account deleted', colour: '#991B1B', bg: '#FEE2E2',
+                why: 'its swimmers were deleted and the group was left behind' },
+    unused:   { label: 'Never used',      colour: '#475569', bg: '#F1F5F9',
+                why: 'created, and nobody ever joined it' }
+  };
+
   // Apply filter + search
   const filtered = enriched.filter(g => {
+    if(['live','archived','orphaned','unused'].includes(filter) && g.state !== filter) return false;
     if(filter === 'empty' && !g.isEmpty) return false;
     if(filter === 'configured' && (!g.isConfigured || g.isEmpty)) return false;
     if(filter === 'misconfigured' && !g.isMisconfigured) return false;
@@ -9228,13 +9318,21 @@ function FamilyGroupsAdminView({ familyGroups, membersByGroup, lessonTypes, less
     return (a.name || '').localeCompare(b.name || '');
   });
 
-  async function bulkDeleteEmpty(){
-    const empties = enriched.filter(g => g.isEmpty);
-    if(empties.length === 0){ alert('No empty groups to delete.'); return; }
-    if(!confirm(`Delete ALL ${empties.length} empty family group${empties.length === 1 ? '' : 's'}? This cannot be undone.\n\nGroups to delete:\n${empties.map(g => `• ${g.name}`).join('\n')}`)) return;
+  // One kind at a time, and the confirmation says which kind and why,
+  // because "empty" covered two different situations and an audit that
+  // cannot tell them apart is not an audit.
+  async function bulkDeleteState(which){
+    const list = enriched.filter(g => g.state === which);
+    if(list.length === 0){ alert('None to delete.'); return; }
+    const st = STATE[which];
+    if(!confirm(
+      `Delete ALL ${list.length} family group${list.length === 1 ? '' : 's'} marked “${st.label}”?\n\n` +
+      `${st.label}: ${st.why}.\n\n` +
+      `This cannot be undone.\n\nGroups to delete:\n${list.map(g => `• ${g.name}`).join('\n')}`
+    )) return;
     setBulkBusy(true);
     try{
-      for(const g of empties){
+      for(const g of list){
         // eslint-disable-next-line no-await-in-loop
         await deleteGroup(g, /*silentConfirm*/ true);
       }
@@ -9248,24 +9346,32 @@ function FamilyGroupsAdminView({ familyGroups, membersByGroup, lessonTypes, less
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap',marginBottom:10}}>
         <div>
           <div style={{fontSize:18,fontWeight:800}}>👪 Family Groups — Administration</div>
-          <div className="small subtle" style={{marginTop:3}}>Every family group in the system, with members and package context. Audit legacy or test data here; bulk-clean empty groups in one click.</div>
+          <div className="small subtle" style={{marginTop:3}}>Every family group in the system, and what each one is still attached to. Deleting an account deletes its swimmers only, so a group whose family has gone stays here looking exactly like one nobody ever used.</div>
         </div>
         <div style={{display:'flex',gap:14,alignItems:'flex-end',flexWrap:'wrap'}}>
           <div><div className="small subtle">Total</div><div style={{fontSize:22,fontWeight:800,color:'var(--primary)'}}>{counts.all}</div></div>
-          <div><div className="small subtle">Configured</div><div style={{fontSize:22,fontWeight:800,color:'#10B981'}}>{counts.configured}</div></div>
-          <div><div className="small subtle">Empty</div><div style={{fontSize:22,fontWeight:800,color:'#94A3B8'}}>{counts.empty}</div></div>
-          <div><div className="small subtle">Misconfigured</div><div style={{fontSize:22,fontWeight:800,color:'#F59E0B'}}>{counts.misconfigured}</div></div>
+          <div><div className="small subtle">Live</div><div style={{fontSize:22,fontWeight:800,color:'#10B981'}}>{counts.live}</div></div>
+          <div><div className="small subtle">Archived</div><div style={{fontSize:22,fontWeight:800,color:'#F59E0B'}}>{counts.archived}</div></div>
+          <div><div className="small subtle">Account deleted</div><div style={{fontSize:22,fontWeight:800,color:'#DC2626'}}>{counts.orphaned}</div></div>
+          <div><div className="small subtle">Never used</div><div style={{fontSize:22,fontWeight:800,color:'#94A3B8'}}>{counts.unused}</div></div>
         </div>
       </div>
       <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
         {externalSearchQ === undefined && <input className="input" style={{flex:1,minWidth:240,maxWidth:420}} placeholder="Search by group, package, lesson type, account, or member name…" value={searchQ} onChange={e=>setSearchQ(e.target.value)} />}
         <div className="tabs" style={{gap:2,padding:2}}>
           <button className={`tab ${filter==='all'?'active':''}`}            style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('all')}>All ({counts.all})</button>
-          <button className={`tab ${filter==='configured'?'active':''}`}     style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('configured')}>Configured ({counts.configured})</button>
-          <button className={`tab ${filter==='empty'?'active':''}`}          style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('empty')}>Empty ({counts.empty})</button>
-          <button className={`tab ${filter==='misconfigured'?'active':''}`}  style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('misconfigured')}>Misconfigured ({counts.misconfigured})</button>
+          <button className={`tab ${filter==='live'?'active':''}`}           style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('live')}>Live ({counts.live})</button>
+          <button className={`tab ${filter==='archived'?'active':''}`}       style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('archived')}>Archived ({counts.archived})</button>
+          <button className={`tab ${filter==='orphaned'?'active':''}`}       style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('orphaned')}>Account deleted ({counts.orphaned})</button>
+          <button className={`tab ${filter==='unused'?'active':''}`}         style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('unused')}>Never used ({counts.unused})</button>
+          <button className={`tab ${filter==='misconfigured'?'active':''}`}  style={{padding:'4px 10px',fontSize:11}} onClick={()=>setFilter('misconfigured')}>No package ({counts.misconfigured})</button>
         </div>
-        {counts.empty > 0 ? <button className="btn btn-danger small" onClick={bulkDeleteEmpty} disabled={bulkBusy} title={`Delete all ${counts.empty} groups with zero members`}>{bulkBusy ? 'Cleaning…' : `🧹 Clean ${counts.empty} empty`}</button> : null}
+        {/* Cleaning the two dead kinds separately, never together: one is
+            a group whose family was deleted and the other is a group
+            nobody ever used, and somebody auditing this wants to agree to
+            them one kind at a time. */}
+        {counts.orphaned > 0 ? <button className="btn btn-danger small" onClick={()=>bulkDeleteState('orphaned')} disabled={bulkBusy} title="Delete the groups whose swimmers were deleted">{bulkBusy ? 'Cleaning…' : `🧹 Clean ${counts.orphaned} orphaned`}</button> : null}
+        {counts.unused > 0 ? <button className="btn btn-danger small" onClick={()=>bulkDeleteState('unused')} disabled={bulkBusy} title="Delete the groups nobody ever joined">{bulkBusy ? 'Cleaning…' : `🧹 Clean ${counts.unused} never used`}</button> : null}
       </div>
     </div>
 
@@ -9295,6 +9401,20 @@ function FamilyGroupsAdminView({ familyGroups, membersByGroup, lessonTypes, less
                   ? <span className="fga-pkg-tag">{g.ltName || '?'} · {g.pkgName}</span>
                   : <span className="fga-pkg-tag fga-pkg-warn">⚠ no package set</span>}
                 <span className={`fga-count ${g.isEmpty ? 'is-empty' : ''}`}>{g.memberCount} member{g.memberCount === 1 ? '' : 's'}</span>
+                <span title={STATE[g.state].why}
+                      style={{fontSize:10.5,fontWeight:800,letterSpacing:'.03em',textTransform:'uppercase',
+                              padding:'2px 7px',borderRadius:999,
+                              color:STATE[g.state].colour,background:STATE[g.state].bg}}>
+                  {STATE[g.state].label}
+                </span>
+                {/* The count of swimmers that were deleted under it. The
+                    only visible trace that this group ever had a family. */}
+                {g.ghosts > 0 ? <span className="small subtle" title="Membership rows pointing at swimmers that no longer exist">
+                  {g.ghosts} deleted swimmer{g.ghosts === 1 ? '' : 's'}
+                </span> : null}
+                {g.state === 'archived' && g.memberCount > 0 ? <span className="small subtle">
+                  all {g.memberCount} archived
+                </span> : null}
                 {g.accountNames.length > 0 ? <span className="fga-accounts">{g.accountNames.join(', ')}</span> : null}
               </div>
             </div>

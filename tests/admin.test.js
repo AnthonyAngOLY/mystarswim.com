@@ -830,6 +830,81 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
                       + JSON.stringify(t.slice(0, 300)));
   });
 
+  // ── Family groups, and what each is still attached to ─────────────────
+  // Deleting an account deletes its SWIMMERS and nothing else. The
+  // membership rows stay, pointing at swimmers that no longer exist, and
+  // the screen skipped them silently -- so a group whose family was
+  // deleted and a group nobody ever used both read "0 members" and were
+  // cleaned under one button called Empty. Six accumulated that way.
+  const groupsView = () => page.evaluate(() => {
+    let host = document.getElementById('fg-host');
+    if (!host) { host = document.createElement('div'); host.id = 'fg-host'; document.body.appendChild(host); }
+    const S = (id, name, active, acct) => ({ id, name, isActive: active, accountId: acct,
+                                             guardianName: acct ? 'Lee Oy Yin' : null });
+    const live = S('s1', 'Mira', true, 'a1');
+    const gone = S('s2', 'Kobe', false, 'a1');
+    ReactDOM.createRoot(host).render(React.createElement(FamilyGroupsAdminView, {
+      familyGroups: [
+        { id: 'g-live',  name: 'Lee Family',     packageId: 'p1', groupType: 'discount' },
+        { id: 'g-arch',  name: 'Tan Family',     packageId: 'p1', groupType: 'discount' },
+        { id: 'g-orph',  name: 'Deleted Family', packageId: 'p1', groupType: 'discount' },
+        { id: 'g-new',   name: 'Empty Shell',    packageId: 'p1', groupType: 'discount' }
+      ],
+      // Only swimmers that still exist. g-orph has none, because its
+      // swimmers were deleted.
+      membersByGroup: { 'g-live': [live], 'g-arch': [gone] },
+      // The raw rows. g-orph still holds two, pointing at nobody.
+      groupMemberships: [
+        { familyGroupId: 'g-live', studentId: 's1' },
+        { familyGroupId: 'g-arch', studentId: 's2' },
+        { familyGroupId: 'g-orph', studentId: 'deleted-1' },
+        { familyGroupId: 'g-orph', studentId: 'deleted-2' }
+      ],
+      lessonTypes: [], lessonTypeById: () => ({ name: 'LTS' }),
+      packages: [], packageById: () => ({ name: 'FAM3', lesson_type_id: 'lt1' }),
+      deleteGroup: () => {}, updateGroup: null
+    }));
+  });
+
+  const cardFor = (name) => page.locator('#fg-host .fga-card').filter({ hasText: name });
+
+  await step('a group whose family was deleted is not called empty', async () => {
+    await groupsView();
+    await page.waitForTimeout(700);
+    const t = await cardFor('Deleted Family').innerText();
+    if (!/Account deleted/i.test(t))
+      throw new Error('it reads as something else: ' + JSON.stringify(t.replace(/\n/g, ' ')));
+    if (!/2 deleted swimmers/i.test(t))
+      throw new Error('it does not say how many swimmers went with it: ' + JSON.stringify(t.replace(/\n/g, ' ')));
+  });
+
+  await step('and a group nobody ever joined is told apart from it', async () => {
+    const t = await cardFor('Empty Shell').innerText();
+    if (/Account deleted/i.test(t))
+      throw new Error('a group that never had anybody is blamed on a deletion');
+    if (!/Never used/i.test(t))
+      throw new Error('it is not marked as never used: ' + JSON.stringify(t.replace(/\n/g, ' ')));
+  });
+
+  await step('a group with only archived swimmers is archived, not live', async () => {
+    const t = await cardFor('Tan Family').innerText();
+    if (!/Archived/i.test(t))
+      throw new Error('archived swimmers read as live: ' + JSON.stringify(t.replace(/\n/g, ' ')));
+    const live = await cardFor('Lee Family').innerText();
+    if (!/Live/i.test(live)) throw new Error('an active swimmer does not read as live');
+    if (/Archived/i.test(live)) throw new Error('a live group is also marked archived');
+  });
+
+  await step('the two dead kinds are cleaned separately, never together', async () => {
+    const btns = await page.locator('#fg-host button').allInnerTexts();
+    const orphan = btns.filter(b => /orphan/i.test(b));
+    const unused = btns.filter(b => /never used/i.test(b));
+    if (!orphan.length || !unused.length)
+      throw new Error('there is no way to clean one kind without the other: ' + JSON.stringify(btns));
+    if (btns.some(b => /Clean \d+ empty/i.test(b)))
+      throw new Error('the old one-button clean is still there, merging both kinds');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');
