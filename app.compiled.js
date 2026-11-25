@@ -7407,7 +7407,7 @@ function App({
     ariaLabel: "Accounts section",
     value: accountSection,
     onChange: setAccountSection,
-    items: [['accounts', 'Accounts'], ['familyGroups', 'Groups'], ['swimmers', 'Swimmers'], ['invoices', 'Invoices'], ['receipts', 'Receipts'], ['pendingCredits', 'Pending Credits'], ['replacements', 'Replacements'], ['aging', 'Aging'], ['codes', 'Discounts'], ...(canSystem ? [['reports', 'Reports']] : [])]
+    items: [['accounts', 'Accounts'], ['familyGroups', 'Groups'], ['swimmers', 'Swimmers'], ['invoices', 'Invoices'], ['receipts', 'Receipts'], ['pendingCredits', 'Pending Credits'], ['replacements', 'Replacements'], ['aging', 'Aging'], ['codes', 'Discounts'], ['signin', 'Sign-in codes'], ...(canSystem ? [['reports', 'Reports']] : [])]
   }), /*#__PURE__*/React.createElement("div", {
     className: "side-content"
   }, ['accounts', 'familyGroups', 'swimmers', 'invoices', 'receipts'].includes(accountSection) && /*#__PURE__*/React.createElement("div", {
@@ -7556,7 +7556,7 @@ function App({
     packageById: packageById,
     onConfirm: confirmCredit,
     onReverse: reverseCredit
-  }), !loading && view === 'accounts' && accountSection === 'replacements' && /*#__PURE__*/React.createElement(ReplacementTrackerView, null), !loading && view === 'accounts' && accountSection === 'aging' && /*#__PURE__*/React.createElement(AgingReportView, {
+  }), !loading && view === 'accounts' && accountSection === 'replacements' && /*#__PURE__*/React.createElement(ReplacementTrackerView, null), !loading && view === 'accounts' && accountSection === 'signin' && /*#__PURE__*/React.createElement(SigninCodesView, null), !loading && view === 'accounts' && accountSection === 'aging' && /*#__PURE__*/React.createElement(AgingReportView, {
     invoices: invoices,
     pmts: pmts,
     branches: options.branches || []
@@ -13280,6 +13280,234 @@ function printReplacementTracker(rows, st, trackedFrom, filterLabel) {
   + 'thead{display:table-header-group}\n' + 'tr{break-inside:avoid;page-break-inside:avoid}\n' + 'thead th{font-size:6.5pt;text-transform:uppercase;letter-spacing:.5px;color:#999;' + 'font-weight:600;padding:4pt;border-bottom:1pt solid #e5e5e5;text-align:left}\n' + 'thead th.n,thead th.nt{text-align:right}\n' + 'td{padding:4pt;border-bottom:1pt solid #f0f0f0;line-height:1.4;vertical-align:top}\n' + '.nm{font-weight:600;font-size:8.5pt}\n' + '.pa{font-size:7.5pt;color:#666}\n' + '.n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}\n' + '.nt{text-align:right;white-space:nowrap}\n' + '.b{font-weight:700}.red{color:#B91C1C}\n' + '.muted{color:#999;font-size:7pt;font-weight:400}\n' + '.chip{display:inline-block;padding:1pt 5pt;border-radius:2pt;font-size:6.5pt;' + 'font-weight:700;background:#FEE2E2;color:#991B1B}\n' + '.is-over td{background:#FFF5F5}\n' + '.ftr{margin-top:10pt;padding-top:5pt;border-top:1pt solid #e5e5e5;' + 'font-size:6pt;color:#aaa;display:flex;justify-content:space-between}\n' + '.empty{padding:20pt;text-align:center;color:#999;font-size:8pt}\n' + '</style>\n' + '<script>window.onload=function(){setTimeout(function(){window.print()},350)}<\/script>\n' + '</head><body><div class="sheet">\n' + '<div class="hdr">' + '<div><img class="logo" src="' + logo + '" onerror="this.style.display=\'none\'">' + '<div class="co">' + adminEsc(ADMIN_COMPANY.name) + ' (' + adminEsc(ADMIN_COMPANY.reg) + ')<br>' + adminEsc(ADMIN_COMPANY.address) + '</div></div>' + '<div><div class="ttl">Replacements</div><div class="meta">' + adminEsc(filterLabel) + '<br>Printed ' + printed + '</div></div>' + '</div>\n' + '<div class="tiles">' + tile(rows.length, 'swimmers listed') + tile(repCount, 'have replaced a class') + tile(anyCount, 'with an emergency') + '<div class="tile' + (overCount ? ' warn' : '') + '">' + '<div class="big">' + overCount + '</div>' + '<div class="lbl">over ' + pc(limit) + '</div></div>' + '</div>\n' + '<div class="note"><b>Replacements</b> count each swimmer&rsquo;s whole history. ' + '<b>Emergencies</b> &mdash; a request with less than ' + hours + ' hours notice &mdash; count only ' + 'from ' + from + ', which is when we began recording when a parent told us. Nothing before that ' + 'can be sorted into late or planned, so it is not guessed at.</div>\n' + (rows.length ? '<table><thead><tr><th>Swimmer</th><th>Parent</th><th class="n">Classes</th>' + '<th class="n">Replaced</th><th class="n">Emergency</th><th class="n">Rate</th>' + '<th class="nt"></th></tr></thead><tbody>' + body + '</tbody></table>' : '<div class="empty">Nobody matches that.</div>') + '\n<div class="ftr"><span>' + adminEsc(ADMIN_COMPANY.name) + '</span>' + '<span>' + (st?.enforce_emergency_limit ? 'The ' + pc(limit) + ' limit is being enforced.' : 'The ' + pc(limit) + ' limit is watched, not enforced.') + '</span></div>\n' + '</div></body></html>';
   w.document.write(html);
   w.document.close();
+}
+
+// ── Sign-in codes ────────────────────────────────────────────────────
+// What the parent sign-in costs, and whether passwords are displacing it.
+//
+// Every code is an SMS Twilio charges for, and nothing recorded how many
+// were going out or why. The question that needed an answer was not "is
+// it working" but "why was the bill that" -- and a bill has no detail on
+// it beyond a number.
+//
+// The ratio at the top is the one worth watching. Codes are the cost;
+// passwords are free. If codes are not falling as passwords are set,
+// something is signing parents out and the password is not catching it.
+function SigninCodesView() {
+  const [rows, setRows] = useState(null);
+  const [up, setUp] = useState(null);
+  const [err, setErr] = useState('');
+  const [days, setDays] = useState(30);
+  // Not a Twilio reading -- a figure to multiply by, so the table reads
+  // in ringgit rather than in counts. The real rate is per carrier.
+  const [rate, setRate] = useState(0.35);
+  async function load() {
+    try {
+      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      const [spend, uptake] = await Promise.all([rest('rpc/parent_otp_spend', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_from: from
+        })
+      }), rest('rpc/parent_password_uptake', {
+        method: 'POST',
+        body: '{}'
+      }).catch(() => null)]);
+      setRows(Array.isArray(spend) ? spend : []);
+      setUp(uptake && uptake.ok ? uptake : null);
+      setErr('');
+    } catch (e) {
+      setErr(e.message);
+      setRows([]);
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [days]);
+  if (rows === null) return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…"));
+  const sum = k => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  const sent = sum('sent'),
+    failed = sum('failed');
+  const cost = (sent + failed) * rate;
+  const pwOk = up ? Number(up.passwords_30d) || 0 : 0;
+  const codes30 = up ? Number(up.codes_30d) || 0 : 0;
+  const share = pwOk + codes30 ? Math.round(pwOk * 100 / (pwOk + codes30)) : null;
+  const tile = (label, value, note, colour) => /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      flex: '1 1 150px',
+      minWidth: 150,
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, label), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 22,
+      fontWeight: 800,
+      color: colour || 'var(--text)'
+    }
+  }, value), note && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 2
+    }
+  }, note));
+  return /*#__PURE__*/React.createElement("div", null, err && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      borderColor: 'var(--red-bd)',
+      background: '#FFF5F5'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 700,
+      marginBottom: 4
+    }
+  }, "Could not read the log"), /*#__PURE__*/React.createElement("div", {
+    className: "small"
+  }, err), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 6
+    }
+  }, "If this says the function does not exist, supabase_parent_signin_guard.sql has not been run yet.")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 10,
+      flexWrap: 'wrap',
+      marginBottom: 12
+    }
+  }, tile('Codes sent', sent, `last ${days} days`), tile('Roughly', 'RM ' + cost.toFixed(2), `at RM ${rate.toFixed(2)} each`, '#B45309'), tile('Failed to send', failed, failed ? 'look at the Twilio log' : 'none', failed ? '#DC2626' : undefined), up && tile('Passwords set', (up.passwords_set == null ? '—' : up.passwords_set) + ' of ' + up.accounts_live, 'accounts that can sign in'), share !== null && tile('Signed in free', share + '%', 'password rather than a code', share >= 50 ? 'var(--green-tx)' : '#B45309')), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      flexWrap: 'wrap',
+      alignItems: 'flex-end'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Period"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: days,
+    onChange: e => setDays(Number(e.target.value))
+  }, /*#__PURE__*/React.createElement("option", {
+    value: 7
+  }, "Last 7 days"), /*#__PURE__*/React.createElement("option", {
+    value: 30
+  }, "Last 30 days"), /*#__PURE__*/React.createElement("option", {
+    value: 90
+  }, "Last 90 days"))), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      margin: 0
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Cost per message (RM)"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    type: "number",
+    step: "0.01",
+    min: "0",
+    style: {
+      width: 120
+    },
+    value: rate,
+    onChange: e => setRate(Number(e.target.value) || 0)
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: load
+  }, "Refresh")), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 8
+    }
+  }, "The rate is yours to set — Twilio charges per carrier, so there is no one number. Only ", /*#__PURE__*/React.createElement("b", null, "Sent"), " and ", /*#__PURE__*/React.createElement("b", null, "Failed"), " cost anything; everything else in the table was refused before a message went out.")), /*#__PURE__*/React.createElement("div", {
+    className: "table-wrap"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Day"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Sent"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Failed"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Numbers"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Too soon"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Capped"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Not on file"), /*#__PURE__*/React.createElement("th", {
+    style: {
+      textAlign: 'right'
+    }
+  }, "Archived"))), /*#__PURE__*/React.createElement("tbody", null, rows.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    colSpan: 8,
+    className: "empty"
+  }, "Nothing yet. Every request for a code lands here, refusals included.")), rows.map(r => /*#__PURE__*/React.createElement("tr", {
+    key: r.day
+  }, /*#__PURE__*/React.createElement("td", null, r.day), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      fontWeight: 700
+    }
+  }, r.sent), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      color: Number(r.failed) ? '#DC2626' : 'var(--text-3)'
+    }
+  }, r.failed), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right'
+    }
+  }, r.numbers), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      color: 'var(--text-3)'
+    }
+  }, r.cooldown), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      color: Number(r.capped) ? '#B45309' : 'var(--text-3)'
+    }
+  }, r.capped), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      color: Number(r.unknown) > 20 ? '#DC2626' : 'var(--text-3)'
+    }
+  }, r.unknown), /*#__PURE__*/React.createElement("td", {
+    style: {
+      textAlign: 'right',
+      color: 'var(--text-3)'
+    }
+  }, r.archived)))))), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 10,
+      lineHeight: 1.6
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "Too soon"), " is the 60-second wait between codes. ", /*#__PURE__*/React.createElement("b", null, "Capped"), " is a number that asked too many times in an hour or a day. ", /*#__PURE__*/React.createElement("b", null, "Not on file"), " is a number we do not hold — a run of them in one day, against different numbers, is somebody working through a list rather than a parent mistyping.", /*#__PURE__*/React.createElement("b", null, " Archived"), " is a family whose swimmers are all archived; they are answered in the same words as a number not on file, on purpose."));
 }
 function ReplacementTrackerView() {
   const [rows, setRows] = useState(null);

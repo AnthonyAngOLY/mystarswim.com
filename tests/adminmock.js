@@ -78,6 +78,23 @@ http.createServer((req, res) => {
     return json(res, 200, [{ body: DB_TERMS }]);
   }
 
+  // Two days of sign-in spend, so the arithmetic on that screen has
+  // something to be wrong about. 12 sent and 1 failed is 13 chargeable
+  // at the rate the screen is set to; the refusals cost nothing and must
+  // not be counted.
+  if (p === '/rest/v1/rpc/parent_otp_spend') {
+    return json(res, 200, [
+      { day: '2026-11-24', sent: 9, failed: 1, cooldown: 4, capped: 2,
+        unknown: 31, archived: 1, numbers: 7 },
+      { day: '2026-11-23', sent: 3, failed: 0, cooldown: 0, capped: 0,
+        unknown: 0, archived: 0, numbers: 3 }
+    ]);
+  }
+  if (p === '/rest/v1/rpc/parent_password_uptake') {
+    return json(res, 200, { ok: true, accounts_live: 269, signed_in_ever: 40,
+      passwords_set: 30, codes_30d: 12, passwords_30d: 36 });
+  }
+
   // Anything else the bundle asks for is an empty table rather than a 404,
   // so a stray read does not look like the failure under test.
   if (p.startsWith('/rest/v1/')) return json(res, 200, []);

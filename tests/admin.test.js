@@ -785,6 +785,51 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (r.none) throw new Error('an invoice with no payments produced a receipt number');
   });
 
+  // ── Sign-in codes ─────────────────────────────────────────────────────
+  // Every code is an SMS that Twilio charges for, and the screen's job is
+  // to turn a count into ringgit. The arithmetic is the assertion: a
+  // refusal costs nothing, and counting one would overstate the bill and
+  // send somebody looking for a problem that is not there.
+  const codesView = () => page.evaluate(() => {
+    let host = document.getElementById('sc-host');
+    if (!host) { host = document.createElement('div'); host.id = 'sc-host'; document.body.appendChild(host); }
+    ReactDOM.createRoot(host).render(React.createElement(SigninCodesView));
+  });
+
+  await step('the sign-in screen reads the log and renders', async () => {
+    await codesView();
+    await page.waitForTimeout(900);
+    const t = await page.locator('#sc-host').innerText();
+    if (!/2026-11-24/.test(t)) throw new Error('the days are not listed: ' + t.slice(0, 160));
+  });
+
+  await step('it charges for what was sent, and not for what was refused', async () => {
+    const t = await page.locator('#sc-host').innerText();
+    // 9 + 3 sent, 1 failed = 13 chargeable at 0.35 = 4.55.
+    if (!/RM\s*4\.55/.test(t))
+      throw new Error('the cost is not 13 x 0.35: ' + JSON.stringify(t.slice(0, 300)));
+    // 4 too-soon + 2 capped + 31 not-on-file + 1 archived cost nothing.
+    if (/RM\s*17\.|RM\s*18\./.test(t))
+      throw new Error('it billed the refusals, which never left the building');
+  });
+
+  await step('changing the rate changes the figure', async () => {
+    const box = page.locator('#sc-host input[type="number"]');
+    await box.fill('0.5');
+    await page.waitForTimeout(400);
+    const t = await page.locator('#sc-host').innerText();
+    if (!/RM\s*6\.50/.test(t))
+      throw new Error('13 x 0.50 is not 6.50 on screen: ' + JSON.stringify(t.slice(0, 300)));
+  });
+
+  await step('and it shows how much of the traffic is already free', async () => {
+    const t = await page.locator('#sc-host').innerText();
+    // 36 password sign-ins against 12 codes is 75%.
+    if (!/75\s*%/.test(t))
+      throw new Error('the password share is not shown, which is the whole point: '
+                      + JSON.stringify(t.slice(0, 300)));
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

@@ -4972,7 +4972,7 @@ function App({ currentUser, onLogout }){
       {/* ── Accounts: left-column nav + content ── */}
       {!loading && view==='accounts' && <div className="side-shell">
         <SectionNav ariaLabel="Accounts section" value={accountSection} onChange={setAccountSection}
-          items={[['accounts','Accounts'],['familyGroups','Groups'],['swimmers','Swimmers'],['invoices','Invoices'],['receipts','Receipts'],['pendingCredits','Pending Credits'],['replacements','Replacements'],['aging','Aging'],['codes','Discounts'],...(canSystem?[['reports','Reports']]:[])]} />
+          items={[['accounts','Accounts'],['familyGroups','Groups'],['swimmers','Swimmers'],['invoices','Invoices'],['receipts','Receipts'],['pendingCredits','Pending Credits'],['replacements','Replacements'],['aging','Aging'],['codes','Discounts'],['signin','Sign-in codes'],...(canSystem?[['reports','Reports']]:[])]} />
         <div className="side-content">
           {['accounts','familyGroups','swimmers','invoices','receipts'].includes(accountSection) && <div style={{marginBottom:12,maxWidth:440}}>
             <input className="input" value={accountSearchQ} onChange={e=>setAccountSearchQ(e.target.value)}
@@ -5089,6 +5089,7 @@ function App({ currentUser, onLogout }){
         packageById={packageById} onConfirm={confirmCredit} onReverse={reverseCredit}
       />}
       {!loading && view==='accounts' && accountSection==='replacements' && <ReplacementTrackerView/>}
+      {!loading && view==='accounts' && accountSection==='signin' && <SigninCodesView/>}
       {!loading && view==='accounts' && accountSection==='aging' && <AgingReportView invoices={invoices} pmts={pmts} branches={options.branches||[]} />}
       {!loading && view==='accounts' && accountSection==='reports' && canSystem && <ReportsView
         invoices={invoices} pmts={pmts} pendingCredits={pendingCredits}
@@ -7830,6 +7831,144 @@ function printReplacementTracker(rows, st, trackedFrom, filterLabel){
 
   w.document.write(html);
   w.document.close();
+}
+
+// ── Sign-in codes ────────────────────────────────────────────────────
+// What the parent sign-in costs, and whether passwords are displacing it.
+//
+// Every code is an SMS Twilio charges for, and nothing recorded how many
+// were going out or why. The question that needed an answer was not "is
+// it working" but "why was the bill that" -- and a bill has no detail on
+// it beyond a number.
+//
+// The ratio at the top is the one worth watching. Codes are the cost;
+// passwords are free. If codes are not falling as passwords are set,
+// something is signing parents out and the password is not catching it.
+function SigninCodesView(){
+  const [rows,setRows]=useState(null);
+  const [up,setUp]=useState(null);
+  const [err,setErr]=useState('');
+  const [days,setDays]=useState(30);
+  // Not a Twilio reading -- a figure to multiply by, so the table reads
+  // in ringgit rather than in counts. The real rate is per carrier.
+  const [rate,setRate]=useState(0.35);
+
+  async function load(){
+    try{
+      const from = new Date(Date.now() - days*86400000).toISOString().slice(0,10);
+      const [spend,uptake]=await Promise.all([
+        rest('rpc/parent_otp_spend',{ method:'POST', body: JSON.stringify({ p_from: from }) }),
+        rest('rpc/parent_password_uptake',{ method:'POST', body:'{}' }).catch(()=>null)
+      ]);
+      setRows(Array.isArray(spend)?spend:[]);
+      setUp(uptake&&uptake.ok?uptake:null);
+      setErr('');
+    }catch(e){ setErr(e.message); setRows([]); }
+  }
+  useEffect(()=>{ load(); },[days]);
+
+  if(rows===null) return <div className="card"><div className="small subtle">Loading…</div></div>;
+
+  const sum = k => rows.reduce((a,r)=>a+(Number(r[k])||0),0);
+  const sent = sum('sent'), failed = sum('failed');
+  const cost = (sent+failed) * rate;
+  const pwOk = up ? Number(up.passwords_30d)||0 : 0;
+  const codes30 = up ? Number(up.codes_30d)||0 : 0;
+  const share = (pwOk+codes30) ? Math.round(pwOk*100/(pwOk+codes30)) : null;
+
+  const tile = (label, value, note, colour) =>
+    <div className="card" style={{flex:'1 1 150px',minWidth:150,margin:0}}>
+      <div className="small subtle">{label}</div>
+      <div style={{fontSize:22,fontWeight:800,color:colour||'var(--text)'}}>{value}</div>
+      {note && <div className="small subtle" style={{marginTop:2}}>{note}</div>}
+    </div>;
+
+  return <div>
+    {err && <div className="card" style={{borderColor:'var(--red-bd)',background:'#FFF5F5'}}>
+      <div style={{fontWeight:700,marginBottom:4}}>Could not read the log</div>
+      <div className="small">{err}</div>
+      <div className="small subtle" style={{marginTop:6}}>
+        If this says the function does not exist, supabase_parent_signin_guard.sql
+        has not been run yet.
+      </div>
+    </div>}
+
+    <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:12}}>
+      {tile('Codes sent', sent, `last ${days} days`)}
+      {tile('Roughly', 'RM '+cost.toFixed(2), `at RM ${rate.toFixed(2)} each`, '#B45309')}
+      {tile('Failed to send', failed, failed? 'look at the Twilio log' : 'none', failed?'#DC2626':undefined)}
+      {up && tile('Passwords set', (up.passwords_set==null?'—':up.passwords_set)
+                  + ' of ' + up.accounts_live, 'accounts that can sign in')}
+      {share!==null && tile('Signed in free', share+'%', 'password rather than a code',
+                            share>=50?'var(--green-tx)':'#B45309')}
+    </div>
+
+    <div className="card" style={{marginBottom:12}}>
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end'}}>
+        <div className="field" style={{margin:0}}>
+          <label>Period</label>
+          <select className="input" value={days} onChange={e=>setDays(Number(e.target.value))}>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        </div>
+        <div className="field" style={{margin:0}}>
+          <label>Cost per message (RM)</label>
+          <input className="input" type="number" step="0.01" min="0" style={{width:120}}
+                 value={rate} onChange={e=>setRate(Number(e.target.value)||0)} />
+        </div>
+        <button className="btn btn-ghost small" onClick={load}>Refresh</button>
+      </div>
+      <div className="small subtle" style={{marginTop:8}}>
+        The rate is yours to set — Twilio charges per carrier, so there is no one
+        number. Only <b>Sent</b> and <b>Failed</b> cost anything; everything else
+        in the table was refused before a message went out.
+      </div>
+    </div>
+
+    <div className="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Day</th>
+          <th style={{textAlign:'right'}}>Sent</th>
+          <th style={{textAlign:'right'}}>Failed</th>
+          <th style={{textAlign:'right'}}>Numbers</th>
+          <th style={{textAlign:'right'}}>Too soon</th>
+          <th style={{textAlign:'right'}}>Capped</th>
+          <th style={{textAlign:'right'}}>Not on file</th>
+          <th style={{textAlign:'right'}}>Archived</th>
+        </tr></thead>
+        <tbody>
+          {rows.length===0 && <tr><td colSpan={8} className="empty">
+            Nothing yet. Every request for a code lands here, refusals included.
+          </td></tr>}
+          {rows.map(r=><tr key={r.day}>
+            <td>{r.day}</td>
+            <td style={{textAlign:'right',fontWeight:700}}>{r.sent}</td>
+            <td style={{textAlign:'right',color:Number(r.failed)?'#DC2626':'var(--text-3)'}}>{r.failed}</td>
+            <td style={{textAlign:'right'}}>{r.numbers}</td>
+            <td style={{textAlign:'right',color:'var(--text-3)'}}>{r.cooldown}</td>
+            <td style={{textAlign:'right',color:Number(r.capped)?'#B45309':'var(--text-3)'}}>{r.capped}</td>
+            {/* A run of these against numbers that are not ours is what
+                probing looks like. It is the reason refusals are logged
+                at all. */}
+            <td style={{textAlign:'right',color:Number(r.unknown)>20?'#DC2626':'var(--text-3)'}}>{r.unknown}</td>
+            <td style={{textAlign:'right',color:'var(--text-3)'}}>{r.archived}</td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+
+    <div className="small subtle" style={{marginTop:10,lineHeight:1.6}}>
+      <b>Too soon</b> is the 60-second wait between codes. <b>Capped</b> is a number
+      that asked too many times in an hour or a day. <b>Not on file</b> is a number
+      we do not hold — a run of them in one day, against different numbers, is
+      somebody working through a list rather than a parent mistyping.
+      <b> Archived</b> is a family whose swimmers are all archived; they are
+      answered in the same words as a number not on file, on purpose.
+    </div>
+  </div>;
 }
 
 function ReplacementTrackerView(){
