@@ -238,6 +238,39 @@
   .wkrow-mates .mate-when{color:var(--muted); font-weight:400}
   .wkrow-alone{flex:1 0 100%; font-size:12.5px; color:var(--muted); margin-top:3px}
 
+  /* The level beside a swimmer's name. Small, because it is a fact about
+     them rather than an action — the action is what it opens. */
+  .lvlbtn{flex:none; min-width:40px; padding:4px 7px; border-radius:9px;
+    background:var(--sky,#EEF7FD); border:1px solid var(--border);
+    color:var(--primary); font-weight:800; font-size:13px; line-height:1.1}
+  .lvlbtn small{font-weight:600; opacity:.6; font-size:11px}
+  .lvlbtn:active{background:var(--slate-bg)}
+
+  .gms{border:1px solid var(--border); border-radius:11px; padding:9px 10px;
+    margin-bottom:7px; background:var(--surface)}
+  .gms.is-on{border-color:#34D399; background:#F0FDF9}
+  .gms-head{display:flex; align-items:center; gap:7px; margin-bottom:6px}
+  .gms-lvl{font-size:10.5px; font-weight:800; letter-spacing:.03em; padding:2px 6px;
+    border-radius:999px; background:var(--slate-bg); color:var(--slate-tx)}
+  .gms-nm{font-weight:800; font-size:14px; flex:1; min-width:0}
+  .gms-cert{color:#D97706}
+  .gms-count{font-size:12.5px; font-weight:700; color:var(--muted)}
+  /* The bar: tasks done over tasks on the level, and nothing else. */
+  .gbar{height:8px; border-radius:999px; background:#E2E8F0; overflow:hidden}
+  .gbar i{display:block; height:100%; border-radius:999px;
+    background:linear-gradient(90deg,#0EA5E9,#34D399)}
+  .gtasks{margin-top:7px; display:flex; flex-direction:column; gap:3px}
+  .gtask{display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+    padding:7px 8px; border-radius:8px; border:1px solid transparent;
+    background:none; font-size:13.5px; color:var(--muted); line-height:1.35}
+  .gtask .gtick{flex:none; width:19px; height:19px; border-radius:6px;
+    border:1.5px solid var(--border); display:flex; align-items:center;
+    justify-content:center; font-size:12px; color:#fff; background:#fff}
+  .gtask.is-done{color:var(--text); font-weight:600}
+  .gtask.is-done .gtick{background:#10B981; border-color:#10B981}
+  .gtask:active{background:var(--slate-bg)}
+  .gtask[disabled]{opacity:.5}
+
   .wk-head{display:flex; align-items:center; gap:8px; margin-bottom:10px}
   .wk-label{flex:1; text-align:center; font-size:15px; font-weight:700}
   .wk-arrow{width:38px; height:38px; flex:none; border-radius:10px; font-size:19px;

@@ -173,6 +173,88 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
     await page.request.get(BASE + '/__drop?reset=1');
   });
 
+  // ── Ticking the syllabus from the poolside ────────────────────────────
+  // The badge sits beside the swimmer's name on the class list, which is
+  // where a coach is already looking when they have just watched the
+  // child do the thing.
+  const openClasses = async () => {
+    await page.locator('#mainNav button[data-view="Classes"]').click();
+    await page.waitForTimeout(900);
+  };
+
+  await step('a graded swimmer carries a level, an ungraded one carries none', async () => {
+    await openClasses();
+    const badges = await page.locator('#clsBody .lvlbtn').count();
+    if (badges === 0) throw new Error('no level is shown beside any swimmer');
+    if (badges !== 1)
+      throw new Error('a swimmer on an ungraded lesson type was given a badge too: ' + badges);
+    const t = await page.locator('#clsBody .lvlbtn').first().innerText();
+    if (!/L1/.test(t)) throw new Error('the badge does not show the level: ' + JSON.stringify(t));
+    if (!/3/.test(t)) throw new Error('the badge does not show how many levels there are');
+  });
+
+  await step('tapping it opens every level, not just the next one', async () => {
+    await page.locator('#clsBody .lvlbtn').first().click();
+    await page.waitForTimeout(700);
+    const n = await page.locator('#gradePad .gms').count();
+    if (n !== 3) throw new Error('expected all 3 levels, drew ' + n);
+  });
+
+  await step('each level has a bar that is its own tasks done over total', async () => {
+    const t = await page.locator('#gradePad').innerText();
+    if (!/0\/2/.test(t)) throw new Error('Guppy does not read 0/2: ' + JSON.stringify(t));
+    if (!/0\/1/.test(t)) throw new Error('Tortoise does not read 0/1');
+    // A level with no tasks must read 0/0 and an empty bar, not a full one.
+    if (!/0\/0/.test(t)) throw new Error('a level with no tasks does not read 0/0');
+    const w = await page.locator('#gradePad .gms').nth(2).locator('.gbar i')
+      .evaluate(el => el.getBoundingClientRect().width);
+    if (w > 1) throw new Error('a level with no tasks draws a full bar: ' + w + 'px');
+  });
+
+  await step('ticking a task fills the bar by one task', async () => {
+    const bar = page.locator('#gradePad .gms').first().locator('.gbar i');
+    const track = page.locator('#gradePad .gms').first().locator('.gbar');
+    const before = await bar.evaluate(el => el.getBoundingClientRect().width);
+    await page.locator('#gradePad .gms').first().locator('.gtask').first().click();
+    await page.waitForTimeout(800);
+    const after = await bar.evaluate(el => el.getBoundingClientRect().width);
+    const full = await track.evaluate(el => el.getBoundingClientRect().width);
+    if (!(after > before)) throw new Error('the bar did not move: ' + before + ' -> ' + after);
+    // One of two tasks: half, not full and not a fixed step.
+    if (Math.abs(after - full / 2) > full * 0.12)
+      throw new Error('1 of 2 did not draw as half: ' + Math.round(after) + ' of ' + Math.round(full));
+    const t = await page.locator('#gradePad').innerText();
+    if (!/1\/2/.test(t)) throw new Error('the count does not read 1/2');
+  });
+
+  await step('completing a level says so out loud', async () => {
+    let said = '';
+    page.once('dialog', d => { said = d.message(); d.accept(); });
+    await page.locator('#gradePad .gms').first().locator('.gtask').nth(1).click();
+    await page.waitForTimeout(900);
+    if (!said) throw new Error('a child finished a level and nothing said so');
+    if (!/Guppy/.test(said)) throw new Error('it does not name the level: ' + JSON.stringify(said));
+  });
+
+  await step('and the badge beside the name moves with it', async () => {
+    const t = await page.locator('#gradePad').innerText();
+    if (!/2\/2/.test(t)) throw new Error('Guppy does not read 2/2 after both ticks');
+    if (!/Level 1 of 3/.test(t))
+      throw new Error('the header does not show the new level: ' + JSON.stringify(t.slice(0, 120)));
+  });
+
+  await step('a swimmer this coach is not rostered to is refused', async () => {
+    const r = await page.evaluate(async () => {
+      const res = await fetch('/rest/v1/rpc/coach_student_grading', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_student: 'stu-2' })
+      });
+      return res.json();
+    });
+    if (r.ok !== false) throw new Error('it answered for a swimmer not in their water');
+    if (!/not rostered/i.test(r.error || '')) throw new Error('it did not say why: ' + JSON.stringify(r));
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

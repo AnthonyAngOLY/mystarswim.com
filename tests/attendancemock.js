@@ -87,6 +87,24 @@ const BUDDIES = [
 
 // The last arguments each RPC was called with, readable over HTTP so the
 // test can assert on the request rather than only on what was drawn.
+// One child's ladder, mutated by ticks so the pad re-reads real changes.
+const LADDER = {
+  ok: true, graded: true,
+  program: { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim' },
+  level: null, levels_total: 3,
+  milestones: [
+    { id: 'ms1', level_no: 1, name: 'Guppy', certificate: false, activated: false,
+      total: 2, done: 0, tasks: [
+        { id: 't1', name: 'Submerges whole head', done: false },
+        { id: 't2', name: 'Blows bubbles', done: false } ] },
+    { id: 'ms2', level_no: 2, name: 'Tortoise', certificate: true, activated: false,
+      total: 1, done: 0, tasks: [
+        { id: 't3', name: 'Glides from the wall', done: false } ] },
+    { id: 'ms3', level_no: 3, name: 'Crab', certificate: false, activated: false,
+      total: 0, done: 0, tasks: [] }
+  ]
+};
+
 const CALLS = {};
 // RPCs withdrawn for the length of a test, via /__drop.
 const DROPPED = {};
@@ -97,6 +115,47 @@ const RPC = {
                              is_admin: false, is_hr: false, must_change_password: false,
                              consented_at: '2026-01-05T02:00:00Z' }]),
   get_my_shift_buddies: () => ([]),
+
+  // The class list, with one swimmer who is graded.
+  get_my_session_roster: () => ([
+    { session_id: 'sess-1', session_date: TODAY, start_time: '09:00:00', end_time: '10:00:00',
+      pool_name: 'Main Pool', lesson_type: 'Learn to Swim', coach_names: 'Lee Mei Ling',
+      is_mine: true, is_cancelled: false, is_training: false,
+      row_id: 'r1', student_id: 'stu-1', student_name: 'Mira Kwan',
+      attendance_status: 'pending', credits_left: 4 },
+    { session_id: 'sess-1', session_date: TODAY, start_time: '09:00:00', end_time: '10:00:00',
+      pool_name: 'Main Pool', lesson_type: 'Learn to Swim', coach_names: 'Lee Mei Ling',
+      is_mine: true, is_cancelled: false, is_training: false,
+      row_id: 'r2', student_id: 'stu-2', student_name: 'Ungraded Child',
+      attendance_status: 'pending', credits_left: 2 }
+  ]),
+  // Only stu-1 is on a graded lesson type. stu-2 must show no badge at
+  // all rather than "Level 0", which would read as a child who has done
+  // nothing instead of a lesson type nobody has set a programme on.
+  my_roster_grading: () => ([
+    { student_id: 'stu-1', program_name: 'Swim Passport', level_no: 1, levels_total: 3 }
+  ]),
+
+  coach_student_grading: (a) => {
+    if (!a || a.p_student !== 'stu-1') return { ok: false, error: 'You are not rostered to this swimmer.' };
+    return LADDER;
+  },
+
+  // Ticks into LADDER so the pad redraws from changed data, as it does
+  // against the real thing. A mock that forgets cannot tell a screen
+  // that re-reads from one that re-renders what it already had.
+  mark_grading_task: (a) => {
+    const ms = LADDER.milestones.find(m => m.tasks.some(t => t.id === a.p_task));
+    if (!ms) return { ok: false, error: 'no such task' };
+    const t = ms.tasks.find(x => x.id === a.p_task);
+    t.done = !!a.p_on;
+    t.marked_by = a.p_on ? 'Lee Mei Ling' : null;
+    ms.done = ms.tasks.filter(x => x.done).length;
+    ms.activated = ms.done === ms.total;
+    LADDER.level = Math.max(0, ...LADDER.milestones.filter(m => m.activated).map(m => m.level_no)) || null;
+    return { ok: true, task_id: a.p_task, milestone_id: ms.id, activated: ms.activated,
+             milestone: ms.name, level_no: ms.level_no, certificate: !!ms.certificate };
+  },
 
   get_my_roster_buddies: (a) => {
     CALLS.get_my_roster_buddies = a;

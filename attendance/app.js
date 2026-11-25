@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 18;
+  var BUILD = 19;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1110,19 +1110,33 @@
     if (!clsWeek) { clsWeek = mondayOf(todayKL()); clsDay = todayKL(); }
     if (clsDay < clsWeek || clsDay > addDaysISO(clsWeek, 6)) clsDay = clsWeek;
     $('clsBody').innerHTML = '<p class="empty">Loading…</p>';
-    return rpc('get_my_session_roster', {
-      // The server no longer narrows on this; it is sent because older
-      // builds do and the parameter has to stay. Everything in the water
-      // they are rostered to comes back.
-      p_from: clsWeek, p_to: addDaysISO(clsWeek, 6), p_include_others: true
-    }).then(function (rows) {
-      clsRows = rows || [];
+    return Promise.all([
+      rpc('get_my_session_roster', {
+        // The server no longer narrows on this; it is sent because older
+        // builds do and the parameter has to stay. Everything in the water
+        // they are rostered to comes back.
+        p_from: clsWeek, p_to: addDaysISO(clsWeek, 6), p_include_others: true
+      }),
+      // Beside the roster rather than inside it: get_my_session_roster is
+      // a published contract that installed phones call, and adding
+      // columns to it means every old build reading a row it does not
+      // expect. A database without the grading module answers 404, which
+      // lands here as no badges and a class list that looks as it did.
+      rpc('my_roster_grading', { p_from: clsWeek, p_to: addDaysISO(clsWeek, 6) })
+        .catch(function () { return []; })
+    ]).then(function (res) {
+      clsRows = res[0] || [];
+      clsLevels = {};
+      (res[1] || []).forEach(function (g) { clsLevels[g.student_id] = g; });
       renderClasses();
     }).catch(function (e) {
       $('clsDays').innerHTML = '';
       $('clsBody').innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
     });
   }
+
+  // student_id -> { program_name, level_no, levels_total }
+  var clsLevels = {};
 
   // Rows arrive one per swimmer. The screen is one card per class.
   function clsSessions(day) {
@@ -1253,9 +1267,20 @@
       // them means stop.
       if (r.marked_by && r.attendance_status !== 'pending') sub.push('by ' + r.marked_by);
       var st = r.attendance_status;
+      // The badge. A child on a lesson type with no grading programme
+      // has none, which is the honest answer rather than "Level 0".
+      var g = clsLevels[r.student_id];
+      var badge = g
+        ? '<button class="lvlbtn" data-grade="' + esc(r.student_id) + '"'
+          + ' data-nm="' + esc(r.student_name || '') + '"'
+          + ' title="' + esc(g.program_name + ' — tap to tick a task') + '">'
+          + (g.level_no ? 'L' + g.level_no : '—')
+          + '<small>/' + esc(String(g.levels_total || '?')) + '</small></button>'
+        : '';
       return '<div class="stu">'
         + '<div class="stu-nm">' + esc(r.student_name || '—')
         +   (sub.length ? '<small>' + esc(sub.join(' · ')) + '</small>' : '') + '</div>'
+        + badge
         // No "has notes already" badge: that would mean the roster
         // function returning a count, and two files defining it. The
         // history is one tap away inside the pad.
@@ -1320,6 +1345,123 @@
   // holding a phone at the poolside and wants to see who they are
   // writing about while they write.
   var noteOpenFor = null;
+
+  // ── Ticking off the syllabus ───────────────────────────────────────────
+  // Opened from the level badge beside a swimmer's name on the class
+  // list, which is where a coach is already looking when they have just
+  // watched the child do the thing.
+  //
+  // Every milestone, not just the next one. Children do not learn in the
+  // order a syllabus is written, and a pad that showed only the current
+  // level would make a coach who has just seen a level-4 skill either
+  // wait or lie.
+  var gradeOpenFor = null;
+
+  function openGradePad(studentId, name, anchorCard) {
+    var old = $('gradePad');
+    if (old) old.remove();
+    if (gradeOpenFor === studentId) { gradeOpenFor = null; return; }
+    gradeOpenFor = studentId;
+
+    var pad = document.createElement('div');
+    pad.className = 'notepad';
+    pad.id = 'gradePad';
+    pad.innerHTML = '<div class="cls-sub" style="margin-bottom:6px">'
+      + esc(name) + '\u2019s syllabus. Tick what you have seen today.</div>'
+      + '<div id="gradeBody"><p class="cls-sub">Loading\u2026</p></div>'
+      + '<button class="btn ghost" id="gradeClose" style="margin-top:7px">Close</button>';
+    if (anchorCard) anchorCard.appendChild(pad);
+
+    $('gradeClose').addEventListener('click', function () {
+      gradeOpenFor = null; pad.remove();
+    });
+    loadGradePad(studentId);
+  }
+
+  function loadGradePad(studentId) {
+    return rpc('coach_student_grading', { p_student: studentId }).then(function (g) {
+      var el = $('gradeBody');
+      if (!el) return;
+      if (!g || g.ok !== true) {
+        el.innerHTML = '<div class="note err">' + esc((g && g.error) || 'Could not read that.') + '</div>';
+        return;
+      }
+      if (g.graded === false) {
+        el.innerHTML = '<p class="cls-sub">This swimmer\u2019s lesson type is not graded on '
+          + 'any programme. The office sets that in Settings \u2192 Lesson Types.</p>';
+        return;
+      }
+      el.innerHTML = gradePadHtml(g);
+      wireGradePad(studentId);
+    }).catch(function (e) {
+      var el = $('gradeBody');
+      if (el) el.innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
+    });
+  }
+
+  function gradePadHtml(g) {
+    var out = '<div class="cls-sub" style="margin-bottom:8px"><b>' + esc(g.program.name) + '</b>'
+      + ' \u00b7 ' + (g.level ? 'Level ' + g.level : 'no level yet')
+      + ' of ' + esc(String(g.levels_total)) + '</div>';
+
+    (g.milestones || []).forEach(function (m) {
+      var done = Number(m.done) || 0, total = Number(m.total) || 0;
+      var pct = total ? Math.round(done * 100 / total) : 0;
+      out += '<div class="gms' + (m.activated ? ' is-on' : '') + '">'
+        + '<div class="gms-head">'
+        +   '<span class="gms-lvl">L' + esc(String(m.level_no)) + '</span>'
+        +   '<span class="gms-nm">' + esc(m.name) + '</span>'
+        +   (m.certificate ? '<span class="gms-cert" title="A certificate can be claimed">\u2605</span>' : '')
+        +   '<span class="gms-count">' + done + '/' + total + '</span>'
+        + '</div>'
+        // The bar is the ratio and nothing else: a level with no tasks
+        // reads as an empty bar rather than a full one.
+        + '<div class="gbar"><i style="width:' + pct + '%"></i></div>'
+        + '<div class="gtasks">'
+        + (m.tasks || []).map(function (t) {
+            return '<button class="gtask' + (t.done ? ' is-done' : '') + '"'
+              + ' data-task="' + esc(t.id) + '" data-on="' + (t.done ? '1' : '0') + '"'
+              + (t.done && t.marked_by ? ' title="' + esc(t.marked_by) + '"' : '')
+              + '><span class="gtick">' + (t.done ? '\u2713' : '') + '</span>'
+              + '<span>' + esc(t.name) + '</span></button>';
+          }).join('')
+        + (total === 0 ? '<p class="cls-sub">No tasks on this level yet.</p>' : '')
+        + '</div></div>';
+    });
+    return out;
+  }
+
+  function wireGradePad(studentId) {
+    Array.prototype.forEach.call($('gradeBody').querySelectorAll('[data-task]'), function (b) {
+      b.addEventListener('click', function () {
+        if (b.disabled) return;
+        var want = b.getAttribute('data-on') !== '1';
+        b.disabled = true;
+        rpc('mark_grading_task', {
+          p_student: studentId, p_task: b.getAttribute('data-task'), p_on: want, p_session: null
+        }).then(function (res) {
+          if (!res || res.ok !== true) throw new Error((res && res.error) || 'Could not save that.');
+          // Said out loud, because the whole point of the ladder is the
+          // moment a child finishes one and nobody notices otherwise.
+          if (want && res.activated) {
+            alert('\u2b50 ' + res.milestone + ' complete \u2014 level ' + res.level_no + '.'
+              + (res.certificate ? '\n\nThis level comes with a certificate. Tell the office.' : ''));
+          }
+          return loadGradePad(studentId);
+        }).then(function () {
+          // The badge beside the name moves too, without a full reload.
+          return rpc('my_roster_grading', { p_from: clsWeek, p_to: addDaysISO(clsWeek, 6) })
+            .then(function (rows) {
+              clsLevels = {};
+              (rows || []).forEach(function (x) { clsLevels[x.student_id] = x; });
+            }).catch(function () {});
+        }).catch(function (e) {
+          b.disabled = false;
+          alert(e.message);
+        });
+      });
+    });
+  }
 
   function openNotePad(studentId, name, anchorCard) {
     var old = $('notePad');
@@ -1439,6 +1581,14 @@
   }
 
   function wireClsCards(today) {
+    Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-grade]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openGradePad(b.getAttribute('data-grade'), b.getAttribute('data-nm'),
+          b.closest('.cls'));
+      });
+    });
+
     Array.prototype.forEach.call($('clsBody').querySelectorAll('[data-note]'), function (b) {
       b.addEventListener('click', function () {
         openNotePad(b.getAttribute('data-note'), b.getAttribute('data-nm'),
