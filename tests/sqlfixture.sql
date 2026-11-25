@@ -84,4 +84,18 @@ language sql stable as $$ select office from _test_state limit 1 $$;
 create or replace function is_website_login() returns boolean
 language sql stable as $$ select true $$;
 
+-- The project's own reading of a Malaysian mobile. reset_signin_attempts
+-- normalises through it, so the fixture needs it.
+create or replace function ss_normalise_phone(p_raw text)
+returns text language plpgsql immutable as $$
+declare d text;
+begin
+  if p_raw is null then return null; end if;
+  d := regexp_replace(p_raw, '[^0-9]', '', 'g');
+  if d = '' then return null; end if;
+  if left(d, 2) = '60' then return '+' || d; end if;
+  if left(d, 1) = '0'  then return '+60' || substr(d, 2); end if;
+  return '+60' || d;
+end $$;
+
 insert into parent_message_settings (id) values (1);
