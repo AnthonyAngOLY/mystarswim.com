@@ -265,6 +265,18 @@ chk (ord, file, adds, state) as (values
       case when exists (select 1 from fn where n='get_my_roster_buddies')
              and exists (select 1 from fn where n='get_my_shift_buddies'
                                             and src like '%roster_week_is_live%')
+           then 'IN' else 'NOT IN' end),
+
+  -- ── The parent sign-in ──────────────────────────────────────────────
+  (54, 'supabase_parent_signin_guard.sql', 'who may ask for a code, how often, and what it cost',
+      case when to_regclass('public.parent_otp_sends') is not null
+             and exists (select 1 from fn where n='parent_signin_check')
+           then 'IN' else 'NOT IN' end),
+  (55, 'supabase_parent_password.sql', 'a password, so signing in stops costing a message',
+      -- Run AFTER the file above: it builds on parent_otp_sends and on
+      -- the settings columns that file adds.
+      case when exists (select 1 from fn where n='parent_login_check')
+             and exists (select 1 from fn where n='parent_login_record')
            then 'IN' else 'NOT IN' end)
 )
 -- ════════════════════════════════════════════════════════════════════════

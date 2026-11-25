@@ -57,6 +57,12 @@
     font-size:14px; font-weight:600; font-family:inherit; color:var(--text);
     background:none; border:0; cursor:pointer}
   .who-menu-item:active{background:var(--slate-bg,#F1F5F9)}
+  /* A show-password box rather than a composition rule. Rules produce
+     Password1! on a sticky note; being able to see what you typed on a
+     phone keyboard is what actually prevents the mistake. */
+  .showpw{display:flex; align-items:center; gap:7px; margin-top:8px;
+    font-size:13px; color:var(--muted); cursor:pointer}
+  .showpw input{width:16px; height:16px; margin:0}
 
   main{padding:14px 16px 90px; max-width:520px; margin:0 auto}
   .card{
@@ -179,10 +185,18 @@
       <label for="phone">Your mobile number</label>
       <input id="phone" class="input" type="tel" inputmode="tel" autocomplete="tel"
              placeholder="012-345 6789">
-      <div class="sub" style="margin:8px 2px 14px">
-        The number the centre has for you. We send a code to it — there is no password.
+      <label for="pw" style="margin-top:12px">Your password</label>
+      <input id="pw" class="input" type="password" autocomplete="current-password"
+             placeholder="••••••••">
+      <label class="showpw"><input type="checkbox" id="pwShow"> Show password</label>
+      <button class="btn" id="signIn" style="margin-top:12px">Sign in</button>
+      <!-- Both on one screen, and no step in between, because a screen
+           that asks for the number first and then decides what to show
+           has to reveal whether that number is one of ours. -->
+      <div class="sub" style="margin:14px 2px 8px;text-align:center">
+        First time here, or forgotten your password?
       </div>
-      <button class="btn" id="sendCode">Send me a code</button>
+      <button class="btn btn-ghost" id="sendCode">Send me a code instead</button>
     </div>
     <div class="sub" style="text-align:center;margin-top:16px">
       Number changed, or not sure which one we have?<br>
@@ -209,6 +223,31 @@
   </main>
 </section>
 
+<!-- ─── Choosing a password ─────────────────────────────────────────── -->
+<!-- Shown straight after a code is accepted, and not skippable. The
+     half-measure is how you end up a year later with most families still
+     waiting for a text every time they open the app. -->
+<section id="s-setpw" class="hidden">
+  <main style="padding-top:48px">
+    <div style="text-align:center;margin-bottom:22px">
+      <div class="big" style="font-size:19px">One more thing</div>
+      <div class="sub" style="margin-top:4px">Choose a password for next time.</div>
+    </div>
+    <div class="card">
+      <div id="setpwNote"></div>
+      <label for="newpw">Your new password</label>
+      <input id="newpw" class="input" type="password" autocomplete="new-password"
+             placeholder="At least 8 characters">
+      <label class="showpw"><input type="checkbox" id="newpwShow"> Show password</label>
+      <div class="sub" style="margin:10px 2px 0">
+        So you will not have to wait for a code every time. If you forget
+        it, ask us for a code again and choose a new one.
+      </div>
+      <button class="btn" id="savePw" style="margin-top:14px">Save and continue</button>
+    </div>
+  </main>
+</section>
+
 <!-- ─── The app ─────────────────────────────────────────────────────── -->
 <section id="s-app" class="hidden">
   <header>
@@ -223,6 +262,7 @@
     </button>
     <div class="who-menu hidden" id="whoMenu" role="menu">
       <div class="who-menu-num" id="whoPhone"></div>
+      <button class="who-menu-item" id="changePwBtn" type="button" role="menuitem">Change password</button>
       <button class="who-menu-item" id="signOutBtn" type="button" role="menuitem">Sign out</button>
     </div>
   </header>

@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 6;
+  var BUILD = 7;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -172,7 +172,8 @@
     if ($('phone')) $('phone').value = '';
     note($('loginNote'), '');
     note($('otpNote'), '');
-    hide($('s-app')); hide($('s-otp')); show($('s-login'));
+    hide($('s-app')); hide($('s-otp')); hide($('s-setpw')); show($('s-login'));
+    if ($('pw')) $('pw').value = '';
   }
 
   // ── The account menu ─────────────────────────────────────────────────
@@ -235,6 +236,56 @@
     });
   }
 
+  // ── Signing in with a password ───────────────────────────────────────
+  // Through our own function rather than straight at Supabase, because
+  // Supabase will not apply the archived-account gate, will not count
+  // the wrong tries, and will not put the attempt in the spend log.
+  function loginWithPassword(phone, password) {
+    return fetch(cfg.supabaseUrl + '/functions/v1/parent-login', {
+      method: 'POST',
+      headers: {
+        apikey: cfg.supabaseAnonKey,
+        Authorization: 'Bearer ' + cfg.supabaseAnonKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ phone: phone, password: password })
+    }).catch(asOffline).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (r.ok && d && d.ok === true && d.access_token) {
+          session = { access_token: d.access_token, refresh_token: d.refresh_token };
+          save();
+          return d;
+        }
+        var err = new Error((d && d.error) || 'That number and password do not match.');
+        if (d && d.must_use_code) err.mustUseCode = true;
+        if (d && typeof d.tries_left === 'number') err.triesLeft = d.tries_left;
+        // A function that is not deployed yet answers 404. Treated as
+        // "no password sign-in here", so the app falls back to codes
+        // rather than telling a parent their password is wrong.
+        if (r.status === 404) err.notDeployed = true;
+        throw err;
+      });
+    });
+  }
+
+  // Set or change it. Straight to Supabase, with the session we already
+  // hold: this is the one call that needs no gate, because holding a
+  // session is already proof of whatever the gate would have asked.
+  function setPassword(pw) {
+    return fetch(cfg.supabaseUrl + '/auth/v1/user', {
+      method: 'PUT',
+      headers: {
+        apikey: cfg.supabaseAnonKey,
+        Authorization: 'Bearer ' + (session && session.access_token),
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ password: pw })
+    }).catch(asOffline).then(function (r) {
+      if (r.ok) return true;
+      return r.text().then(function (t) { throw new Error(readable(t, 'Could not save that password.')); });
+    });
+  }
+
   function verify(phone, token) {
     return fetch(cfg.supabaseUrl + '/auth/v1/verify', {
       method: 'POST',
@@ -278,7 +329,7 @@
         return;
       }
       family = f;
-      hide($('s-login')); hide($('s-otp')); show($('s-app'));
+      hide($('s-login')); hide($('s-otp')); hide($('s-setpw')); show($('s-app'));
       $('whoName').textContent = family.name;
       var n = (family.children || []).length;
       $('whoKids').textContent = n === 1 ? '1 swimmer' : n + ' swimmers';
@@ -745,11 +796,102 @@
     });
   });
 
+  // Sign in with the password. The common path once a parent has one,
+  // and the only one that costs nothing.
+  $('signIn').addEventListener('click', function () {
+    var p = e164($('phone').value);
+    var pw = String($('pw').value || '');
+    if (p.replace(/\D/g, '').length < 10) {
+      note($('loginNote'), 'That does not look like a mobile number.', true); return;
+    }
+    if (!pw) {
+      note($('loginNote'), 'Enter your password, or ask us for a code.', true); return;
+    }
+    note($('loginNote'), '');
+    var btn = this; btn.disabled = true; btn.textContent = 'Signing in…';
+    loginWithPassword(p, pw).then(function () {
+      $('pw').value = '';
+      return enter();
+    }).catch(function (e) {
+      if (e.notDeployed) {
+        // parent-login is not up yet. Say what to do rather than what
+        // broke: the code path is still there and still works.
+        note($('loginNote'), 'Passwords are not switched on yet — '
+          + 'ask us for a code instead.', true);
+      } else if (e.mustUseCode) {
+        note($('loginNote'), e.message, true);
+        $('pw').value = '';
+      } else {
+        note($('loginNote'), e.message
+          + (typeof e.triesLeft === 'number' && e.triesLeft > 0 && e.triesLeft <= 2
+             ? ' ' + e.triesLeft + ' more tr' + (e.triesLeft === 1 ? 'y' : 'ies')
+               + ' before we send a code instead.' : ''), true);
+      }
+    }).then(function () {
+      btn.disabled = false; btn.textContent = 'Sign in';
+    });
+  });
+
+  // Both boxes, same behaviour. Seeing what you typed on a phone
+  // keyboard is what actually prevents the mistake.
+  function wireShow(boxId, fieldId) {
+    var box = $(boxId);
+    if (!box) return;
+    box.addEventListener('change', function () {
+      $(fieldId).type = box.checked ? 'text' : 'password';
+    });
+  }
+  wireShow('pwShow', 'pw');
+  wireShow('newpwShow', 'newpw');
+
+  // ── Choosing a password ──────────────────────────────────────────────
+  // Reached only straight after a code was accepted, which is both the
+  // first sign-in and the way back from a forgotten password.
+  var pwSaveFails = 0;
+  function askForPassword() {
+    pwSaveFails = 0;
+    $('newpw').value = '';
+    note($('setpwNote'), '');
+    hide($('s-login')); hide($('s-otp')); show($('s-setpw'));
+    $('newpw').focus();
+  }
+
+  $('savePw').addEventListener('click', function () {
+    var pw = String($('newpw').value || '');
+    if (pw.length < 8) {
+      note($('setpwNote'), 'Make it at least 8 characters.', true); return;
+    }
+    var btn = this; btn.disabled = true; btn.textContent = 'Saving…';
+    setPassword(pw).then(function () {
+      $('newpw').value = '';
+      return enter();
+    }).catch(function (e) {
+      pwSaveFails++;
+      note($('setpwNote'), e.message, true);
+      // Forced, but never a dead end. If saving genuinely cannot work —
+      // a setting wrong at Supabase's end, say — then holding every
+      // parent on this screen after they have already proved who they
+      // are would break the app for all of them at once. They are in;
+      // the password can wait for the account menu.
+      if (pwSaveFails >= 2 && !$('pwLater')) {
+        var later = document.createElement('button');
+        later.id = 'pwLater';
+        later.className = 'btn btn-ghost';
+        later.style.marginTop = '8px';
+        later.textContent = 'Continue without one for now';
+        later.addEventListener('click', function () { enter(); });
+        btn.parentNode.appendChild(later);
+      }
+    }).then(function () {
+      btn.disabled = false; btn.textContent = 'Save and continue';
+    });
+  });
+
   $('verifyCode').addEventListener('click', function () {
     var t = String($('code').value || '').replace(/\D/g, '');
     if (t.length < 4) { note($('otpNote'), 'Enter the code we sent you.', true); return; }
     var btn = this; btn.disabled = true; btn.textContent = 'Signing in…';
-    verify(pendingPhone, t).then(enter).catch(function (e) {
+    verify(pendingPhone, t).then(askForPassword).catch(function (e) {
       note($('otpNote'), e.message, true);
     }).then(function () {
       btn.disabled = false; btn.textContent = 'Sign in';
@@ -825,6 +967,18 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') closeWhoMenu();
   });
+  // Changing it while signed in needs no code: holding a session is
+  // already proof of everything a code would have proved. Only a
+  // forgotten password costs a message, which is the point.
+  $('changePwBtn').addEventListener('click', function () {
+    closeWhoMenu();
+    hide($('s-app'));
+    askForPassword();
+    note($('setpwNote'), '');
+    $('setpwNote').innerHTML =
+      '<div class="note info">Choose a new password. The old one stops working.</div>';
+  });
+
   $('signOutBtn').addEventListener('click', function () {
     // Confirmed, because getting back in is not free: it costs an SMS,
     // a wait, and six of them an hour is the whole allowance.

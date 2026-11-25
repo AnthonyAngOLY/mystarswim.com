@@ -330,20 +330,115 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (btn) throw new Error('the send button was left disabled after a refusal');
   });
 
-  await step('the code gets you back in, which is the whole loop', async () => {
+  // ── A code lands on the password screen, not in the app ───────────────
+  // Every OTP sign-in is either a first time or a forgotten password, so
+  // every one of them ends by choosing a password. That is what stops
+  // the next sign-in costing a message.
+  await step('a code lets you in only as far as choosing a password', async () => {
     // The refusal above spent the mock's one cooldown; this send goes.
     await page.locator('#sendCode').click();
     await page.waitForTimeout(800);
     await page.locator('#code').fill('123456');
     await page.locator('#verifyCode').click();
     await page.waitForTimeout(800);
-    if (!(await page.locator('#s-app').isVisible()))
-      throw new Error('the code was accepted and the app did not open');
-    if (!(await page.locator('#whoBtn').isVisible()))
-      throw new Error('back in, but with no way out again');
+    if (await page.locator('#s-app').isVisible())
+      throw new Error('it went straight into the app, so nobody ever sets a password');
+    if (!(await page.locator('#s-setpw').isVisible()))
+      throw new Error('the password screen did not open');
   });
 
+  await step('there is no way past it without choosing one', async () => {
+    const skips = await page.locator('#s-setpw button').allInnerTexts();
+    if (skips.some(t => /skip|later|not now/i.test(t)))
+      throw new Error('it offers a way out, which is how most families never set one: '
+                      + JSON.stringify(skips));
+  });
+
+  await step('a short one is refused before it reaches the server', async () => {
+    await page.locator('#newpw').fill('swim');
+    await page.locator('#savePw').click();
+    await page.waitForTimeout(400);
+    const said = await page.locator('#setpwNote').innerText();
+    if (!/8 characters/i.test(said)) throw new Error('it did not say the length: ' + said);
+    if (await page.locator('#s-app').isVisible()) throw new Error('a four-letter password got in');
+  });
+
+  await step('and a real one saves and opens the app', async () => {
+    await page.locator('#newpw').fill('swimtime2026');
+    await page.locator('#savePw').click();
+    await page.waitForTimeout(900);
+    if (!(await page.locator('#s-app').isVisible()))
+      throw new Error('it saved the password and never opened the app');
+  });
+
+  // ── Signing in with it, which costs nothing ───────────────────────────
+  await step('the password signs you in with no message sent', async () => {
+    const before = await (await page.request.get(BASE + '/__calls')).json().catch(() => ({}));
+    void before;
+    await page.locator('#whoBtn').click();
+    await page.waitForTimeout(200);
+    answer = 'accept';
+    await page.locator('#signOutBtn').click();
+    await page.waitForTimeout(500);
+    await page.locator('#phone').fill('0123456001');
+    await page.locator('#pw').fill('swimtime2026');
+    await page.locator('#signIn').click();
+    await page.waitForTimeout(900);
+    if (!(await page.locator('#s-app').isVisible()))
+      throw new Error('the right password did not get in');
+    if (await page.locator('#s-otp').isVisible())
+      throw new Error('it asked for a code as well, which is the cost we are removing');
+  });
+
+  await step('a wrong one is refused without saying whether the number is ours', async () => {
+    await page.locator('#whoBtn').click();
+    await page.waitForTimeout(200);
+    answer = 'accept';
+    await page.locator('#signOutBtn').click();
+    await page.waitForTimeout(500);
+    await page.locator('#phone').fill('0123456001');
+    await page.locator('#pw').fill('not-the-password');
+    await page.locator('#signIn').click();
+    await page.waitForTimeout(900);
+    if (await page.locator('#s-app').isVisible()) throw new Error('a wrong password got in');
+    const said = await page.locator('#loginNote').innerText();
+    if (/no account|not on file|unknown|no such/i.test(said))
+      throw new Error('the refusal tells you the number is not one of ours: ' + said);
+    if (!/do not match/i.test(said)) throw new Error('it did not say what was wrong: ' + said);
+  });
+
+  await step('too many tries pushes that number back to a code', async () => {
+    await page.request.get(BASE + '/__login?mustUseCode=1');
+    await page.locator('#pw').fill('still-wrong');
+    await page.locator('#signIn').click();
+    await page.waitForTimeout(900);
+    const said = await page.locator('#loginNote').innerText();
+    if (!/code/i.test(said))
+      throw new Error('it did not point at the code, so the parent is stranded: ' + said);
+    if (await page.locator('#pw').inputValue())
+      throw new Error('the password it just refused is still sitting in the box');
+    await page.request.get(BASE + '/__login?reset=1');
+  });
+
+  await step('a database without the login function says so, not "wrong password"', async () => {
+    await page.request.get(BASE + '/__login?off=1');
+    await page.locator('#phone').fill('0123456001');
+    await page.locator('#pw').fill('swimtime2026');
+    await page.locator('#signIn').click();
+    await page.waitForTimeout(900);
+    const said = await page.locator('#loginNote').innerText();
+    if (/do not match/i.test(said))
+      throw new Error('a missing function reads as the parent getting it wrong: ' + said);
+    if (!/code/i.test(said)) throw new Error('it did not point at the code path: ' + said);
+    await page.request.get(BASE + '/__login?reset=1');
+  });
+
+
   await step('and the second sign-out clears the number the first one left', async () => {
+    await page.locator('#phone').fill('0123456001');
+    await page.locator('#pw').fill('swimtime2026');
+    await page.locator('#signIn').click();
+    await page.waitForTimeout(900);
     // This is the assertion the first sign-out could not make: nothing
     // had been typed into the box yet, so an empty box proved nothing.
     // Now a number has been through it.

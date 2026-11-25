@@ -37,6 +37,11 @@ const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 // countdown without waiting the real sixty seconds.
 const COOL = { sec: 0 };
 
+// The password side. GOOD_PW is the only one that works.
+const GOOD_PW = 'swimtime2026';
+const LOGIN = { off: false, mustUseCode: false, fails: 0 };
+const SETPW = { fail: false, saved: 0 };
+
 const RPC = {
   my_family: () => ({
     ok: true, account_id: 'acct-1', display_name: 'Kwan Suk Lee',
@@ -165,6 +170,56 @@ http.createServer((req, res) => {
   if (p === '/__cool') {
     COOL.sec = Number(new URL(req.url, 'http://x').searchParams.get('sec') || 0);
     return send(res, 200, JSON.stringify(COOL));
+  }
+
+  // Signing in with a password. GOOD_PW is the one that works; a 404 can
+  // be forced with /__nologin to stand in for a database that has had
+  // the SQL but not yet the function.
+  if (p === '/functions/v1/parent-login') {
+    if (LOGIN.off) return send(res, 404, JSON.stringify({ message: 'not found' }));
+    let body = '';
+    req.on('data', c => { body += c; });
+    return req.on('end', () => {
+      let a = null;
+      try { a = body ? JSON.parse(body) : null; } catch (_e) { a = null; }
+      if (LOGIN.mustUseCode) {
+        return send(res, 429, JSON.stringify({ must_use_code: true,
+          error: 'Too many tries. Ask us for a code instead \u2014 you can set a '
+               + 'new password once you are in.' }));
+      }
+      if (!a || a.password !== GOOD_PW) {
+        LOGIN.fails++;
+        return send(res, 401, JSON.stringify({
+          error: 'That number and password do not match. If this is your first '
+               + 'time, or you have forgotten it, ask us for a code.',
+          tries_left: Math.max(0, 5 - LOGIN.fails),
+          must_use_code: LOGIN.fails >= 5 }));
+      }
+      LOGIN.fails = 0;
+      send(res, 200, JSON.stringify({ ok: true, access_token: 'demo', refresh_token: 'demo' }));
+    });
+  }
+  if (p === '/__login') {
+    const q = new URL(req.url, 'http://x').searchParams;
+    if (q.get('off')) LOGIN.off = q.get('off') === '1';
+    if (q.get('mustUseCode')) LOGIN.mustUseCode = q.get('mustUseCode') === '1';
+    if (q.get('reset')) { LOGIN.off = false; LOGIN.mustUseCode = false; LOGIN.fails = 0; }
+    return send(res, 200, JSON.stringify(LOGIN));
+  }
+  // Setting a password. /__setpw?fail=1 makes it refuse, so the escape
+  // hatch on the forced screen can be driven.
+  if (p === '/auth/v1/user' && req.method === 'PUT') {
+    if (SETPW.fail) {
+      return send(res, 422, JSON.stringify({ msg: 'Password should be at least 8 characters.' }));
+    }
+    SETPW.saved++;
+    return send(res, 200, JSON.stringify({ id: 'user-1' }));
+  }
+  if (p === '/__setpw') {
+    const q = new URL(req.url, 'http://x').searchParams;
+    if (q.has('fail')) SETPW.fail = q.get('fail') === '1';
+    if (q.get('reset')) { SETPW.fail = false; SETPW.saved = 0; }
+    return send(res, 200, JSON.stringify(SETPW));
   }
 
   if (p === '/functions/v1/parent-signin') {
