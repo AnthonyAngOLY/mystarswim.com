@@ -75,8 +75,8 @@ create table auth.users (
 -- can_write_office() decides who may read the spend log. The real one
 -- reads the JWT; here it is a switch a test flips, because what is being
 -- tested is that the functions ask it, not how it answers.
-create table _test_state (office boolean not null default true);
-insert into _test_state values (true);
+create table _test_state (office boolean not null default true, crew uuid);
+insert into _test_state (office) values (true);
 
 create or replace function can_write_office() returns boolean
 language sql stable as $$ select office from _test_state limit 1 $$;
@@ -97,5 +97,19 @@ begin
   if left(d, 1) = '0'  then return '+60' || substr(d, 2); end if;
   return '+60' || d;
 end $$;
+
+-- Lesson types, which the grading module hangs a programme off.
+create table if not exists scheduler_lesson_types (
+  id         uuid primary key default gen_random_uuid(),
+  name       text,
+  is_active  boolean default true,
+  sort_order integer default 0
+);
+
+-- A coach, as the attendance app knows them. The grading policies let a
+-- crew member write marks, so the fixture needs the function that says
+-- whether the caller is one.
+create or replace function attendance_my_crew_id() returns uuid
+language sql stable as $$ select crew from _test_state limit 1 $$;
 
 insert into parent_message_settings (id) values (1);
