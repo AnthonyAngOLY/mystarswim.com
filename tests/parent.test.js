@@ -254,7 +254,16 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
   });
 
   await step('and signing back in is the same code-by-text it always was', async () => {
-    await page.locator('#phone').fill('0123456001');
+    await page.locator('#toCode').click();
+    await page.waitForTimeout(300);
+    // The button used to sit below the password field and silently use
+    // the number box two fields above it. Nothing on screen said so, and
+    // it read as the start of a flow that would ask for a number.
+    if (!(await page.locator('#s-askcode').isVisible()))
+      throw new Error('asking for a code never showed a screen of its own');
+    if (!(await page.locator('#askPhone').isVisible()))
+      throw new Error('there is no number box on the screen that sends the code');
+    await page.locator('#askPhone').fill('0123456001');
     await page.locator('#sendCode').click();
     await page.waitForTimeout(600);
     if (!(await page.locator('#s-otp').isVisible()))
@@ -309,6 +318,8 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     await page.waitForTimeout(400);
     await page.locator('#backToPhone').click();
     await page.waitForTimeout(300);
+    if (!(await page.locator('#s-askcode').isVisible()))
+      throw new Error('"use a different number" did not land on the screen that asks for one');
     if (await page.locator('#resendCode').isDisabled())
       throw new Error('a timer from the last attempt is still holding the button down');
   });
@@ -318,12 +329,12 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     // screen -- so the message has to land there, not on the code screen
     // they never reached.
     await page.request.get(BASE + '/__cool?sec=2');
-    await page.locator('#phone').fill('0123456001');
+    await page.locator('#askPhone').fill('0123456001');
     await page.locator('#sendCode').click();
     await page.waitForTimeout(800);
     if (await page.locator('#s-otp').isVisible())
       throw new Error('a refused send still moved them on to type a code that was never sent');
-    const said = await page.locator('#loginNote').innerText();
+    const said = await page.locator('#askNote').innerText();
     if (!/2 more seconds/.test(said))
       throw new Error("it did not pass on the server's wait: " + JSON.stringify(said));
     const btn = await page.locator('#sendCode').isDisabled();
@@ -337,7 +348,7 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
   await step('a code lets you in only as far as choosing a password', async () => {
     // The refusal above spent the mock's one cooldown; this send goes.
     await page.locator('#sendCode').click();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(900);
     await page.locator('#code').fill('123456');
     await page.locator('#verifyCode').click();
     await page.waitForTimeout(800);

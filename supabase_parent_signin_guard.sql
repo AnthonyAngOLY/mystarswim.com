@@ -249,6 +249,16 @@ $$;
 -- nothing with the anon key should be able to call either.
 revoke all on function parent_signin_check(text)                 from public, anon, authenticated;
 revoke all on function parent_signin_sent(uuid, boolean, text, text) from public, anon, authenticated;
+-- And granted back to the role the Edge Function actually runs as.
+-- EXECUTE is granted to PUBLIC by default, so revoking from PUBLIC takes
+-- it from everybody who held it only that way -- service_role among
+-- them. Without these two lines parent-signin asks the gate a question,
+-- is told "permission denied", and reports that it could not check.
+--
+-- SECURITY DEFINER does not cover this. It decides whose privileges the
+-- body runs WITH, not who may call it.
+grant execute on function parent_signin_check(text)                 to service_role;
+grant execute on function parent_signin_sent(uuid, boolean, text, text) to service_role;
 
 
 -- ─── 5. What it cost ────────────────────────────────────────────────────

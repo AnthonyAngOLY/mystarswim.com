@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 7;
+  var BUILD = 8;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -172,7 +172,8 @@
     if ($('phone')) $('phone').value = '';
     note($('loginNote'), '');
     note($('otpNote'), '');
-    hide($('s-app')); hide($('s-otp')); hide($('s-setpw')); show($('s-login'));
+    hide($('s-app')); hide($('s-otp')); hide($('s-setpw')); hide($('s-askcode'));
+    show($('s-login'));
     if ($('pw')) $('pw').value = '';
   }
 
@@ -329,7 +330,8 @@
         return;
       }
       family = f;
-      hide($('s-login')); hide($('s-otp')); hide($('s-setpw')); show($('s-app'));
+      hide($('s-login')); hide($('s-otp')); hide($('s-setpw')); hide($('s-askcode'));
+    show($('s-app'));
       $('whoName').textContent = family.name;
       var n = (family.children || []).length;
       $('whoKids').textContent = n === 1 ? '1 swimmer' : n + ' swimmers';
@@ -769,12 +771,26 @@
   }
 
   // ── Wiring ───────────────────────────────────────────────────────────
+  // Opening the code screen carries over whatever they already typed, so
+  // nobody retypes a number they have entered once.
+  $('toCode').addEventListener('click', function () {
+    note($('loginNote'), ''); note($('askNote'), '');
+    $('askPhone').value = $('phone').value || '';
+    hide($('s-login')); show($('s-askcode'));
+    $('askPhone').focus();
+  });
+
+  $('backToPw').addEventListener('click', function () {
+    note($('askNote'), '');
+    hide($('s-askcode')); show($('s-login'));
+  });
+
   $('sendCode').addEventListener('click', function () {
-    var p = e164($('phone').value);
+    var p = e164($('askPhone').value);
     if (p.replace(/\D/g, '').length < 10) {
-      note($('loginNote'), 'That does not look like a mobile number.', true); return;
+      note($('askNote'), 'Enter the mobile number the centre has for you.', true); return;
     }
-    note($('loginNote'), '');
+    note($('askNote'), '');
     this.disabled = true; this.textContent = 'Sending…';
     var btn = this;
     sendCode(p).then(function (out) {
@@ -786,11 +802,11 @@
         + (channel === 'sms' ? ' by SMS' : ' on WhatsApp');
       note($('otpNote'), '');
       $('code').value = '';
-      hide($('s-login')); show($('s-otp'));
+      hide($('s-login')); hide($('s-askcode')); show($('s-otp'));
       holdResend(out.cooldownSec || RESEND_WAIT);
       $('code').focus();
     }).catch(function (e) {
-      note($('loginNote'), e.message, true);
+      note($('askNote'), e.message, true);
     }).then(function () {
       btn.disabled = false; btn.textContent = 'Send me a code';
     });
@@ -852,7 +868,7 @@
     pwSaveFails = 0;
     $('newpw').value = '';
     note($('setpwNote'), '');
-    hide($('s-login')); hide($('s-otp')); show($('s-setpw'));
+    hide($('s-login')); hide($('s-otp')); hide($('s-askcode')); show($('s-setpw'));
     $('newpw').focus();
   }
 
@@ -989,9 +1005,14 @@
     signOut();
   });
 
+  // "Use a different number" belongs on the screen that asks for one,
+  // not on the sign-in screen, which would make them find the code
+  // button again.
   $('backToPhone').addEventListener('click', function () {
     releaseResend();
-    hide($('s-otp')); show($('s-login')); note($('loginNote'), '');
+    note($('askNote'), '');
+    hide($('s-otp')); hide($('s-login')); show($('s-askcode'));
+    $('askPhone').focus();
   });
 
   Array.prototype.forEach.call($('tabs').querySelectorAll('button'), function (b) {

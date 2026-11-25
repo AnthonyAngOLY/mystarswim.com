@@ -190,18 +190,47 @@
              placeholder="••••••••">
       <label class="showpw"><input type="checkbox" id="pwShow"> Show password</label>
       <button class="btn" id="signIn" style="margin-top:12px">Sign in</button>
-      <!-- Both on one screen, and no step in between, because a screen
-           that asks for the number first and then decides what to show
-           has to reveal whether that number is one of ours. -->
+      <!-- The number and the password sit together, and no step in
+           between decides which to show: a screen that asked for the
+           number first and then chose would have to reveal whether that
+           number is one of ours.
+           The code path gets its own screen instead, because this button
+           having an invisible dependency on the box two fields above it
+           is not something anybody should have to work out. -->
       <div class="sub" style="margin:14px 2px 8px;text-align:center">
         First time here, or forgotten your password?
       </div>
-      <button class="btn btn-ghost" id="sendCode">Send me a code instead</button>
+      <button class="btn btn-ghost" id="toCode">Send me a code instead</button>
     </div>
     <div class="sub" style="text-align:center;margin-top:16px">
       Number changed, or not sure which one we have?<br>
       Call the centre and we will update it.
     </div>
+  </main>
+</section>
+
+<!-- ─── Asking for a code ───────────────────────────────────────────── -->
+<!-- Its own screen, with its own number box. On the sign-in screen the
+     button sat below a password field, so it read as the start of a
+     separate flow that would ask for a number -- and then silently used
+     the box above instead. Now it does ask. -->
+<section id="s-askcode" class="hidden">
+  <main style="padding-top:48px">
+    <div style="text-align:center;margin-bottom:22px">
+      <div class="big" style="font-size:19px">We will text you a code</div>
+      <div class="sub" style="margin-top:4px">No password needed.</div>
+    </div>
+    <div class="card">
+      <div id="askNote"></div>
+      <label for="askPhone">Your mobile number</label>
+      <input id="askPhone" class="input" type="tel" inputmode="tel" autocomplete="tel"
+             placeholder="012-345 6789">
+      <div class="sub" style="margin:8px 2px 14px">
+        The number the centre has for you. The code arrives by text message.
+      </div>
+      <button class="btn" id="sendCode">Send me a code</button>
+    </div>
+    <button class="btn btn-ghost" id="backToPw" style="margin-top:10px">Back</button>
   </main>
 </section>
 

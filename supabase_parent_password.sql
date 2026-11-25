@@ -175,6 +175,11 @@ end $$;
 
 revoke all on function parent_login_check(text)          from public, anon, authenticated;
 revoke all on function parent_login_record(text, boolean) from public, anon, authenticated;
+-- Granted back to the role parent-login runs as. Revoking from PUBLIC
+-- removes it from service_role too, which is how the code path broke
+-- with "we could not check that just now".
+grant execute on function parent_login_check(text)          to service_role;
+grant execute on function parent_login_record(text, boolean) to service_role;
 
 
 -- ─── 4. Who has one ─────────────────────────────────────────────────────
