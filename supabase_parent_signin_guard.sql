@@ -144,7 +144,11 @@ begin
   -- THE ACTIVE NUMBER ONLY. parent_signin_phone() is the one place that
   -- knows which of the two an account currently signs in with, and this
   -- now matches on it rather than on either column.
-  select count(*), min(pa.id) into v_n, v_acct
+  -- array_agg, not min: Postgres has no min(uuid), and the failure is
+  -- at run time rather than at create time -- the function installed
+  -- cleanly and raised "function min(uuid) does not exist" on the first
+  -- real sign-in.
+  select count(*), (array_agg(pa.id))[1] into v_n, v_acct
     from parent_accounts pa
    where parent_signin_phone(pa) = p_phone;
 

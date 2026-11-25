@@ -83,7 +83,8 @@ begin
     return jsonb_build_object('ok', false, 'error', v_no);
   end if;
 
-  select count(*), min(pa.id) into v_n, v_acct
+  -- array_agg, not min: there is no min(uuid).
+  select count(*), (array_agg(pa.id))[1] into v_n, v_acct
     from parent_accounts pa
    where parent_signin_phone(pa) = p_phone;
 
@@ -144,9 +145,10 @@ begin
   select * into v_set from parent_message_settings limit 1;
   v_max := coalesce(v_set.password_max_fails, 5);
 
-  select min(pa.id) into v_acct
+  select pa.id into v_acct
     from parent_accounts pa
-   where parent_signin_phone(pa) = p_phone;
+   where parent_signin_phone(pa) = p_phone
+   limit 1;
 
   insert into parent_otp_sends (phone, account_id, outcome)
   values (p_phone, v_acct, case when p_ok then 'password_ok' else 'password_bad' end);
