@@ -180,12 +180,28 @@ Deno.serve(async (req) => {
   // What Twilio was actually asked to do, against the row the gate
   // wrote. Without this the log says a message was allowed and never
   // whether it went, which is the half that explains a bill.
-  await db.rpc("parent_signin_sent", {
-    p_log: gate.log_id,
-    p_ok: out.ok,
-    p_channel: usedChannel,
-    p_error: out.ok ? null : `${out.status} ${out.text}`.slice(0, 500),
-  }).catch((e: unknown) => console.error("could not record the send", e));
+  //
+  // try/catch, NOT .catch() on the builder. db.rpc() returns a thenable
+  // that implements then and nothing else, so .catch is undefined and
+  // calling it throws -- after the message has gone. The function then
+  // died on the line below the send, the platform returned a 500 with
+  // none of the CORS headers above it, and a phone reported that it
+  // could not reach us. The parent got their code and was told the
+  // opposite.
+  //
+  // Recording this must never be able to fail the request: the message
+  // has already left, and losing the log line is better than telling a
+  // parent nothing was sent.
+  try {
+    await db.rpc("parent_signin_sent", {
+      p_log: gate.log_id,
+      p_ok: out.ok,
+      p_channel: usedChannel,
+      p_error: out.ok ? null : `${out.status} ${out.text}`.slice(0, 500),
+    });
+  } catch (e) {
+    console.error("could not record the send", e);
+  }
 
   if (!out.ok) {
     console.error("otp send failed", out.status, out.text);

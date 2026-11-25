@@ -123,8 +123,15 @@ Deno.serve(async (req) => {
   }
 
   const session = await res.json();
-  await db.rpc("parent_login_record", { p_phone: phone, p_ok: true })
-    .catch((e: unknown) => console.error("could not record the sign-in", e));
+  // try/catch, not .catch() on the builder: db.rpc() returns a thenable
+  // with a then and no catch, so calling .catch throws -- and it would
+  // throw here after the sign-in had already succeeded, losing the
+  // session the parent just earned.
+  try {
+    await db.rpc("parent_login_record", { p_phone: phone, p_ok: true });
+  } catch (e) {
+    console.error("could not record the sign-in", e);
+  }
 
   // Only the two tokens. The rest of what Supabase returns is about the
   // auth user, and the app reads the family through my_family() with the

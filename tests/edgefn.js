@@ -93,17 +93,26 @@ function stubClient(opts) {
   const calls = { rpc: [], insert: [], upsert: [], select: [] };
   const client = {
     calls,
-    rpc: async (name, args) => {
+    // Returns a THENABLE, not a Promise, because that is what
+    // supabase-js returns. PostgrestBuilder implements `then` and
+    // nothing else -- no `catch`, no `finally`. Handing back a real
+    // Promise here made `db.rpc(...).catch(...)` work in the tests and
+    // throw in production, where `.catch` is undefined. The function
+    // died on the line after the SMS had already gone out, the platform
+    // answered 500 without the CORS headers, and the parent's phone
+    // reported that it could not reach us -- while the code sat in
+    // their messages.
+    //
+    // A test double that is more capable than the real thing cannot
+    // catch misuse of the real thing.
+    rpc: (name, args) => {
       calls.rpc.push([name, args]);
       const f = (o.rpc || {})[name];
-      if (!f) return { data: null, error: { message: 'no such function ' + name } };
       // A test returns the whole supabase-js envelope, {data, error} --
-      // that is the convention the public-intake suite already uses, and
-      // it is passed through untouched. Wrapping bare values here
-      // instead broke every one of those tests, and sniffing for an
-      // `error` key to decide read a perfectly good refusal (which
-      // carries one) as a transport failure.
-      return f(args);
+      // the convention the public-intake suite already uses.
+      const p = Promise.resolve(f ? f(args)
+        : { data: null, error: { message: 'no such function ' + name } });
+      return { then: (res, rej) => p.then(res, rej) };
     },
     // The query builder, as much of it as this function uses. Every
     // filter returns the builder, and the builder is thenable, so a
