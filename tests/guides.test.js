@@ -91,6 +91,52 @@ const eq = (a, b, m) => { if (a !== b) throw new Error(m + ' — got ' + a + ', 
        'the manual does not mention it');
   });
 
+  // ── The guides describe the sign-in that exists ──────────────────────
+  // The parent app grew a password, a screen of its own for asking for a
+  // code, and a way to sign out. Prose describing a behaviour drifts from
+  // the behaviour unless something checks it: seventeen mentions of
+  // WhatsApp survived in these files for weeks after the system stopped
+  // sending on it.
+  await step('no guide still says there is no password', () => {
+    for (const f of ['welcome.html', 'guide.html', 'staff-guide.html']) {
+      const t = read(f);
+      if (/no password (to remember|needed)/i.test(t))
+        throw new Error(f + ' still tells parents there is no password');
+    }
+  });
+
+  await step('the guides name the button the app actually has', () => {
+    // The sign-in screen's code button, by its exact label.
+    const app = read('parent/index.html');
+    const m = app.match(/id="toCode"[^>]*>([^<]+)</);
+    if (!m) throw new Error('the app has no code button to describe');
+    const label = m[1].trim();
+    for (const f of ['welcome.html', 'staff-guide.html']) {
+      if (!read(f).includes(label))
+        throw new Error(f + ' does not name the button parents must tap: ' + JSON.stringify(label));
+    }
+  });
+
+  await step('they tell parents the length the app enforces', () => {
+    const js = read('parent/app.js');
+    const m = js.match(/pw\.length\s*<\s*(\d+)/);
+    if (!m) throw new Error('the app enforces no minimum length');
+    const n = m[1];
+    // "characters" is required, not just the digit: a bare \b8\b matched
+    // the 12 inside the example number "+60 12-345 6789", so the check
+    // passed with the app set to 12 and the page still saying 8.
+    if (!new RegExp('\\b' + n + '\\s*characters').test(read('welcome.html')))
+      throw new Error('the setup page does not say ' + n + ' characters, which the app requires');
+  });
+
+  await step('the staff guide does not promise a reset nobody can do', () => {
+    const t = read('staff-guide.html');
+    if (!/cannot reset a password|nobody can see or set/i.test(t))
+      throw new Error('it never tells staff they cannot reset a password');
+    if (/we can reset|office can reset|ask the office to reset/i.test(t))
+      throw new Error('it promises a reset that does not exist');
+  });
+
   await step('no guide promises a channel the system does not send on', () => {
     // The guides said the code arrives on WhatsApp. It does not: WhatsApp
     // needs an approved Meta business sender, which takes weeks, so
