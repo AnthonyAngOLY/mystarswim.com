@@ -82,6 +82,30 @@ http.createServer((req, res) => {
   // something to be wrong about. 12 sent and 1 failed is 13 chargeable
   // at the rate the screen is set to; the refusals cost nothing and must
   // not be counted.
+  // The syllabus, three levels deep, so the grading screen has a ladder
+  // to draw. Swim Passport level 2 deliberately has no tasks: a level
+  // that awards itself to everyone is the fault worth seeing on screen.
+  if (p === '/rest/v1/grading_programs') {
+    return json(res, 200, [
+      { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', sort_order: 1, is_active: true },
+      { id: 'pr2', name: 'Water Discovery', subtitle: 'Toddlers', sort_order: 2, is_active: true }
+    ]);
+  }
+  if (p === '/rest/v1/grading_milestones') {
+    return json(res, 200, [
+      { id: 'ms1', program_id: 'pr1', level_no: 1, name: 'Guppy', certificate: false, is_active: true },
+      { id: 'ms2', program_id: 'pr1', level_no: 2, name: 'Tortoise', certificate: true, is_active: true },
+      { id: 'ms3', program_id: 'pr2', level_no: 1, name: 'Droplet', certificate: false, is_active: true }
+    ]);
+  }
+  if (p === '/rest/v1/grading_tasks') {
+    return json(res, 200, [
+      { id: 't1', milestone_id: 'ms1', name: 'Submerges whole head', sort_order: 1, is_active: true },
+      { id: 't2', milestone_id: 'ms1', name: 'Blows bubbles', sort_order: 2, is_active: true },
+      { id: 't3', milestone_id: 'ms3', name: 'Enters without distress', sort_order: 1, is_active: true }
+    ]);
+  }
+
   if (p === '/rest/v1/rpc/parent_otp_spend') {
     return json(res, 200, [
       { day: '2026-11-24', sent: 9, failed: 1, cooldown: 4, capped: 2,

@@ -991,6 +991,11 @@ function App({
   const [saveBusy, setSaveBusy] = useState(false);
   const [remarkDraft, setRemarkDraft] = useState('');
   // ── Invoicing state ────────────────────────────────────────────────
+  // The syllabus. Loaded with everything else because the lesson-type
+  // editor needs the list and the grading screen needs all of it.
+  const [gradingPrograms, setGradingPrograms] = useState([]);
+  const [gradingMilestones, setGradingMilestones] = useState([]);
+  const [gradingTasks, setGradingTasks] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [invoiceLines, setInvoiceLines] = useState([]);
   const [pmts, setPmts] = useState([]);
@@ -1044,7 +1049,7 @@ function App({
       setLoading(false);
       setStatus('Connected');
       // Phase 2 — background: load everything else after first paint.
-      Promise.all([loadStudents(), loadGroups(), loadGroupMemberships(), loadCreditBalances(), loadCreditPurchases(), loadSubscriptions(), loadCodes(), loadReplacementPending(), loadTcAcceptances(), loadRemarks(monthCursor), loadInvoiceData(), loadProgrammeSessions(), loadProgrammeCategories(), loadBillingTerms(), loadProducts(), loadContactMessages(), loadAppUsers(), loadAdminAll(), loadLeave()]).catch(e => console.warn('Background load warning:', e));
+      Promise.all([loadStudents(), loadGroups(), loadGroupMemberships(), loadCreditBalances(), loadCreditPurchases(), loadSubscriptions(), loadCodes(), loadReplacementPending(), loadTcAcceptances(), loadRemarks(monthCursor), loadInvoiceData(), loadGrading(), loadProgrammeSessions(), loadProgrammeCategories(), loadBillingTerms(), loadProducts(), loadContactMessages(), loadAppUsers(), loadAdminAll(), loadLeave()]).catch(e => console.warn('Background load warning:', e));
     } catch (err) {
       handleErr(err);
       setLoading(false);
@@ -1052,6 +1057,23 @@ function App({
   }
 
   // ── Invoice loaders ────────────────────────────────────────────────
+  // Three small tables, read together: a milestone without its tasks is
+  // a row nobody can do anything with.
+  async function loadGrading() {
+    try {
+      const [progs, miles, tasks] = await Promise.all([selectAllRows('grading_programs', '*', '&order=sort_order.asc,name.asc'), selectAllRows('grading_milestones', '*', '&order=level_no.asc'), selectAllRows('grading_tasks', '*', '&order=sort_order.asc')]);
+      setGradingPrograms(progs || []);
+      setGradingMilestones(miles || []);
+      setGradingTasks(tasks || []);
+    } catch (e) {
+      // Before supabase_grading_programs.sql has been run. The lesson
+      // type editor simply offers no programmes, which is honest.
+      console.warn('Grading tables not available yet (run supabase_grading_programs.sql):', e?.message || e);
+      setGradingPrograms([]);
+      setGradingMilestones([]);
+      setGradingTasks([]);
+    }
+  }
   async function loadInvoiceData() {
     try {
       const [invRows, lineRows, payRows, pcRows, settRows, pmRows, wsRows, ppRows] = await Promise.all([selectAllRows('invoices', '*', '&order=created_at.desc'), selectAllRows('invoice_lines', '*', '&order=invoice_id.asc,sort_order.asc'), selectAllRows('payments', '*', '&order=invoice_id.asc,created_at.asc'), selectAllRows('pending_credits', '*', '&order=created_at.desc'), selectRows('invoice_settings', '*').catch(() => []), selectRows('payment_methods', '*', '&order=sort_order.asc').catch(() => []), selectRows('public_schedule_settings', '*').catch(() => []), selectRows('public_pricing', '*', '&order=category.asc,sort_order.asc').catch(() => [])]);
@@ -7695,13 +7717,19 @@ function App({
     ariaLabel: "Settings section",
     value: adminSection,
     onChange: setAdminSection,
-    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['classPolicy', 'Credits & Classes'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isOwner ? [['retention', 'Documents']] : [])]
+    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['grading', 'Grading'], ['classPolicy', 'Credits & Classes'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isOwner ? [['retention', 'Documents']] : [])]
   }), /*#__PURE__*/React.createElement("div", {
     className: "side-content"
   }, adminSection === 'retention' && isOwner && /*#__PURE__*/React.createElement(DocRetentionView, {
     months: docRetentionMonths,
     setMonths: saveDocRetention,
     runPurge: runLeaveDocPurge
+  }), adminSection === 'grading' && /*#__PURE__*/React.createElement(GradingAdminView, {
+    programs: gradingPrograms,
+    milestones: gradingMilestones,
+    tasks: gradingTasks,
+    lessonTypes: options.lessonTypes,
+    onReload: loadGrading
   }), adminSection === 'classPolicy' && /*#__PURE__*/React.createElement(ClassPolicyView, null), adminSection === 'summary' && /*#__PURE__*/React.createElement(SummaryView, {
     summary: summary,
     pools: activePools()
@@ -7795,6 +7823,7 @@ function App({
     reorderOption: reorderOption,
     moveOption: moveOption,
     saveLessonType: saveLessonType,
+    gradingPrograms: gradingPrograms,
     deleteLessonType: deleteLessonType,
     lessonTypeCounts: lessonTypeCounts,
     crewForLinking: adminEmployees,
@@ -9626,6 +9655,435 @@ function PackageEditor({
     }
   }, "Save")));
 }
+
+// ============================================================================
+// GradingAdminView — the syllabus: programmes, their milestones, their tasks.
+//
+// Three levels deep, which is one more than a table can show, so it is
+// drawn as a ladder: pick a programme, see its levels, open a level to
+// see its tasks. The alternative -- a flat list of tasks with two
+// dropdowns -- is how a syllabus ends up with a task on the wrong level
+// and nobody noticing for a term.
+//
+// Editing this is editing what children have achieved. Adding a task to
+// a milestone withdraws it from every child who holds it until they do
+// the new thing; the database does that on its own, and this screen says
+// so before you save rather than after.
+// ============================================================================
+function GradingAdminView({
+  programs,
+  milestones,
+  tasks,
+  lessonTypes,
+  onReload
+}) {
+  const [progId, setProgId] = useState(null);
+  const [openMs, setOpenMs] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const prog = (programs || []).find(p => p.id === progId) || (programs || [])[0] || null;
+  const levels = (milestones || []).filter(m => m.program_id === prog?.id).sort((a, b) => (a.level_no || 0) - (b.level_no || 0));
+  const tasksFor = msId => (tasks || []).filter(t => t.milestone_id === msId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  // Which lesson types send children up this ladder. Worth showing: a
+  // programme nothing points at grades nobody.
+  const usedBy = pid => (lessonTypes || []).filter(lt => lt.grading_program_id === pid);
+  async function run(fn) {
+    setBusy(true);
+    setErr('');
+    try {
+      await fn();
+      await onReload();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function addProgram() {
+    const name = prompt('Programme name — e.g. "Swim Passport"');
+    if (!name || !name.trim()) return;
+    await run(async () => {
+      const made = await insertRows('grading_programs', {
+        name: name.trim(),
+        sort_order: (programs || []).length + 1
+      });
+      if (made?.[0]?.id) setProgId(made[0].id);
+    });
+  }
+  async function addLevel() {
+    if (!prog) return;
+    const next = levels.length ? Math.max(...levels.map(m => m.level_no || 0)) + 1 : 1;
+    const name = prompt(`Level ${next} name — e.g. "Guppy"`);
+    if (!name || !name.trim()) return;
+    await run(() => insertRows('grading_milestones', {
+      program_id: prog.id,
+      level_no: next,
+      name: name.trim()
+    }));
+  }
+  async function addTask(ms) {
+    const name = prompt(`A task for ${ms.name} — e.g. "Submerge and blow bubbles"`);
+    if (!name || !name.trim()) return;
+    const existing = tasksFor(ms.id);
+    // Adding a task to a level children already hold takes it back off
+    // them until they do the new thing. Said before it happens.
+    if (existing.length) {
+      const holders = null; // the count lives in the database; the warning does not need it
+      void holders;
+      if (!confirm(`Add "${name.trim()}" to ${ms.name}?\n\n` + `Any child who has already completed ${ms.name} will have it withdrawn ` + `until this new task is ticked for them too.\n\n` + `That is deliberate — otherwise ${ms.name} means whatever it meant on ` + `the day each child climbed it.`)) return;
+    }
+    await run(() => insertRows('grading_tasks', {
+      milestone_id: ms.id,
+      name: name.trim(),
+      sort_order: existing.length + 1
+    }));
+  }
+  const rename = (table, row, field, label) => async () => {
+    const v = prompt(label, row[field] || '');
+    if (v === null) return;
+    await run(() => patchRows(table, {
+      id: row.id
+    }, {
+      [field]: v.trim() || null
+    }));
+  };
+  const toggleActive = (table, row) => () => run(() => patchRows(table, {
+    id: row.id
+  }, {
+    is_active: row.is_active === false
+  }));
+
+  // Icons go to a public bucket: a badge is artwork drawn on three
+  // screens and a printed certificate, not a record about a child.
+  async function uploadIcon(table, row) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png,image/jpeg,image/webp,image/svg+xml';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      await run(async () => {
+        const safe = (file.name || 'icon').replace(/[^\w.\-]+/g, '_').slice(0, 60);
+        const path = `${row.id}/${Date.now()}-${safe}`;
+        const res = await fetch(`${cfg.supabaseUrl}/storage/v1/object/grading-icons/${encodeURI(path)}`, {
+          method: 'POST',
+          headers: {
+            ...authHeadersFor(),
+            'Content-Type': file.type || 'image/png'
+          },
+          body: file
+        });
+        if (!res.ok) throw new Error('Could not upload that image.');
+        await patchRows(table, {
+          id: row.id
+        }, {
+          icon_path: path
+        });
+      });
+    };
+    input.click();
+  }
+  const iconUrl = p => p ? `${cfg.supabaseUrl}/storage/v1/object/public/grading-icons/${encodeURI(p)}` : null;
+  const iconBox = (table, row) => /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    title: row.icon_path ? 'Replace the badge image' : 'Upload a badge image',
+    style: {
+      padding: 2,
+      width: 40,
+      height: 40,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center'
+    },
+    onClick: () => uploadIcon(table, row)
+  }, row.icon_path ? /*#__PURE__*/React.createElement("img", {
+    src: iconUrl(row.icon_path),
+    alt: "",
+    style: {
+      maxWidth: 34,
+      maxHeight: 34,
+      objectFit: 'contain'
+    }
+  }) : /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 16,
+      opacity: .45
+    }
+  }, "🖼"));
+  if (!programs) return /*#__PURE__*/React.createElement("div", {
+    className: "card"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…"));
+  if (!programs.length) return /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      padding: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      marginBottom: 6
+    }
+  }, "No grading programmes yet"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 12,
+      lineHeight: 1.6
+    }
+  }, "Run ", /*#__PURE__*/React.createElement("b", null, "supabase_grading_programs.sql"), " to create the tables and seed three programmes to edit, or add one here and build it up."), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary",
+    onClick: addProgram,
+    disabled: busy
+  }, "Add a programme"), err && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#DC2626',
+      marginTop: 8
+    }
+  }, err));
+  return /*#__PURE__*/React.createElement("div", null, err && /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      borderColor: 'var(--red-bd)',
+      background: '#FFF5F5',
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small"
+  }, err)), /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      flexWrap: 'wrap',
+      alignItems: 'center'
+    }
+  }, (programs || []).map(p => {
+    const on = p.id === prog?.id;
+    return /*#__PURE__*/React.createElement("button", {
+      key: p.id,
+      className: `btn ${on ? 'btn-primary' : 'btn-ghost'} small`,
+      onClick: () => {
+        setProgId(p.id);
+        setOpenMs(null);
+      }
+    }, p.name, p.is_active === false ? ' (off)' : '');
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: addProgram,
+    disabled: busy
+  }, "+ Programme"))), prog && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 12,
+      alignItems: 'flex-start',
+      flexWrap: 'wrap'
+    }
+  }, iconBox('grading_programs', prog), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      minWidth: 200
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 17,
+      fontWeight: 800
+    }
+  }, prog.name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, prog.subtitle || 'No subtitle'), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4
+    }
+  }, levels.length, " level", levels.length === 1 ? '' : 's', " ·", ' ', usedBy(prog.id).length ? `graded by ${usedBy(prog.id).map(l => l.name).join(', ')}` : /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: '#B45309'
+    }
+  }, "no lesson type points at this — it grades nobody"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: rename('grading_programs', prog, 'name', 'Programme name')
+  }, "Rename"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: rename('grading_programs', prog, 'subtitle', 'Subtitle — e.g. "Learn to Swim"')
+  }, "Subtitle"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: toggleActive('grading_programs', prog)
+  }, prog.is_active === false ? 'Turn on' : 'Turn off')))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6
+    }
+  }, levels.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "card empty",
+    style: {
+      padding: 22
+    }
+  }, "No levels yet. A programme with no levels grades nobody."), levels.map(ms => {
+    const ts = tasksFor(ms.id);
+    const open = openMs === ms.id;
+    return /*#__PURE__*/React.createElement("div", {
+      key: ms.id,
+      className: "card",
+      style: {
+        padding: 0,
+        opacity: ms.is_active === false ? .55 : 1
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 10,
+        alignItems: 'center',
+        padding: '10px 12px',
+        cursor: 'pointer'
+      },
+      onClick: () => setOpenMs(open ? null : ms.id)
+    }, iconBox('grading_milestones', ms), /*#__PURE__*/React.createElement("div", {
+      style: {
+        flex: 1,
+        minWidth: 0
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontWeight: 800
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "small subtle",
+      style: {
+        marginRight: 6
+      }
+    }, "Level ", ms.level_no), ms.name, ms.certificate && /*#__PURE__*/React.createElement("span", {
+      title: "A certificate can be claimed at this level",
+      style: {
+        marginLeft: 7,
+        fontSize: 10.5,
+        fontWeight: 800,
+        padding: '2px 7px',
+        borderRadius: 999,
+        background: '#FEF3C7',
+        color: '#92400E'
+      }
+    }, "CERTIFICATE")), /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, ts.length, " task", ts.length === 1 ? '' : 's', ts.length === 0 && /*#__PURE__*/React.createElement("b", {
+      style: {
+        color: '#B45309'
+      }
+    }, " — a level with no tasks awards nothing"))), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: 'var(--text-3)',
+        fontSize: 11
+      }
+    }, open ? '▲' : '▼')), open && /*#__PURE__*/React.createElement("div", {
+      style: {
+        borderTop: '1px solid var(--border)',
+        padding: '10px 12px'
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        gap: 6,
+        flexWrap: 'wrap',
+        marginBottom: 10
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: rename('grading_milestones', ms, 'name', `Level ${ms.level_no} name`)
+    }, "Rename"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: rename('grading_milestones', ms, 'description', 'What this level means')
+    }, "Description"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      disabled: busy,
+      onClick: () => run(() => patchRows('grading_milestones', {
+        id: ms.id
+      }, {
+        certificate: !ms.certificate
+      }))
+    }, ms.certificate ? 'No certificate' : 'Offers a certificate'), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: toggleActive('grading_milestones', ms)
+    }, ms.is_active === false ? 'Turn on' : 'Turn off')), ms.description && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        marginBottom: 8
+      }
+    }, ms.description), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3
+      }
+    }, ts.map((t, i) => /*#__PURE__*/React.createElement("div", {
+      key: t.id,
+      style: {
+        display: 'flex',
+        gap: 8,
+        alignItems: 'center',
+        padding: '5px 0',
+        borderTop: i ? '1px dashed var(--border)' : 'none',
+        opacity: t.is_active === false ? .5 : 1
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "small subtle",
+      style: {
+        width: 18,
+        textAlign: 'right'
+      }
+    }, i + 1), /*#__PURE__*/React.createElement("span", {
+      style: {
+        flex: 1,
+        minWidth: 0
+      }
+    }, t.name), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: rename('grading_tasks', t, 'name', 'Task')
+    }, "✎"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      onClick: toggleActive('grading_tasks', t),
+      title: t.is_active === false ? 'Put this task back on the level' : 'Take this task off the level'
+    }, t.is_active === false ? '↩' : '✕'))), ts.length === 0 && /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, "Nothing here yet.")), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      style: {
+        marginTop: 10
+      },
+      disabled: busy,
+      onClick: () => addTask(ms)
+    }, "+ Task")));
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      marginTop: 10
+    },
+    onClick: addLevel,
+    disabled: busy
+  }, "+ Level ", levels.length ? Math.max(...levels.map(m => m.level_no || 0)) + 1 : 1), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 14,
+      lineHeight: 1.6
+    }
+  }, "A child is graded on whichever programme their lesson type points at — set that in ", /*#__PURE__*/React.createElement("b", null, "Settings → Lesson Types"), ". Their badge is the highest level where ", /*#__PURE__*/React.createElement("b", null, "every"), " task has been ticked, so one tick on a high level promotes nobody. Turning a task off, or adding one, changes who has finished what: the database works that out immediately.")));
+}
 function SettingsView({
   section,
   options,
@@ -9640,6 +10098,7 @@ function SettingsView({
   moveOption,
   saveLessonType,
   deleteLessonType,
+  gradingPrograms,
   lessonTypeCounts,
   codes,
   students,
@@ -10402,6 +10861,7 @@ function SettingsView({
       }, /*#__PURE__*/React.createElement(LessonTypeEditor, {
         row: r,
         pools: options.pools,
+        gradingPrograms: gradingPrograms,
         onSave: patch => {
           saveLessonType(r, patch);
           setEditingLessonId(null);
@@ -11762,9 +12222,11 @@ function ProgrammeTermsPanel({
 function LessonTypeEditor({
   row,
   pools,
+  gradingPrograms,
   onSave
 }) {
   const [draft, setDraft] = useState({
+    grading_program_id: row.grading_program_id || '',
     name: row.name || '',
     age_min_months: row.age_min_months ?? '',
     age_max_months: row.age_max_months ?? '',
@@ -11839,6 +12301,20 @@ function LessonTypeEditor({
     onChange: e => setF('students_per_instructor', e.target.value),
     placeholder: "6 for 1:6"
   })), /*#__PURE__*/React.createElement("div", {
+    className: "field",
+    style: {
+      gridColumn: '1 / 3'
+    }
+  }, /*#__PURE__*/React.createElement("label", null, "Graded on"), /*#__PURE__*/React.createElement("select", {
+    className: "input",
+    value: draft.grading_program_id,
+    onChange: e => setF('grading_program_id', e.target.value)
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Not graded"), (gradingPrograms || []).filter(p => p.is_active !== false).map(p => /*#__PURE__*/React.createElement("option", {
+    key: p.id,
+    value: p.id
+  }, p.name, p.subtitle ? ` — ${p.subtitle}` : '')))), /*#__PURE__*/React.createElement("div", {
     className: "field"
   }, /*#__PURE__*/React.createElement("label", null, "Default duration (min)"), /*#__PURE__*/React.createElement("input", {
     className: "input",

@@ -905,6 +905,70 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       throw new Error('the old one-button clean is still there, merging both kinds');
   });
 
+  // ── The syllabus screen ───────────────────────────────────────────────
+  // Three levels deep -- programme, level, task -- which is one more than
+  // a table can show. The faults worth seeing are a level with no tasks
+  // (it would award itself to every child in the programme) and a
+  // programme no lesson type points at (it grades nobody).
+  const gradingView = () => page.evaluate(() => {
+    let host = document.getElementById('gr-host');
+    if (!host) { host = document.createElement('div'); host.id = 'gr-host'; document.body.appendChild(host); }
+    ReactDOM.createRoot(host).render(React.createElement(GradingAdminView, {
+      programs: [
+        { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', is_active: true },
+        { id: 'pr2', name: 'Water Discovery', subtitle: 'Toddlers', is_active: true }
+      ],
+      milestones: [
+        { id: 'ms1', program_id: 'pr1', level_no: 1, name: 'Guppy', certificate: false, is_active: true },
+        { id: 'ms2', program_id: 'pr1', level_no: 2, name: 'Tortoise', certificate: true, is_active: true },
+        // Water Discovery needs a level of its own, or the "no levels"
+        // empty state fires and the assertion below passes on the wrong
+        // sentence -- which is exactly what it did.
+        { id: 'ms3', program_id: 'pr2', level_no: 1, name: 'Droplet', certificate: false, is_active: true }
+      ],
+      tasks: [
+        { id: 't1', milestone_id: 'ms1', name: 'Submerges whole head', sort_order: 1, is_active: true },
+        { id: 't2', milestone_id: 'ms1', name: 'Blows bubbles', sort_order: 2, is_active: true },
+        { id: 't3', milestone_id: 'ms3', name: 'Enters without distress', sort_order: 1, is_active: true }
+      ],
+      // pr1 is graded by a lesson type; pr2 is pointed at by nothing.
+      lessonTypes: [{ id: 'lt1', name: 'Learn to Swim', grading_program_id: 'pr1' }],
+      onReload: () => Promise.resolve()
+    }));
+  });
+
+  await step('the syllabus draws its ladder', async () => {
+    await gradingView();
+    await page.waitForTimeout(800);
+    const t = await page.locator('#gr-host').innerText();
+    if (!/Level 1/.test(t) || !/Guppy/.test(t)) throw new Error('no levels drawn: ' + t.slice(0, 200));
+    if (!/2 tasks/.test(t)) throw new Error('it does not count the tasks on a level: ' + t.slice(0, 200));
+  });
+
+  await step('a level with no tasks says it awards nothing', async () => {
+    const t = await page.locator('#gr-host').innerText();
+    if (!/awards nothing/i.test(t))
+      throw new Error('an empty level looks finished, and would be handed to every child: '
+                      + JSON.stringify(t.slice(0, 300)));
+  });
+
+  await step('and a programme nothing points at says it grades nobody', async () => {
+    await page.locator('#gr-host button').filter({ hasText: 'Water Discovery' }).first().click();
+    await page.waitForTimeout(400);
+    const t = await page.locator('#gr-host').innerText();
+    // The exact phrase, not "grades nobody" -- the empty-state sentence
+    // for a programme with no levels ends in those same two words.
+    if (!/no lesson type points at this/i.test(t))
+      throw new Error('an unused programme looks live: ' + JSON.stringify(t.slice(0, 300)));
+  });
+
+  await step('a level that offers a certificate is marked as one', async () => {
+    await page.locator('#gr-host button').filter({ hasText: 'Swim Passport' }).first().click();
+    await page.waitForTimeout(400);
+    const t = await page.locator('#gr-host').innerText();
+    if (!/CERTIFICATE/.test(t)) throw new Error('the certificate level is not marked');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');
