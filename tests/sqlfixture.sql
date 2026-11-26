@@ -131,4 +131,13 @@ create table if not exists admin_employees (
 create or replace function can_note_on_student(p_student uuid) returns boolean
 language sql stable as $$ select coalesce((select may_note from _test_state limit 1), true) $$;
 
+-- What the parent app reads through. The real one resolves the signed-in
+-- auth user; here it is the first account, because what is under test is
+-- what my_family does with the answer.
+create or replace function my_parent_account_id() returns uuid
+language sql stable as $$ select id from parent_accounts order by created_at limit 1 $$;
+
+create table if not exists parent_messages (
+  account_id uuid, read_at timestamptz);
+
 insert into parent_message_settings (id) values (1);

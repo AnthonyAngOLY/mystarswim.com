@@ -53,6 +53,34 @@ A clean rebuild shows only the lines you changed. If the diff is larger
 than your edit, the Babel settings are wrong — fix them rather than
 committing the noise.
 
+## The SQL is run, not read
+
+`bash tests/run.sh sql` installs every migration in `tests/sql.test.js`'s
+`FILES` list against a real Postgres and then calls what it created.
+**Adding a file to that list is part of writing the file.** One not in it
+is one still being checked by reading.
+
+Reading let two faults through to the live database in an afternoon, and
+neither is visible on the page:
+
+`min(pa.id)` on a uuid column. There is no `min(uuid)`, and plpgsql
+resolves function names when the body *runs* — so the file installed
+cleanly, the confirm block reported success, and the first parent to ask
+for a code got "we could not check that just now".
+
+`revoke all ... from public` on a gate function, which also takes it from
+`service_role` — the role the Edge Functions run as. `SECURITY DEFINER`
+does not cover this: it decides whose privileges the body runs *with*,
+not who may call it.
+
+Each file is probed **the moment it installs**, before any later file can
+redefine what it created. The first version of this suite probed only at
+the end and caught neither fault, because a later migration re-creates
+`parent_signin_check` and papered over both.
+
+Without a local Postgres the suite skips itself and says so. A machine
+without one is not a broken checkout.
+
 ## One result per file
 
 The Supabase SQL editor shows the result of the **last statement only**.
