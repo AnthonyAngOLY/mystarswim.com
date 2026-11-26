@@ -427,6 +427,37 @@ function q(sql) {
     if (lvl !== '1') throw new Error('level is ' + JSON.stringify(lvl) + ', expected 1');
   });
 
+  // The office is about to move its Learn to Swim lesson type off the
+  // placeholder ladder and onto MAS BADGES. Which ladder is drawn is a
+  // choice about a dropdown; a tick is a coach saying they watched a
+  // child do something. Changing the first must never be a way to lose
+  // the second.
+  step('repointing a lesson type to another ladder keeps every tick', () => {
+    const before = q(`select count(*) from student_task_marks where removed_at is null`);
+    if (before === '0') throw new Error('nothing is ticked, so this proves nothing');
+    const was = q(`select grading_program_id from scheduler_lesson_types limit 1`);
+    const mas = q(`select id from grading_programs where name='MAS BADGES'`);
+    q(`update scheduler_lesson_types set grading_program_id='${mas}'`);
+
+    const moved = JSON.parse(q(`select student_grading((select id from students limit 1))`));
+    if (moved.program.name !== 'MAS BADGES')
+      throw new Error('the ladder did not change: ' + moved.program.name);
+    // Nothing carries across, and it should not: a Starfish criterion is
+    // not the same claim as a Guppy one, and pretending otherwise would
+    // hand out levels nobody watched.
+    if (moved.level !== null)
+      throw new Error('a level was awarded on a ladder nothing was ticked against: '
+        + moved.level);
+    const after = q(`select count(*) from student_task_marks where removed_at is null`);
+    if (after !== before)
+      throw new Error('repointing cost ' + (Number(before) - Number(after)) + ' tick(s)');
+
+    q(`update scheduler_lesson_types set grading_program_id='${was}'`);
+    const back = JSON.parse(q(`select student_grading((select id from students limit 1))`));
+    if (back.level !== 1)
+      throw new Error('moving back did not give the child their level again: ' + back.level);
+  });
+
   step('the bars are tasks done over tasks on that level', () => {
     // Read the shape out of the syllabus rather than writing the numbers
     // here, so loading a different syllabus is not a test to rewrite.
