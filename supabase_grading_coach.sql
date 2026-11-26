@@ -247,7 +247,8 @@ select z.k as "#", z.thing, z.detail
       || 'a lesson type with no grading programme simply has no badge.'
   union all
   select 5, 'next',
-         'Deploy the attendance app (BUILD 19). Until then nothing calls '
-      || 'these and the class list looks as it did.'
+         'Deploy the attendance app — whatever BUILD attendance/app.js now '
+      || 'says; a number written here only goes stale, and this one did. '
+      || 'Until then nothing calls these and the class list looks as it did.'
   ) z
  order by z.k;

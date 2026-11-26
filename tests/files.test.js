@@ -229,6 +229,32 @@ step('every roundel is on disk, transparent, and web-sized', () => {
   }
 });
 
+// A roundel must BE the circle, not a circle sitting somewhere inside a
+// square. Both sets shipped cut to the artboard they were drawn on
+// rather than to their own outline -- the MAS ones 11px off centre, the
+// passport ones inset by 3 on every side and cut 37px too tall, because
+// the sticker sheet they came off is not level. It reads as a badge
+// that has been cropped, and nothing in the file name says so.
+step('every roundel is the circle, centred, filling its frame', () => {
+  const magick = (args) => require('child_process')
+    .execFileSync('convert', args, { encoding: 'utf8' }).trim();
+  for (const f of fs.readdirSync(path.join(ROOT, 'badges')).filter(f => !/-mark\.png$/.test(f))) {
+    const rel = path.join(ROOT, 'badges', f);
+    // The opaque part of the image, measured. Must fill the canvas
+    // corner to corner: anything less is margin, and margin off-centre
+    // is the fault this catches.
+    const box = magick([rel, '-alpha', 'extract', '-fuzz', '50%', '-trim',
+                        '-format', '%w %h %X %Y', 'info:']);
+    const [w, h, x, y] = box.split(/\s+/).map(v => parseInt(v, 10));
+    const size = parseInt(magick([rel, '-format', '%w', 'info:']), 10);
+    if (Math.abs(w - size) > 1 || Math.abs(h - size) > 1)
+      throw new Error(f + ': the circle is ' + w + 'x' + h + ' inside a ' + size
+        + 'px frame — it was cut to its artboard, not to its outline');
+    if (Math.abs(x) > 1 || Math.abs(y) > 1)
+      throw new Error(f + ': the circle sits at +' + x + '+' + y + ', not centred');
+  }
+});
+
 // And the migrations point at exactly these, by the path the apps use.
 for (const [file, n] of [['supabase_grading_mas_badges.sql', 8],
                          ['supabase_swim_passport_syllabus.sql', 9]]) {
