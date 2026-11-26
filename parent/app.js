@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 11;
+  var BUILD = 12;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -447,7 +447,7 @@
                                       + ';border-color:' + hex(g.colour) + '"' : '') + '>'
                      + (g.icon ? '<img src="' + esc(iconUrl(g.icon)) + '" alt="">' : '')
                      + esc(g.program) + ' \u00b7 '
-                     + (g.level ? 'Level ' + esc(String(g.level)) : 'Starting out')
+                     + (g.level ? esc(stageWord(g.label, g.level)) : 'Starting out')
                      + '<small>' + esc(String(g.earned)) + '/' + esc(String(g.total)) + '</small>'
                      + '</span></div>' : '')
               + '</div></div></div>';
@@ -480,6 +480,7 @@
               program: g.program.name,
               icon: (top && top.icon) || g.program.icon,
               colour: (top && top.colour) || g.program.colour,
+              label: top && top.label,
               level: g.level,
               total: g.levels_total,
               earned: held.length
@@ -523,6 +524,16 @@
   // column has a CHECK on it, but a value that reaches an attribute is
   // checked where it is used too, not only where it was stored.
   function hex(c) { return (/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/).test(c || '') ? c : ''; }
+
+  // What a rung is called. level_no orders the ladder; label is what the
+  // child's badge says, and on the Swim Passport those differ -- stage
+  // "1" is the third rung, because A and B come first. Printing the
+  // ordinal beside a sticker reading "Learn to Swim 1" is a year of
+  // front-desk questions.
+  function stageWord(label, levelNo) {
+    if (label) return 'Stage ' + label;
+    return levelNo ? 'Level ' + levelNo : '';
+  }
 
   // Likewise a URL that becomes an href. http and https only: the
   // office types this box, and `javascript:` in it would be script
@@ -579,12 +590,13 @@
     // The roundel of the level she is on, not the programme's mark: the
     // chip is her badge, and a programme logo squeezed to 16px is a grey
     // smudge that says nothing.
-    var topIcon = held.length ? held[held.length - 1].icon : null;
+    var topMs = held.length ? held[held.length - 1] : null;
+    var topIcon = topMs && topMs.icon;
     var out = '<div class="h" style="display:flex;align-items:center;gap:8px">'
       + '<span>' + esc(g.program.name) + '</span>'
       + '<span class="lvlchip">'
       + (topIcon ? '<img src="' + esc(iconUrl(topIcon)) + '" alt="">' : '')
-      + (g.level ? 'Level ' + esc(String(g.level)) : 'Starting out')
+      + (g.level ? esc(stageWord(topMs && topMs.label, g.level)) : 'Starting out')
       + '<small>' + earned + '/' + esc(String(g.levels_total)) + '</small></span></div>';
 
     out += syllabusHtml(g.program);
@@ -609,7 +621,7 @@
         +     (m.icon ? '<img src="' + esc(iconUrl(m.icon)) + '" alt="">'
                       : (m.activated ? '\u2605' : '\u25cb')) + '</span>'
         +   '<span class="msrow-nm"><b>' + esc(m.name) + '</b>'
-        +     '<span>Level ' + esc(String(m.level_no))
+        +     '<span>' + esc(stageWord(m.label, m.level_no))
         +       (m.activated ? ' \u00b7 earned' : '') + '</span></span>'
         +   '<span class="msrow-chev">' + (open ? '\u25b2' : '\u25bc') + '</span>'
         + '</div>'

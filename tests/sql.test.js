@@ -107,6 +107,29 @@ const FILES = [
     probe: () => {
       if (q(`select coach_student_grading((select id from students limit 1))->>'ok'`) !== 'true')
         throw new Error('a rostered coach cannot read the ladder');
+      // The badge beside each swimmer on the class list. `label` goes
+      // LAST: a phone reads these rows by key and ignores one it does
+      // not know, but only because nothing before it moved.
+      const cols = q(`select string_agg(t.n, ',' order by t.i)
+                        from (select unnest(p.proargnames) n,
+                                     generate_subscripts(p.proargnames,1) i
+                                from pg_proc p
+                               where p.proname='my_roster_grading') t
+                       where t.n <> 'p_from' and t.n <> 'p_to'`);
+      if (cols !== 'student_id,program_name,level_no,levels_total,label')
+        throw new Error('the roster columns moved: ' + JSON.stringify(cols));
+      // It reads grading_milestones.label, and plpgsql resolves column
+      // names when the body RUNS. Without the column this file installs
+      // cleanly and dies on the first class list, so: call it.
+      q(`select count(*) from my_roster_grading(current_date, current_date + 6)`);
+      // The coach app signs in as `authenticated`, and a drop-and-create
+      // drops the grants along with the function.
+      if (q(`select has_function_privilege('authenticated',
+               'public.my_roster_grading(date,date)', 'execute')`) !== 't')
+        throw new Error('re-creating it lost the grant the coach app signs in with');
+      if (q(`select has_function_privilege('anon',
+               'public.my_roster_grading(date,date)', 'execute')`) === 't')
+        throw new Error('anon can read the roster, and the anon key is in every page');
     } },
   { file: 'supabase_grading_certificates.sql',
     probe: () => {
@@ -165,6 +188,17 @@ const FILES = [
       q(`update grading_programs set syllabus_body=null, syllabus_name=null,
                 syllabus_version=null where name='${graded}'`);
       if (prog() !== '') throw new Error('clearing the fields left a syllabus behind');
+    } },
+  { file: 'supabase_grading_stage_labels.sql',
+    probe: () => {
+      if (q(`select count(*) from information_schema.columns
+              where table_schema='public' and table_name='grading_milestones'
+                and column_name='label'`) !== '1')
+        throw new Error('the label column is not there');
+      // It must reach the apps, or it is a column nobody can read.
+      if (!/"label"/.test(q(`select student_grading((select id from students limit 1))::text`)))
+        throw new Error('student_grading does not carry the label');
+
     } },
   { file: 'supabase_grading_mas_badges.sql',
     probe: () => {
@@ -225,6 +259,63 @@ const FILES = [
       for (const ic of icons) {
         if (!ic.startsWith('/badges/'))
           throw new Error('an icon is not served from this site: ' + JSON.stringify(ic));
+        if (!fs.existsSync(path.join(ROOT, ic.slice(1))))
+          throw new Error(ic + ' is in the database and not in the repository');
+      }
+    } },
+  { file: 'supabase_swim_passport_syllabus.sql',
+    probe: () => {
+      const n = q(`select count(*) from grading_milestones m
+                     join grading_programs p on p.id=m.program_id
+                    where p.name='Swim Passport'`);
+      if (n !== '8') throw new Error('expected 8 stages, found ' + n);
+      const c = q(`select count(*) from grading_tasks t
+                     join grading_milestones m on m.id=t.milestone_id
+                     join grading_programs p on p.id=m.program_id
+                    where p.name='Swim Passport'`);
+      if (c !== '68') throw new Error('expected 68 skills, found ' + c);
+
+      // The placeholders are gone. They shipped as something to look at
+      // while the module was built, and a ladder that still has Guppy on
+      // it is one this file did not actually replace.
+      if (q(`select count(*) from grading_milestones m
+               join grading_programs p on p.id=m.program_id
+              where p.name='Swim Passport'
+                and m.name in ('Guppy','Tortoise','Crab')`) !== '0')
+        throw new Error('a placeholder level survived');
+
+      // The id is kept, so nothing has to be re-chosen in Settings.
+      if (q(`select count(*) from scheduler_lesson_types lt
+               join grading_programs p on p.id=lt.grading_program_id
+              where p.name='Swim Passport'`) !== '1')
+        throw new Error('the lesson type lost its programme');
+
+      // The labels are what the child's sticker says, and the ordinal is
+      // NOT the same thing: stage 1 is the third rung.
+      const labs = q(`select string_agg(m.label, ',' order by m.level_no)
+                        from grading_milestones m join grading_programs p
+                          on p.id=m.program_id where p.name='Swim Passport'`);
+      if (labs !== 'A,B,1,2,3,4,5,6')
+        throw new Error('the stage labels are wrong: ' + JSON.stringify(labs));
+      if (q(`select m.level_no from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport' and m.label='1'`) !== '3')
+        throw new Error('stage 1 is not the third rung, so the label buys nothing');
+
+      // Attribution. The stage names are the YMCA framework's, and the
+      // note is where that is said -- not in a SQL comment nobody reads.
+      const body = q(`select syllabus_body from grading_programs where name='Swim Passport'`);
+      if (body !== 'Star Swim') throw new Error('the syllabus is not credited to us: ' + body);
+      if (!/YMCA/.test(q(`select syllabus_note from grading_programs where name='Swim Passport'`)))
+        throw new Error('the note does not say where the stage structure came from');
+
+      // The artwork, checked against the repository rather than trusted.
+      const icons = q(`select string_agg(m.icon_path, ' ' order by m.level_no)
+                         from grading_milestones m join grading_programs p
+                           on p.id = m.program_id where p.name='Swim Passport'`).split(' ');
+      if (icons.length !== 8) throw new Error('expected 8 stickers, got ' + icons.length);
+      for (const ic of icons) {
+        if (!ic.startsWith('/badges/ss-'))
+          throw new Error('a sticker is not served from this site: ' + JSON.stringify(ic));
         if (!fs.existsSync(path.join(ROOT, ic.slice(1))))
           throw new Error(ic + ' is in the database and not in the repository');
       }

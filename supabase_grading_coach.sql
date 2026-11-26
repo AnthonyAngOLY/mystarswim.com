@@ -7,6 +7,13 @@
 --  RUN supabase_grading_programs.sql FIRST. This builds on the tables
 --  and on student_grading() that it creates.
 --
+--  IT ADDS grading_milestones.label ITSELF rather than depending on
+--  supabase_grading_stage_labels.sql having run. my_roster_grading()
+--  reads that column, and plpgsql resolves column names when the body
+--  RUNS -- so without the column this file would install cleanly, every
+--  confirm block would report success, and the first coach to open a
+--  class list would get nothing with the reason in a log.
+--
 --  WHY THESE AND NOT THE TABLES DIRECTLY
 --  The attendance app signs in as a crew member, not an office seat. It
 --  could be given write access to student_task_marks and left to decide
@@ -138,12 +145,26 @@ comment on function mark_grading_task(uuid, uuid, boolean, uuid) is
 -- contract that installed phones call, so this is beside it rather than
 -- inside it: adding columns there would mean every old build reading a
 -- row it does not expect.
-create or replace function my_roster_grading(p_from date, p_to date)
+-- What the badge beside each swimmer says. label is added here, not
+-- only in supabase_grading_stage_labels.sql, so this file installs on
+-- its own in any order.
+alter table grading_milestones add column if not exists label text;
+
+-- Dropped and re-created, not replaced: Postgres will not change the
+-- return type of a function in place, and `create or replace` with a
+-- new column list fails with "cannot change return type of existing
+-- function" -- which is what a re-run of this file hits otherwise.
+drop function if exists my_roster_grading(date, date);
+
+-- `label` goes LAST. A phone reads these rows by key and ignores one
+-- it does not know, but only because nothing before it moved.
+create function my_roster_grading(p_from date, p_to date)
 returns table (
   student_id   uuid,
   program_name text,
   level_no     integer,
-  levels_total integer
+  levels_total integer,
+  label        text
 )
 language plpgsql stable security definer set search_path = public as $$
 declare v_me uuid := attendance_my_crew_id();
@@ -171,17 +192,31 @@ begin
      where lt.grading_program_id is not null
   ),
   pick as (
-    select distinct on (student_id) student_id, pid from prog order by student_id, pid
+    -- Every column qualified. `student_id` is also one of this
+    -- function's OUT names, so bare it is "ambiguous: a PL/pgSQL
+    -- variable or a table column" -- which the file installs past
+    -- without a word and raises on the first call. The attendance app
+    -- catches that call and draws nothing, so the only symptom was
+    -- badges quietly never appearing on a class list.
+    select distinct on (prog.student_id) prog.student_id, prog.pid
+      from prog order by prog.student_id, prog.pid
+  ),
+  top as (
+    select p.student_id, p.pid,
+           (select max(ms.level_no) from student_milestones sm
+              join grading_milestones ms on ms.id = sm.milestone_id
+             where sm.student_id = p.student_id and sm.revoked_at is null
+               and ms.program_id = p.pid)::integer as lvl
+      from pick p
   )
-  select p.student_id,
+  select t.student_id,
          g.name::text,
-         (select max(ms.level_no) from student_milestones sm
-            join grading_milestones ms on ms.id = sm.milestone_id
-           where sm.student_id = p.student_id and sm.revoked_at is null
-             and ms.program_id = p.pid)::integer,
+         t.lvl,
          (select count(*) from grading_milestones ms
-           where ms.program_id = p.pid and ms.is_active)::integer
-    from pick p join grading_programs g on g.id = p.pid;
+           where ms.program_id = t.pid and ms.is_active)::integer,
+         (select ms.label from grading_milestones ms
+           where ms.program_id = t.pid and ms.level_no = t.lvl)::text
+    from top t join grading_programs g on g.id = t.pid;
 end $$;
 
 revoke all on function my_roster_grading(date, date) from public, anon;

@@ -10259,7 +10259,7 @@ function GradingAdminView({
       style: {
         marginRight: 6
       }
-    }, "Level ", ms.level_no), ms.name, ms.certificate && /*#__PURE__*/React.createElement("span", {
+    }, ms.label ? `Stage ${ms.label}` : `Level ${ms.level_no}`), ms.name, ms.certificate && /*#__PURE__*/React.createElement("span", {
       title: "A certificate can be claimed at this level",
       style: {
         marginLeft: 7,
@@ -10300,6 +10300,10 @@ function GradingAdminView({
       className: "btn btn-ghost small",
       onClick: rename('grading_milestones', ms, 'description', 'What this level means')
     }, "Description"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "What the child's badge says — A, B, 1. Leave empty where it just says the level number.",
+      onClick: rename('grading_milestones', ms, 'label', `What the badge for level ${ms.level_no} says — e.g. "A" or "1". Empty = "Level ${ms.level_no}".`)
+    }, "Badge label"), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost small",
       disabled: busy,
       onClick: () => run(() => patchRows('grading_milestones', {

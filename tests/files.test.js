@@ -204,9 +204,12 @@ step('every printed document carries the current SSM number', () => {
 // transparency is a circle on a white square on a tinted card, which is
 // the thing it was redrawn to stop being -- and nothing about the file
 // name says which it is.
-step('every MAS roundel is on disk, transparent, and web-sized', () => {
+step('every roundel is on disk, transparent, and web-sized', () => {
   const want = ['mas-1-starfish', 'mas-2-sea-turtle', 'mas-3-guppy', 'mas-4-octopus',
-                'mas-5-frog', 'mas-6-swordfish', 'mas-7-dolphin', 'mas-badges-mark'];
+                'mas-5-frog', 'mas-6-swordfish', 'mas-7-dolphin', 'mas-badges-mark',
+                'ss-a-water-discovery', 'ss-b-water-exploration', 'ss-1-water-acclimation',
+                'ss-2-water-movement', 'ss-3-water-stamina', 'ss-4-stroke-introduction',
+                'ss-5-stroke-development', 'ss-6-stroke-mechanics', 'star-swim-mark'];
   for (const n of want) {
     const rel = 'badges/' + n + '.png';
     if (!exists(rel)) throw new Error('missing: ' + rel);
@@ -226,17 +229,35 @@ step('every MAS roundel is on disk, transparent, and web-sized', () => {
   }
 });
 
-// And the migration points at exactly these, by the path the apps use.
-step('the migration and the artwork agree on the paths', () => {
-  const sql = read('supabase_grading_mas_badges.sql');
-  // The confirm block's `like '/badges/%'` is not one of them.
-  const paths = [...new Set([...sql.matchAll(/'(\/badges\/[^']+\.png)'/g)].map(m => m[1]))];
-  if (paths.length !== 8)
-    throw new Error('expected 8 artwork paths in the migration, found ' + paths.length
-                    + ': ' + paths.join(' '));
-  for (const p of paths)
-    if (!exists(p.replace(/^\//, '')))
-      throw new Error(p + ' is in the migration and not in the repository');
+// And the migrations point at exactly these, by the path the apps use.
+for (const [file, n] of [['supabase_grading_mas_badges.sql', 8],
+                         ['supabase_swim_passport_syllabus.sql', 9]]) {
+  step(file + ' and the artwork agree on the paths', () => {
+    const sql = read(file);
+    // The confirm blocks' `like '/badges/%'` is not one of them.
+    const paths = [...new Set([...sql.matchAll(/'(\/badges\/[^']+\.png)'/g)].map(m => m[1]))];
+    if (paths.length !== n)
+      throw new Error('expected ' + n + ' artwork paths, found ' + paths.length
+                      + ': ' + paths.join(' '));
+    for (const p of paths)
+      if (!exists(p.replace(/^\//, '')))
+        throw new Error(p + ' is in the migration and not in the repository');
+  });
+}
+
+// The stickers came off a KuRenang passport. Removing that mark was the
+// job, and "it looked right in the montage" is not a check that survives
+// somebody re-cutting the artwork later.
+step('no sticker still carries the old academy mark', () => {
+  for (const f of fs.readdirSync(path.join(ROOT, 'badges'))) {
+    const buf = fs.readFileSync(path.join(ROOT, 'badges', f));
+    if (/kurenang/i.test(buf.toString('latin1')))
+      throw new Error(f + ' still names the previous academy');
+  }
+  // And the SQL that installs them credits us, not them.
+  const sql = read('supabase_swim_passport_syllabus.sql');
+  if (/kurenang/i.test(sql.replace(/^--.*$/gm, '')))
+    throw new Error('the migration still names the previous academy outside its comments');
 });
 
 console.log(fail ? fail + ' FAILED' : 'all green');

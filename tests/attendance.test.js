@@ -189,7 +189,10 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
     if (badges !== 1)
       throw new Error('a swimmer on an ungraded lesson type was given a badge too: ' + badges);
     const t = await page.locator('#clsBody .lvlbtn').first().innerText();
-    if (!/L1/.test(t)) throw new Error('the badge does not show the level: ' + JSON.stringify(t));
+    // The passport's own label, not the rung number: this swimmer holds
+    // a sticker that says A.
+    if (!/^A/.test(t)) throw new Error('the badge does not show the stage: ' + JSON.stringify(t));
+    if (/L1/.test(t)) throw new Error('it printed the rung number over the badge label: ' + t);
     if (!/3/.test(t)) throw new Error('the badge does not show how many levels there are');
   });
 
@@ -232,8 +235,19 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
     const plain = page.locator('#gradePad .gms').nth(1).locator('.gms-lvl');
     if (await plain.evaluate(el => el.classList.contains('has-img')))
       throw new Error('a level with no artwork was given the image treatment');
-    if ((await plain.innerText()).trim() !== 'L2')
-      throw new Error('the lettered pill stopped saying which level it is');
+    if ((await plain.innerText()).trim() !== 'B')
+      throw new Error('the lettered pill stopped saying which rung it is');
+  });
+
+  await step('the pad names each rung the way its badge does', async () => {
+    const pills = await page.locator('#gradePad .gms .gms-lvl')
+      .evaluateAll(els => els.map(e => (e.getAttribute('title') || e.textContent).trim()));
+    if (pills.length !== 3) throw new Error('expected 3 rungs, read ' + pills.length);
+    // Rung 1 carries artwork, so its label lives in the title; rungs 2
+    // and 3 are lettered pills. Either way the badge's own name wins.
+    if (!/Stage A/.test(pills[0])) throw new Error('rung 1 is not Stage A: ' + pills[0]);
+    if (pills[1] !== 'B') throw new Error('rung 2 pill is not B: ' + JSON.stringify(pills[1]));
+    if (pills[2] !== '1') throw new Error('rung 3 pill is not 1: ' + JSON.stringify(pills[2]));
   });
 
   await step('each level has a bar that is its own tasks done over total', async () => {
@@ -275,8 +289,9 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
   await step('and the badge beside the name moves with it', async () => {
     const t = await page.locator('#gradePad').innerText();
     if (!/2\/2/.test(t)) throw new Error('Guppy does not read 2/2 after both ticks');
-    if (!/Level 1 of 3/.test(t))
-      throw new Error('the header does not show the new level: ' + JSON.stringify(t.slice(0, 120)));
+    // "Stage A of 3", because this ladder's first rung is lettered.
+    if (!/Stage A of 3/.test(t))
+      throw new Error('the header does not show the new stage: ' + JSON.stringify(t.slice(0, 120)));
   });
 
   await step('a level with no certificate offers no button', async () => {

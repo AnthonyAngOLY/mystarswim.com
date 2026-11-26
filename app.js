@@ -6512,7 +6512,12 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
               </span>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:800}}>
-                  <span className="small subtle" style={{marginRight:6}}>Level {ms.level_no}</span>
+                  {/* level_no orders the ladder; label is what the child's
+                      badge actually says. On the Swim Passport stage "1" is
+                      the third rung, because A and B come first. */}
+                  <span className="small subtle" style={{marginRight:6}}>
+                    {ms.label ? `Stage ${ms.label}` : `Level ${ms.level_no}`}
+                  </span>
                   {ms.name}
                   {ms.certificate && <span title="A certificate can be claimed at this level"
                     style={{marginLeft:7,fontSize:10.5,fontWeight:800,padding:'2px 7px',borderRadius:999,
@@ -6529,6 +6534,10 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
               <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>
                 <button className="btn btn-ghost small" onClick={rename('grading_milestones', ms, 'name', `Level ${ms.level_no} name`)}>Rename</button>
                 <button className="btn btn-ghost small" onClick={rename('grading_milestones', ms, 'description', 'What this level means')}>Description</button>
+                <button className="btn btn-ghost small"
+                        title="What the child's badge says — A, B, 1. Leave empty where it just says the level number."
+                        onClick={rename('grading_milestones', ms, 'label',
+                          `What the badge for level ${ms.level_no} says — e.g. "A" or "1". Empty = "Level ${ms.level_no}".`)}>Badge label</button>
                 <button className="btn btn-ghost small" disabled={busy}
                         onClick={()=>run(()=>patchRows('grading_milestones',{id:ms.id},{certificate: !ms.certificate}))}>
                   {ms.certificate ? 'No certificate' : 'Offers a certificate'}</button>

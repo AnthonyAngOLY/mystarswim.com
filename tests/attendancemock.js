@@ -102,17 +102,19 @@ const LADDER = {
                          url: 'https://example.org/badges' } },
   level: null, levels_total: 3,
   milestones: [
-    { id: 'ms1', level_no: 1, name: 'Guppy', icon: '/badges/mas-1-starfish.png',
+    // Labelled A, B, 1 -- the Swim Passport shape, where the sticker on
+    // the child's passport and the rung number deliberately disagree.
+    { id: 'ms1', level_no: 1, label: 'A', name: 'Guppy', icon: '/badges/mas-1-starfish.png',
       colour: '#F0713C', certificate: false, activated: false,
       total: 2, done: 0, tasks: [
         { id: 't1', name: 'Submerges whole head', done: false },
         { id: 't2', name: 'Blows bubbles', done: false } ] },
-    { id: 'ms2', level_no: 2, name: 'Tortoise', colour: '#159C8B',
+    { id: 'ms2', level_no: 2, label: 'B', name: 'Tortoise', colour: '#159C8B',
       certificate: true, activated: false,
       certificate_claimed_at: null, certificate_claimed_by: null,
       total: 1, done: 0, tasks: [
         { id: 't3', name: 'Glides from the wall', done: false } ] },
-    { id: 'ms3', level_no: 3, name: 'Crab', certificate: false, activated: false,
+    { id: 'ms3', level_no: 3, label: '1', name: 'Crab', certificate: false, activated: false,
       total: 0, done: 0, tasks: [] }
   ]
 };
@@ -145,7 +147,10 @@ const RPC = {
   // all rather than "Level 0", which would read as a child who has done
   // nothing instead of a lesson type nobody has set a programme on.
   my_roster_grading: () => ([
-    { student_id: 'stu-1', program_name: 'Swim Passport', level_no: 1, levels_total: 3 }
+    // `label` LAST, as the function returns it: a phone reads these by
+    // key, which only holds while nothing before it moves.
+    { student_id: 'stu-1', program_name: 'Swim Passport', level_no: 1,
+      levels_total: 3, label: 'A' }
   ]),
 
   coach_student_grading: (a) => {

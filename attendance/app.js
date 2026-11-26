@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 21;
+  var BUILD = 22;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1274,7 +1274,7 @@
         ? '<button class="lvlbtn" data-grade="' + esc(r.student_id) + '"'
           + ' data-nm="' + esc(r.student_name || '') + '"'
           + ' title="' + esc(g.program_name + ' — tap to tick a task') + '">'
-          + (g.level_no ? 'L' + g.level_no : '—')
+          + (g.level_no ? esc(stageTag(g.label, g.level_no)) : '—')
           + '<small>/' + esc(String(g.levels_total || '?')) + '</small></button>'
         : '';
       return '<div class="stu">'
@@ -1413,9 +1413,25 @@
   function hex(c) { return (/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/).test(c || '') ? c : ''; }
   function webUrl(u) { return (/^https?:\/\//i).test(u || '') ? u : ''; }
 
+  // What a rung is called. level_no orders the ladder; label is what the
+  // child's badge says. On the Swim Passport stage "1" is the third
+  // rung, because A and B come first, so printing the ordinal beside a
+  // sticker reading "Learn to Swim 1" is a year of questions.
+  function stageWord(label, levelNo) {
+    if (label) return 'Stage ' + label;
+    return levelNo ? 'Level ' + levelNo : '';
+  }
+  // The short form, for the pill on a class list.
+  function stageTag(label, levelNo) {
+    return label ? String(label) : 'L' + levelNo;
+  }
+
   function gradePadHtml(g) {
     var out = '<div class="cls-sub" style="margin-bottom:8px"><b>' + esc(g.program.name) + '</b>'
-      + ' \u00b7 ' + (g.level ? 'Level ' + g.level : 'no level yet')
+      + ' \u00b7 ' + (g.level
+          ? esc(stageWord((g.milestones || []).reduce(function (a, m) {
+              return m.level_no === g.level ? m.label : a; }, null), g.level))
+          : 'no level yet')
       + ' of ' + esc(String(g.levels_total)) + '</div>';
 
     var s = g.program.syllabus;
@@ -1445,10 +1461,10 @@
         + (c ? ' style="--c:' + c + '"' : '') + '>'
         + '<div class="gms-head">'
         +   (m.icon
-              ? '<span class="gms-lvl has-img" title="Level ' + esc(String(m.level_no)) + '">'
-                + '<img src="' + esc(iconUrl(m.icon)) + '" alt="Level '
-                + esc(String(m.level_no)) + '"></span>'
-              : '<span class="gms-lvl">L' + esc(String(m.level_no)) + '</span>')
+              ? '<span class="gms-lvl has-img" title="' + esc(stageWord(m.label, m.level_no)) + '">'
+                + '<img src="' + esc(iconUrl(m.icon)) + '" alt="'
+                + esc(stageWord(m.label, m.level_no)) + '"></span>'
+              : '<span class="gms-lvl">' + esc(stageTag(m.label, m.level_no)) + '</span>')
         +   '<span class="gms-nm">' + esc(m.name) + '</span>'
         +   (m.certificate ? '<span class="gms-cert" title="A certificate can be claimed">\u2605</span>' : '')
         +   '<span class="gms-count">' + done + '/' + total + '</span>'
@@ -1526,7 +1542,11 @@
           // Said out loud, because the whole point of the ladder is the
           // moment a child finishes one and nobody notices otherwise.
           if (want && res.activated) {
-            alert('\u2b50 ' + res.milestone + ' complete \u2014 level ' + res.level_no + '.'
+            // The ladder already in hand knows what that rung is called.
+            var doneMs = (g.milestones || []).filter(function (m) {
+              return m.level_no === res.level_no; })[0];
+            alert('\u2b50 ' + res.milestone + ' complete \u2014 '
+              + stageWord(doneMs && doneMs.label, res.level_no).toLowerCase() + '.'
               + (res.certificate ? '\n\nThis level comes with a certificate. Tell the office.' : ''));
           }
           return loadGradePad(studentId);

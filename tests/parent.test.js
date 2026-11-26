@@ -490,7 +490,9 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (chips !== 1)
       throw new Error('a child on an ungraded lesson type was given one too: ' + chips);
     const t = await page.locator('#homeKids .lvlchip').first().innerText();
-    if (!/Level 1/.test(t)) throw new Error('the chip does not name the level: ' + JSON.stringify(t));
+    // The badge's own name for that rung. This ladder letters its first
+    // stage A, so "Level 1" would contradict the sticker.
+    if (!/Stage A/i.test(t)) throw new Error('the chip does not name the stage: ' + JSON.stringify(t));
     if (!/1\/3/.test(t)) throw new Error('the chip does not show earned of total: ' + JSON.stringify(t));
   });
 
@@ -615,6 +617,24 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     const three = await fill(2);
     if (!/10, 67, 94/.test(three))
       throw new Error('a level with no colour did not inherit the programme’s: ' + three);
+  });
+
+  // The Swim Passport prints its stages A, B, 1 … 6, so the third rung
+  // is stage 1. A child holding a sticker that says "Learn to Swim 1"
+  // must not be told by the app that she is on level 3.
+  await step('a level says what its badge says, not what number rung it is', async () => {
+    const rows = await page.locator('#childGrading .msrow .msrow-nm span')
+      .evaluateAll(els => els.map(e => e.textContent.trim()));
+    if (rows.length !== 3) throw new Error('expected 3 levels, read ' + rows.length);
+    if (!/^Stage A/.test(rows[0]) || !/^Stage B/.test(rows[1]) || !/^Stage 1/.test(rows[2]))
+      throw new Error('the rungs are printed by number, not by badge: '
+        + JSON.stringify(rows));
+    if (rows.some(r => /Level/.test(r)))
+      throw new Error('a labelled level still says "Level": ' + JSON.stringify(rows));
+    // And the chip above them agrees.
+    const chip = await page.locator('#childGrading .lvlchip').first().innerText();
+    if (!/Stage A/i.test(chip))
+      throw new Error('the heading chip disagrees with the rows: ' + JSON.stringify(chip));
   });
 
   await step('an ungraded child shows no collection at all', async () => {
