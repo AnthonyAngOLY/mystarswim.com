@@ -117,6 +117,117 @@ const FILES = [
     probe: () => {
       if (!q(`select colour from grading_programs where name='Swim Passport'`).startsWith('#'))
         throw new Error('no colour was set on a seeded programme');
+    } },
+  { file: 'supabase_grading_syllabus.sql',
+    probe: () => {
+      const cols = q(`select string_agg(column_name, ',' order by column_name)
+                        from information_schema.columns
+                       where table_schema='public' and table_name='grading_programs'
+                         and column_name like 'syllabus%'`);
+      if (cols !== 'syllabus_body,syllabus_name,syllabus_note,syllabus_url,syllabus_version')
+        throw new Error('the syllabus columns are not all there: ' + JSON.stringify(cols));
+
+      // The box is drawn as a link in three apps, and the office types
+      // into it. A javascript: URL there is script running in every
+      // parent's browser.
+      const bad = psql(`-d ${DB} -tAc "update grading_programs `
+                     + `set syllabus_url='javascript:alert(1)'"`);
+      if (bad.status === 0)
+        throw new Error('a javascript: URL was stored, and it is rendered as a link');
+      const good = psql(`-d ${DB} -tAc "update grading_programs `
+                      + `set syllabus_url='https://malaysiaaquatics.org.my/'"`);
+      if (good.status !== 0) throw new Error('an ordinary https link was refused');
+      q(`update grading_programs set syllabus_url = null`);
+
+      // Nothing set on the graded programme: the key must be absent
+      // rather than an object of five nulls, because the apps ask one
+      // question of it, not five.
+      const prog = () => q(`select student_grading((select id from students limit 1))`
+                         + `->'program'->>'syllabus'`);
+      if (prog() !== '') throw new Error('an uncredited programme reports a syllabus');
+
+      const graded = q(`select p.name from grading_programs p
+                         where exists (select 1 from scheduler_lesson_types lt
+                                        where lt.grading_program_id = p.id) limit 1`);
+      q(`update grading_programs set syllabus_body='Test Body', syllabus_name='Test Std',
+                syllabus_version='9.9' where name='${graded}'`);
+      const got = q(`select student_grading((select id from students limit 1))`
+                  + `->'program'->'syllabus'->>'body'`);
+      if (got !== 'Test Body')
+        throw new Error('the syllabus does not reach the apps: ' + JSON.stringify(got));
+
+      // The colours file added the columns but nothing ever carried them
+      // out to a phone. This function is where that happens.
+      if (!q(`select student_grading((select id from students limit 1))`
+           + `->'program'->>'colour'`).startsWith('#'))
+        throw new Error('the programme colour does not reach the apps');
+
+      q(`update grading_programs set syllabus_body=null, syllabus_name=null,
+                syllabus_version=null where name='${graded}'`);
+      if (prog() !== '') throw new Error('clearing the fields left a syllabus behind');
+    } },
+  { file: 'supabase_grading_mas_badges.sql',
+    probe: () => {
+      const n = q(`select count(*) from grading_milestones m
+                     join grading_programs p on p.id=m.program_id
+                    where p.name='MAS BADGES'`);
+      if (n !== '7') throw new Error('expected 7 levels, found ' + n);
+      const c = q(`select count(*) from grading_tasks t
+                     join grading_milestones m on m.id=t.milestone_id
+                     join grading_programs p on p.id=m.program_id
+                    where p.name='MAS BADGES'`);
+      if (c !== '45') throw new Error('expected 45 criteria, found ' + c);
+
+      // It is a FOURTH programme. An earlier draft of this file renamed
+      // Swim Passport into MAS BADGES, which silently moved every lesson
+      // type already graded on it onto a syllabus nobody had chosen.
+      const all = q(`select string_agg(name, ', ' order by sort_order, name)
+                       from grading_programs`);
+      if (all !== 'Water Discovery, Swim Passport, Advanced Program, MAS BADGES')
+        throw new Error('the four programmes are not all there: ' + JSON.stringify(all));
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport'`) === '0')
+        throw new Error('Swim Passport lost its levels');
+      // And nothing moved onto it. Which lesson type is graded on which
+      // ladder is an office decision, in Settings -> Lesson Types.
+      if (q(`select count(*) from scheduler_lesson_types lt
+               join grading_programs p on p.id=lt.grading_program_id
+              where p.name='MAS BADGES'`) !== '0')
+        throw new Error('a lesson type was moved onto MAS BADGES by a migration');
+      if (q(`select count(*) from scheduler_lesson_types lt
+               join grading_programs p on p.id=lt.grading_program_id
+              where p.name='Swim Passport'`) !== '1')
+        throw new Error('the lesson type lost the programme it was pointed at');
+
+      // Every level offers a certificate, as the Syllabus has it.
+      if (q(`select count(*) from grading_milestones m join grading_programs p on p.id=m.program_id
+              where p.name='MAS BADGES' and m.certificate`) !== '7')
+        throw new Error('not every level offers a certificate');
+
+      // The attribution, which is the whole point of the layer above.
+      const cred = q(`select syllabus_body || ' / ' || syllabus_name || ' v' || syllabus_version
+                        from grading_programs where name='MAS BADGES'`);
+      if (!/^Malaysia Aquatics \/ BADGES/.test(cred))
+        throw new Error('MAS BADGES credits nobody: ' + JSON.stringify(cred));
+      if (!/not a MAS assessment|separate assessment/i.test(
+            q(`select syllabus_note from grading_programs where name='MAS BADGES'`)))
+        throw new Error('the note does not say what a badge here is NOT');
+
+      // The artwork. A path typed wrong here is a broken image in three
+      // apps and a confirm block that still says "installed", so the
+      // files are checked on disk rather than taken on trust.
+      const icons = q(`select string_agg(m.icon_path, ' ' order by m.level_no)
+                         from grading_milestones m join grading_programs p
+                           on p.id = m.program_id where p.name='MAS BADGES'`).split(' ')
+                    .concat(q(`select icon_path from grading_programs where name='MAS BADGES'`));
+      if (icons.length !== 8)
+        throw new Error('expected 7 level roundels and a programme mark, got ' + icons.length);
+      for (const ic of icons) {
+        if (!ic.startsWith('/badges/'))
+          throw new Error('an icon is not served from this site: ' + JSON.stringify(ic));
+        if (!fs.existsSync(path.join(ROOT, ic.slice(1))))
+          throw new Error(ic + ' is in the database and not in the repository');
+      }
     } }
 ];
 
@@ -282,12 +393,25 @@ function q(sql) {
   });
 
   // ── The ladder ────────────────────────────────────────────────────────
+  // PROG is read from the database rather than written here. These steps
+  // matched on name='Swim Passport', the file that loads the real
+  // syllabus renames it, and the tick then matched no rows at all -- so
+  // "a single tick promoted nobody" passed by ticking nothing. A test
+  // that asserts on an empty set passes for ever and guards nothing.
+  const PROG = () => q(`select name from grading_programs p
+                         where exists (select 1 from scheduler_lesson_types lt
+                                        where lt.grading_program_id = p.id) limit 1`);
+
   step('one tick on a high level activates nothing', () => {
+    const before = q(`select count(*) from student_task_marks where removed_at is null`);
     q(`insert into student_task_marks (student_id, task_id, marked_by_name)
          select s.id, t.id, 'Coach Sally' from students s, grading_tasks t
          join grading_milestones m on m.id = t.milestone_id
          join grading_programs p on p.id = m.program_id
-        where p.name='Swim Passport' and m.level_no=3 and t.sort_order=1`);
+        where p.name='${PROG()}' and m.level_no=3 and t.sort_order=1`);
+    const after = q(`select count(*) from student_task_marks where removed_at is null`);
+    if (Number(after) !== Number(before) + 1)
+      throw new Error('the tick matched nothing, so this asserts on an empty set');
     const n = q(`select count(*) from student_milestones where revoked_at is null`);
     if (n !== '0') throw new Error('a single tick promoted somebody: ' + n);
   });
@@ -297,18 +421,28 @@ function q(sql) {
          select s.id, t.id, 'Coach Sally' from students s, grading_tasks t
          join grading_milestones m on m.id = t.milestone_id
          join grading_programs p on p.id = m.program_id
-        where p.name='Swim Passport' and m.level_no=1
+        where p.name='${PROG()}' and m.level_no=1
         on conflict do nothing`);
     const lvl = q(`select student_grading((select id from students limit 1))->>'level'`);
     if (lvl !== '1') throw new Error('level is ' + JSON.stringify(lvl) + ', expected 1');
   });
 
   step('the bars are tasks done over tasks on that level', () => {
-    const bars = q(`select string_agg((m->>'done')||'/'||(m->>'total'), ' ' order by (m->>'level_no')::int)
-                      from jsonb_array_elements(
-                        student_grading((select id from students limit 1))->'milestones') m`);
-    if (!/^6\/6 0\/5 1\/5$/.test(bars))
-      throw new Error('expected "6/6 0/5 1/5", got ' + JSON.stringify(bars));
+    // Read the shape out of the syllabus rather than writing the numbers
+    // here, so loading a different syllabus is not a test to rewrite.
+    const want = q(`select string_agg(
+                        case when m.level_no = 1 then c.n::text
+                             when m.level_no = 3 then '1'
+                             else '0' end || '/' || c.n::text, ' ' order by m.level_no)
+                      from grading_milestones m
+                      join grading_programs p on p.id = m.program_id
+                      join lateral (select count(*) n from grading_tasks t
+                                     where t.milestone_id = m.id and t.is_active) c on true
+                     where p.name='${PROG()}' and m.is_active`);
+    const got = q(`select string_agg((m->>'done')||'/'||(m->>'total'), ' ' order by (m->>'level_no')::int)
+                     from jsonb_array_elements(
+                       student_grading((select id from students limit 1))->'milestones') m`);
+    if (got !== want) throw new Error('expected ' + JSON.stringify(want) + ', got ' + JSON.stringify(got));
   });
 
   step('removing one tick withdraws the level and keeps the row', () => {
@@ -335,7 +469,7 @@ function q(sql) {
     q(`insert into grading_tasks (milestone_id, name, sort_order)
          select m.id, 'A newly added thing', 99 from grading_milestones m
          join grading_programs p on p.id = m.program_id
-        where p.name='Swim Passport' and m.level_no=1`);
+        where p.name='${PROG()}' and m.level_no=1`);
     const after = q(`select count(*) from student_milestones where revoked_at is null`);
     if (before !== '1') throw new Error('level 1 was not restored before the test');
     if (after !== '0')
@@ -345,9 +479,11 @@ function q(sql) {
 
   // ── Certificates ──────────────────────────────────────────────────────
   step('a certificate cannot be claimed on a level that carries none', () => {
+    // Water Discovery level 1 carries none, and is untouched by the
+    // syllabus file -- so this stays true whatever is loaded.
     const e = q(`select claim_certificate((select id from students limit 1),
                    (select m.id from grading_milestones m join grading_programs p on p.id=m.program_id
-                     where p.name='Swim Passport' and m.level_no=1), true)->>'error'`);
+                     where p.name='Water Discovery' and m.level_no=1), true)->>'error'`);
     if (!/does not come with a certificate/i.test(e || ''))
       throw new Error('it allowed one: ' + JSON.stringify(e));
   });
@@ -368,6 +504,56 @@ function q(sql) {
   });
 
   // ── The things only a database can refuse ─────────────────────────────
+  // By now a coach has ticked real criteria. Re-running the syllabus
+  // file must refuse rather than delete them: a tick is somebody saying
+  // they watched a child do something, and no file is entitled to throw
+  // that away to make room for a better syllabus.
+  //
+  // Tested HERE rather than beside the install, where there is nothing
+  // to protect and the guard cannot fire either way.
+  step('the syllabus refuses to overwrite ticks a coach has made', () => {
+    // A coach ticks a MAS criterion, as they would the day a lesson type
+    // is pointed at this ladder.
+    q(`insert into student_task_marks (student_id, task_id, marked_by_name)
+         select s.id, t.id, 'Coach Sally' from students s, grading_tasks t
+         join grading_milestones m on m.id = t.milestone_id
+         join grading_programs p on p.id = m.program_id
+        where p.name='MAS BADGES' and m.level_no=1 and t.sort_order=1
+        on conflict do nothing`);
+    const mine = q(`select count(*) from student_task_marks k
+                      join grading_tasks t on t.id = k.task_id
+                      join grading_milestones m on m.id = t.milestone_id
+                      join grading_programs p on p.id = m.program_id
+                     where p.name='MAS BADGES' and k.removed_at is null`);
+    if (mine === '0')
+      throw new Error('nothing is ticked on MAS BADGES, so this proves nothing');
+
+    // Left alone the file sees Dolphin at level 7 and stops before it
+    // would delete anything, which is correct and also means the guard
+    // never fires. One rename in Settings -> Grading -- the ordinary way
+    // a ladder drifts from the file that wrote it -- takes it past that
+    // short circuit and into the delete-and-reseed the guard is for.
+    q(`update grading_milestones set name='Dolphin (2026)'
+        where level_no=7 and program_id=(select id from grading_programs
+                                          where name='MAS BADGES')`);
+    const r = psql(`-d ${DB} -v ON_ERROR_STOP=1 -q -f `
+                   + path.join(WORK, 'supabase_grading_mas_badges.sql'));
+    q(`update grading_milestones set name='Dolphin' where name='Dolphin (2026)'`);
+
+    if (r.status === 0)
+      throw new Error('it re-seeded over ' + mine + ' tick(s) rather than refusing');
+    if (!/already recorded against its levels/i.test(r.stderr || ''))
+      throw new Error('it failed for some other reason: '
+        + (r.stderr || '').trim().split('\n').slice(-2).join(' | '));
+    const still = q(`select count(*) from student_task_marks k
+                       join grading_tasks t on t.id = k.task_id
+                       join grading_milestones m on m.id = t.milestone_id
+                       join grading_programs p on p.id = m.program_id
+                      where p.name='MAS BADGES' and k.removed_at is null`);
+    if (still !== mine)
+      throw new Error('the refusal still cost ' + (Number(mine) - Number(still)) + ' tick(s)');
+  });
+
   step('a colour that is not a colour is refused', () => {
     const r = psql(`-d ${DB} -tAc "update grading_programs set colour='bright blue'"`);
     if (r.status === 0)

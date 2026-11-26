@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 20;
+  var BUILD = 21;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1356,6 +1356,7 @@
   // level would make a coach who has just seen a level-4 skill either
   // wait or lie.
   var gradeOpenFor = null;
+  var gradeSylOpen = false;
 
   function openGradePad(studentId, name, anchorCard) {
     var old = $('gradePad');
@@ -1392,24 +1393,62 @@
         return;
       }
       el.innerHTML = gradePadHtml(g);
-      wireGradePad(studentId);
+      wireGradePad(studentId, g);
     }).catch(function (e) {
       var el = $('gradeBody');
       if (el) el.innerHTML = '<div class="note err">' + esc(e.message) + '</div>';
     });
   }
 
+  // A path beginning with / is served by this site \u2014 the MAS roundels
+  // ship with the build. Anything else is a key in the grading-icons
+  // bucket, where an icon uploaded in Settings \u2192 Grading goes.
+  function iconUrl(p) {
+    if (!p) return null;
+    if (p.charAt(0) === '/') return p;
+    return cfg.supabaseUrl + '/storage/v1/object/public/grading-icons/' + encodeURI(p);
+  }
+  // Checked where it is written into an attribute, not only where it
+  // was stored.
+  function hex(c) { return (/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/).test(c || '') ? c : ''; }
+  function webUrl(u) { return (/^https?:\/\//i).test(u || '') ? u : ''; }
+
   function gradePadHtml(g) {
     var out = '<div class="cls-sub" style="margin-bottom:8px"><b>' + esc(g.program.name) + '</b>'
       + ' \u00b7 ' + (g.level ? 'Level ' + g.level : 'no level yet')
       + ' of ' + esc(String(g.levels_total)) + '</div>';
 
+    var s = g.program.syllabus;
+    if (s) {
+      var line = [s.body, s.name].filter(Boolean).join(' \u00b7 ');
+      if (s.version) line += (line ? ' ' : '') + 'v' + s.version;
+      var surl = webUrl(s.url);
+      var more = !!(s.note || surl);
+      // Marker first: trailing, it orphans onto a second line as soon as
+      // the syllabus name is long, which this one is.
+      out += '<button type="button" class="gsyl"' + (more ? ' data-syl="1"' : '') + '>'
+        + (more ? '<i>' + (gradeSylOpen ? '\u2212' : 'i') + '</i>' : '')
+        + esc(line || 'About this syllabus') + '</button>';
+      if (more && gradeSylOpen) {
+        out += '<div class="gsylnote">' + esc(s.note || '')
+          + (surl ? ' <a href="' + esc(surl) + '" target="_blank" rel="noopener">'
+                  + 'Read the syllabus</a>' : '')
+          + '</div>';
+      }
+    }
+
     (g.milestones || []).forEach(function (m) {
       var done = Number(m.done) || 0, total = Number(m.total) || 0;
       var pct = total ? Math.round(done * 100 / total) : 0;
-      out += '<div class="gms' + (m.activated ? ' is-on' : '') + '">'
+      var c = hex(m.colour) || hex(g.program.colour);
+      out += '<div class="gms' + (m.activated ? ' is-on' : '') + '"'
+        + (c ? ' style="--c:' + c + '"' : '') + '>'
         + '<div class="gms-head">'
-        +   '<span class="gms-lvl">L' + esc(String(m.level_no)) + '</span>'
+        +   (m.icon
+              ? '<span class="gms-lvl has-img" title="Level ' + esc(String(m.level_no)) + '">'
+                + '<img src="' + esc(iconUrl(m.icon)) + '" alt="Level '
+                + esc(String(m.level_no)) + '"></span>'
+              : '<span class="gms-lvl">L' + esc(String(m.level_no)) + '</span>')
         +   '<span class="gms-nm">' + esc(m.name) + '</span>'
         +   (m.certificate ? '<span class="gms-cert" title="A certificate can be claimed">\u2605</span>' : '')
         +   '<span class="gms-count">' + done + '/' + total + '</span>'
@@ -1445,7 +1484,17 @@
     return out;
   }
 
-  function wireGradePad(studentId) {
+  function wireGradePad(studentId, g) {
+    // The syllabus paragraph, folded away by default. The flag
+    // outlives this redraw and the one after every tick, so it does
+    // not snap shut under a coach who has just opened it.
+    Array.prototype.forEach.call($('gradeBody').querySelectorAll('[data-syl]'), function (b) {
+      b.addEventListener('click', function () {
+        gradeSylOpen = !gradeSylOpen;
+        $('gradeBody').innerHTML = gradePadHtml(g);
+        wireGradePad(studentId, g);
+      });
+    });
     Array.prototype.forEach.call($('gradeBody').querySelectorAll('[data-cert]'), function (b) {
       b.addEventListener('click', function () {
         if (b.disabled) return;

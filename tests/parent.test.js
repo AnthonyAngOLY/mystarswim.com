@@ -547,6 +547,76 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
       throw new Error('a level with no certificate offers one: ' + JSON.stringify(t));
   });
 
+  // ── The syllabus behind the ladder ────────────────────────────────────
+  // Levels named Starfish and Dolphin are Malaysia Aquatics', not ours.
+  // The credit has to be on the screen, and the sentence about what a
+  // level here does NOT mean has to be reachable from it -- otherwise it
+  // lives in a SQL comment nobody reads and a parent is told, by
+  // omission, that MAS certified their child.
+  await step('the programme credits the syllabus it follows', async () => {
+    const t = await page.locator('#childGrading .syl').first().innerText();
+    if (!/Malaysia Aquatics/.test(t) || !/BADGES/.test(t) || !/v1\.0/.test(t))
+      throw new Error('the credit line does not name body, syllabus and edition: '
+        + JSON.stringify(t));
+    // Quiet: it must not be louder than the child's own level.
+    const sz = await page.locator('#childGrading .syl').first()
+      .evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    const hd = await page.locator('#childGrading .h').first()
+      .evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    if (!(sz < hd)) throw new Error('the credit is set as large as the heading: '
+      + sz + ' vs ' + hd);
+  });
+
+  await step('and one tap opens what a level here does not mean', async () => {
+    if (await page.locator('#childGrading .sylnote').count())
+      throw new Error('the paragraph is open before anybody asked for it');
+    await page.locator('#childGrading .syl').first().click();
+    await page.waitForTimeout(300);
+    const t = await page.locator('#childGrading .sylnote').innerText();
+    if (!/separate assessment/i.test(t))
+      throw new Error('the note does not say a MAS award is separate: ' + JSON.stringify(t));
+    const href = await page.locator('#childGrading .sylnote a').getAttribute('href');
+    if (href !== 'https://example.org/badges')
+      throw new Error('the link is not the one stored: ' + JSON.stringify(href));
+    await page.locator('#childGrading .syl').first().click();
+    await page.waitForTimeout(300);
+    if (await page.locator('#childGrading .sylnote').count())
+      throw new Error('it will not fold away again');
+  });
+
+  await step('the roundel is round — no grey tile behind it', async () => {
+    const badge = page.locator('#childGrading .msrow').nth(0).locator('.msrow-badge');
+    if (!(await badge.evaluate(el => el.classList.contains('has-img'))))
+      throw new Error('a level with artwork still draws the lettered tile');
+    const bg = await badge.evaluate(el => getComputedStyle(el).backgroundColor);
+    if (!/rgba\(0, 0, 0, 0\)|transparent/.test(bg))
+      throw new Error('a transparent roundel sits on a filled square: ' + bg);
+    // And the file is really there. A path typed wrong in the migration
+    // is a broken image in three apps and a confirm block that still
+    // says "installed".
+    const w = await badge.locator('img').evaluate(el => el.naturalWidth);
+    if (!(w > 0)) throw new Error('the roundel did not load — the path is wrong');
+    // A level with no artwork keeps the glyph, so the fallback is not
+    // quietly dead code.
+    const plain = page.locator('#childGrading .msrow').nth(1).locator('.msrow-badge');
+    if (await plain.evaluate(el => el.classList.contains('has-img')))
+      throw new Error('a level with no artwork was given the transparent treatment');
+  });
+
+  await step('each level is drawn in its own colour', async () => {
+    const fill = (i) => page.locator('#childGrading .msrow').nth(i).locator('.msbar i')
+      .evaluate(el => getComputedStyle(el).backgroundColor);
+    const one = await fill(0), two = await fill(1);
+    if (one === two)
+      throw new Error('two levels with different colours drew the same bar: ' + one);
+    if (!/240, 113, 60/.test(one))
+      throw new Error('level 1 is not drawn in its own #F0713C: ' + one);
+    // Level 3 has no colour of its own and inherits the programme's.
+    const three = await fill(2);
+    if (!/10, 67, 94/.test(three))
+      throw new Error('a level with no colour did not inherit the programme’s: ' + three);
+  });
+
   await step('an ungraded child shows no collection at all', async () => {
     await page.locator('#childBack').click();
     await page.waitForTimeout(600);

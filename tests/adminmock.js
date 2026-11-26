@@ -58,6 +58,9 @@ function send(res, code, body, type) {
 }
 const json = (res, code, obj) => send(res, code, JSON.stringify(obj));
 
+// table path -> the last PATCH body seen for it.
+const PATCHES = {};
+
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
@@ -66,6 +69,21 @@ http.createServer((req, res) => {
 
   if (p === '/__fail') { STATE.failTerms = url.searchParams.get('on') === '1'; return json(res, 200, STATE); }
   if (p === '/__terms') return json(res, 200, { body: DB_TERMS });
+
+  // The last PATCH sent to each table, readable over HTTP. Without it a
+  // save can only be checked by what the screen does afterwards, and a
+  // screen that closes its panel looks identical whether it sent the
+  // right columns, the wrong ones, or none.
+  if (p === '/__patches') return json(res, 200, PATCHES);
+  if (req.method === 'PATCH') {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    return req.on('end', () => {
+      try { PATCHES[p] = { query: url.search, body: JSON.parse(raw || '{}') }; }
+      catch (_e) { PATCHES[p] = { query: url.search, body: raw }; }
+      return json(res, 200, []);
+    });
+  }
 
   if (p === '/config.js') {
     return send(res, 200,
@@ -87,7 +105,10 @@ http.createServer((req, res) => {
   // that awards itself to everyone is the fault worth seeing on screen.
   if (p === '/rest/v1/grading_programs') {
     return json(res, 200, [
-      { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', sort_order: 1, is_active: true },
+      { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', sort_order: 1,
+        is_active: true, syllabus_body: 'Malaysia Aquatics',
+        syllabus_name: 'BADGES \u2014 Swimming Proficiency Test',
+        syllabus_version: '1.0' },
       { id: 'pr2', name: 'Water Discovery', subtitle: 'Toddlers', sort_order: 2, is_active: true }
     ]);
   }

@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 10;
+  var BUILD = 11;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -442,7 +442,9 @@
                   : 'No class booked') + '</div>'
               // The one thing a parent wants at a glance, on the first
               // screen, without opening anything.
-              + (g ? '<div style="margin-top:7px"><span class="lvlchip">'
+              + (g ? '<div style="margin-top:7px"><span class="lvlchip"'
+                     + (hex(g.colour) ? ' style="color:' + hex(g.colour)
+                                      + ';border-color:' + hex(g.colour) + '"' : '') + '>'
                      + (g.icon ? '<img src="' + esc(iconUrl(g.icon)) + '" alt="">' : '')
                      + esc(g.program) + ' \u00b7 '
                      + (g.level ? 'Level ' + esc(String(g.level)) : 'Starting out')
@@ -469,10 +471,18 @@
         kids.forEach(function (k) {
           rpc('my_child_grading', { p_student: k.id }).then(function (g) {
             if (!g || g.ok !== true || g.graded === false) return;
+            // The roundel of the level she is actually on, not the
+            // programme's mark: the chip is her badge, and a programme
+            // logo is the same on every card on the screen.
+            var held = (g.milestones || []).filter(function (m) { return m.activated; });
+            var top = held.length ? held[held.length - 1] : null;
             homeLevels[k.id] = {
-              program: g.program.name, icon: g.program.icon, level: g.level,
+              program: g.program.name,
+              icon: (top && top.icon) || g.program.icon,
+              colour: (top && top.colour) || g.program.colour,
+              level: g.level,
               total: g.levels_total,
-              earned: (g.milestones || []).filter(function (m) { return m.activated; }).length
+              earned: held.length
             };
             drawKids();
           }).catch(function () {});
@@ -495,8 +505,56 @@
   // student_id -> the chip on the home screen.
   var homeLevels = {};
 
+  // program_id -> is the "who wrote this ladder" paragraph open.
+  var sylOpen = {};
+
   function iconUrl(p) {
-    return p ? cfg.supabaseUrl + '/storage/v1/object/public/grading-icons/' + encodeURI(p) : null;
+    if (!p) return null;
+    // A path beginning with / is served by this site. The MAS roundels
+    // ship with the build, so standing a new environment up does not
+    // begin with seven uploads to a storage bucket. Anything else is a
+    // key in grading-icons, which is where an icon uploaded in Settings
+    // → Grading still goes.
+    if (p.charAt(0) === '/') return p;
+    return cfg.supabaseUrl + '/storage/v1/object/public/grading-icons/' + encodeURI(p);
+  }
+
+  // A colour out of the database is drawn into a style attribute. The
+  // column has a CHECK on it, but a value that reaches an attribute is
+  // checked where it is used too, not only where it was stored.
+  function hex(c) { return (/^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/).test(c || '') ? c : ''; }
+
+  // Likewise a URL that becomes an href. http and https only: the
+  // office types this box, and `javascript:` in it would be script
+  // running in every parent's browser.
+  function webUrl(u) { return (/^https?:\/\//i).test(u || '') ? u : ''; }
+
+  // The line under the programme name: who owns this syllabus, what it
+  // is called, which edition. Quiet — a parent came to see their child's
+  // levels, not our accreditation — with one tap to the paragraph that
+  // says what a level here does and does not mean.
+  function syllabusHtml(prog) {
+    var s = prog && prog.syllabus; if (!s) return '';
+    var line = [s.body, s.name].filter(Boolean).join(' · ');
+    if (s.version) line += (line ? ' ' : '') + 'v' + s.version;
+    if (!line) line = 'About this syllabus';
+    var url = webUrl(s.url);
+    var more = !!(s.note || url);
+    var open = !!sylOpen[prog.id];
+    // The marker leads the line. Trailing, it orphans onto a second row
+    // the moment the syllabus name is long -- and "BADGES - Swimming
+    // Proficiency Test" is exactly long enough.
+    return '<div class="sylrow">'
+      + '<button type="button" class="syl"' + (more ? ' data-syl="' + esc(prog.id) + '"' : '')
+      +   ' aria-expanded="' + (open ? 'true' : 'false') + '">'
+      +   (more ? '<i>' + (open ? '\u2212' : 'i') + '</i>' : '') + esc(line) + '</button>'
+      + (more && open
+          ? '<div class="sylnote">' + esc(s.note || '')
+            + (url ? ' <a href="' + esc(url) + '" target="_blank" rel="noopener">'
+                   + 'Read the syllabus</a>' : '')
+            + '</div>'
+          : '')
+      + '</div>';
   }
 
   function loadChildGrading(studentId) {
@@ -516,21 +574,38 @@
   }
 
   function gradingHtml(g) {
-    var earned = (g.milestones || []).filter(function (m) { return m.activated; }).length;
+    var held = (g.milestones || []).filter(function (m) { return m.activated; });
+    var earned = held.length;
+    // The roundel of the level she is on, not the programme's mark: the
+    // chip is her badge, and a programme logo squeezed to 16px is a grey
+    // smudge that says nothing.
+    var topIcon = held.length ? held[held.length - 1].icon : null;
     var out = '<div class="h" style="display:flex;align-items:center;gap:8px">'
       + '<span>' + esc(g.program.name) + '</span>'
       + '<span class="lvlchip">'
-      + (g.program.icon ? '<img src="' + esc(iconUrl(g.program.icon)) + '" alt="">' : '')
+      + (topIcon ? '<img src="' + esc(iconUrl(topIcon)) + '" alt="">' : '')
       + (g.level ? 'Level ' + esc(String(g.level)) : 'Starting out')
       + '<small>' + earned + '/' + esc(String(g.levels_total)) + '</small></span></div>';
+
+    out += syllabusHtml(g.program);
 
     (g.milestones || []).forEach(function (m) {
       var done = Number(m.done) || 0, total = Number(m.total) || 0;
       var pct = total ? Math.round(done * 100 / total) : 0;
       var open = !!gradeOpen[m.id];
-      out += '<div class="msrow' + (m.activated ? ' is-on' : '') + '" data-ms="' + esc(m.id) + '">'
+      // The level's own colour, the programme's if it has none. A ladder
+      // drawn in one blue is a ladder a parent has to read to tell apart.
+      var c = hex(m.colour) || hex(g.program.colour);
+      // --c is set on the row so the stripe, the bar fill and the bubble
+      // all read it. Set on the bubble alone it would not reach the bar,
+      // and three inline colours drift apart the first time one is
+      // edited.
+      out += '<div class="msrow' + (m.activated ? ' is-on' : '') + '" data-ms="' + esc(m.id) + '"'
+        + (c ? ' style="--c:' + c + '"' : '') + '>'
         + '<div class="msrow-head" data-toggle="' + esc(m.id) + '">'
-        +   '<span class="msrow-badge">'
+        // A roundel is round, and its PNG is transparent. The tile
+        // behind it has to go, or the circle sits on a grey square.
+        +   '<span class="msrow-badge' + (m.icon ? ' has-img' : '') + '">'
         +     (m.icon ? '<img src="' + esc(iconUrl(m.icon)) + '" alt="">'
                       : (m.activated ? '\u2605' : '\u25cb')) + '</span>'
         +   '<span class="msrow-nm"><b>' + esc(m.name) + '</b>'
@@ -573,12 +648,22 @@
   }
 
   function wireGrading(studentId, g) {
+    var redraw = function () {
+      $('childGrading').innerHTML = gradingHtml(g);
+      wireGrading(studentId, g);
+    };
     Array.prototype.forEach.call($('childGrading').querySelectorAll('[data-toggle]'), function (b) {
       b.addEventListener('click', function () {
         var id = b.getAttribute('data-toggle');
         gradeOpen[id] = !gradeOpen[id];
-        $('childGrading').innerHTML = gradingHtml(g);
-        wireGrading(studentId, g);
+        redraw();
+      });
+    });
+    Array.prototype.forEach.call($('childGrading').querySelectorAll('[data-syl]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-syl');
+        sylOpen[id] = !sylOpen[id];
+        redraw();
       });
     });
   }

@@ -915,7 +915,10 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     if (!host) { host = document.createElement('div'); host.id = 'gr-host'; document.body.appendChild(host); }
     ReactDOM.createRoot(host).render(React.createElement(GradingAdminView, {
       programs: [
-        { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', is_active: true },
+        { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', is_active: true,
+          syllabus_body: 'Malaysia Aquatics',
+          syllabus_name: 'BADGES \u2014 Swimming Proficiency Test',
+          syllabus_version: '1.0', syllabus_note: 'A MAS award is separate.' },
         { id: 'pr2', name: 'Water Discovery', subtitle: 'Toddlers', is_active: true }
       ],
       milestones: [
@@ -943,6 +946,61 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     const t = await page.locator('#gr-host').innerText();
     if (!/Level 1/.test(t) || !/Guppy/.test(t)) throw new Error('no levels drawn: ' + t.slice(0, 200));
     if (!/2 tasks/.test(t)) throw new Error('it does not count the tasks on a level: ' + t.slice(0, 200));
+  });
+
+  // ── Which syllabus a programme follows ────────────────────────────────
+  // Typed here, printed in the parent app and the coaches' app. The
+  // field that needs guarding is the link: it becomes an href on three
+  // screens, and `javascript:` in it would be script running in every
+  // parent's browser. The column has a CHECK on it too -- but a refusal
+  // arriving from PostgREST reads as "could not save" and names no box.
+  await step('the programme says which syllabus it follows', async () => {
+    const t = await page.locator('#gr-host').innerText();
+    if (!/Syllabus: Malaysia Aquatics · BADGES — Swimming Proficiency Test v1\.0/.test(t))
+      throw new Error('no credit line on the programme: ' + JSON.stringify(t.slice(0, 400)));
+    // Folded away: five text boxes by default would bury the levels.
+    if (await page.locator('#gr-host textarea').count())
+      throw new Error('the editor is open before anybody asked for it');
+  });
+
+  await step('a link that is not a link is refused before it is saved', async () => {
+    await page.evaluate(() => fetch('/__patches').then(r => r.json()));
+    await page.locator('#gr-host button').filter({ hasText: 'Syllabus' }).first().click();
+    await page.waitForTimeout(400);
+    const boxes = await page.locator('#gr-host input.input, #gr-host textarea').count();
+    if (boxes !== 5) throw new Error('expected five boxes, found ' + boxes);
+    const link = page.locator('#gr-host input[placeholder^="https://"]');
+    await link.fill('javascript:alert(1)');
+    await page.locator('#gr-host button').filter({ hasText: 'Save' }).first().click();
+    await page.waitForTimeout(500);
+    const t = await page.locator('#gr-host').innerText();
+    if (!/must start with http/i.test(t))
+      throw new Error('it did not say which box is wrong: ' + JSON.stringify(t.slice(0, 300)));
+    const sent = await page.evaluate(() => fetch('/__patches').then(r => r.json()));
+    if (sent['/rest/v1/grading_programs'])
+      throw new Error('it sent the javascript: URL to the database anyway');
+  });
+
+  await step('and a real one saves every column, the emptied ones as null', async () => {
+    await page.locator('#gr-host input[placeholder^="https://"]').fill('https://example.org/x');
+    // Clearing a box must store null, not the empty string: the apps ask
+    // "is there a syllabus" by looking for a value.
+    await page.locator('#gr-host textarea').fill('');
+    await page.locator('#gr-host button').filter({ hasText: 'Save' }).first().click();
+    await page.waitForTimeout(600);
+    const sent = await page.evaluate(() => fetch('/__patches').then(r => r.json()));
+    const body = sent['/rest/v1/grading_programs'] && sent['/rest/v1/grading_programs'].body;
+    if (!body) throw new Error('nothing was sent');
+    const want = ['syllabus_body','syllabus_name','syllabus_version','syllabus_url','syllabus_note'];
+    for (const k of want)
+      if (!(k in body)) throw new Error('the save left out ' + k);
+    if (body.syllabus_url !== 'https://example.org/x')
+      throw new Error('the link was not saved: ' + JSON.stringify(body.syllabus_url));
+    if (body.syllabus_note !== null)
+      throw new Error('an emptied box was stored as "" rather than null: '
+        + JSON.stringify(body.syllabus_note));
+    if (await page.locator('#gr-host textarea').count())
+      throw new Error('the panel stayed open after saving');
   });
 
   await step('a level with no tasks says it awards nothing', async () => {

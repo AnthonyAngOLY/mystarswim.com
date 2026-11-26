@@ -200,6 +200,42 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
     if (n !== 3) throw new Error('expected all 3 levels, drew ' + n);
   });
 
+  // A coach hands the certificate over at the poolside. If the sentence
+  // about what a level here is NOT lives only in a SQL comment, the
+  // person saying it out loud has never read it.
+  await step('the pad says which syllabus this ladder is', async () => {
+    const t = await page.locator('#gradePad .gsyl').innerText();
+    if (!/Malaysia Aquatics/.test(t) || !/BADGES/.test(t) || !/v1\.0/.test(t))
+      throw new Error('no credit line in the pad: ' + JSON.stringify(t));
+    if (await page.locator('#gradePad .gsylnote').count())
+      throw new Error('the paragraph is open before anybody asked for it');
+    await page.locator('#gradePad .gsyl').click();
+    await page.waitForTimeout(250);
+    if (!/separate assessment/i.test(await page.locator('#gradePad .gsylnote').innerText()))
+      throw new Error('the note does not say a MAS award is separate');
+    await page.locator('#gradePad .gsyl').click();
+    await page.waitForTimeout(250);
+    if (await page.locator('#gradePad .gsylnote').count())
+      throw new Error('it will not fold away again');
+  });
+
+  await step('a level with a roundel shows it, round, in place of the pill', async () => {
+    const lvl = page.locator('#gradePad .gms').first().locator('.gms-lvl');
+    if (!(await lvl.evaluate(el => el.classList.contains('has-img'))))
+      throw new Error('the level with artwork still draws the L1 pill');
+    const bg = await lvl.evaluate(el => getComputedStyle(el).backgroundColor);
+    if (!/rgba\(0, 0, 0, 0\)|transparent/.test(bg))
+      throw new Error('a transparent roundel sits on a filled pill: ' + bg);
+    if (!(await lvl.locator('img').evaluate(el => el.naturalWidth) > 0))
+      throw new Error('the roundel did not load — the path is wrong');
+    // The one without artwork keeps its pill, so the fallback is alive.
+    const plain = page.locator('#gradePad .gms').nth(1).locator('.gms-lvl');
+    if (await plain.evaluate(el => el.classList.contains('has-img')))
+      throw new Error('a level with no artwork was given the image treatment');
+    if ((await plain.innerText()).trim() !== 'L2')
+      throw new Error('the lettered pill stopped saying which level it is');
+  });
+
   await step('each level has a bar that is its own tasks done over total', async () => {
     const t = await page.locator('#gradePad').innerText();
     if (!/0\/2/.test(t)) throw new Error('Guppy does not read 0/2: ' + JSON.stringify(t));

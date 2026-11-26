@@ -252,13 +252,33 @@
   .gms-head{display:flex; align-items:center; gap:7px; margin-bottom:6px}
   .gms-lvl{font-size:10.5px; font-weight:800; letter-spacing:.03em; padding:2px 6px;
     border-radius:999px; background:var(--slate-bg); color:var(--slate-tx)}
+  /* With the level's own roundel there is no pill to tint: a round
+     transparent PNG on a grey pill reads as a grey pill. */
+  .gms-lvl.has-img{padding:0; background:none; width:30px; height:30px; flex:none;
+    display:block; border-radius:50%}
+  .gms-lvl.has-img img{width:100%; height:100%; object-fit:contain; display:block}
   .gms-nm{font-weight:800; font-size:14px; flex:1; min-width:0}
   .gms-cert{color:#D97706}
   .gms-count{font-size:12.5px; font-weight:700; color:var(--muted)}
-  /* The bar: tasks done over tasks on the level, and nothing else. */
+  /* The bar: tasks done over tasks on the level, and nothing else.
+     --c is the level's colour, set on .gms; unset it reads as before. */
   .gbar{height:8px; border-radius:999px; background:#E2E8F0; overflow:hidden}
   .gbar i{display:block; height:100%; border-radius:999px;
-    background:linear-gradient(90deg,#0EA5E9,#34D399)}
+    background:var(--c, linear-gradient(90deg,#0EA5E9,#34D399))}
+
+  /* Which syllabus this ladder is. A coach hands certificates over at
+     the poolside, so the sentence about what a level here is NOT is one
+     tap away, on the screen where it would be said. */
+  .gsyl{-webkit-appearance:none; appearance:none; border:0; background:none; padding:0;
+    font:inherit; font-size:11px; font-weight:700; letter-spacing:.015em; line-height:1.5;
+    color:var(--muted); display:inline; cursor:pointer; text-align:left; margin:-4px 0 8px}
+  .gsyl i{font-style:normal; width:13px; height:13px; border-radius:50%;
+    border:1px solid currentColor; font-size:8.5px; font-weight:800; line-height:1;
+    display:inline-flex; align-items:center; justify-content:center; opacity:.75;
+    margin-right:5px; vertical-align:middle}
+  .gsylnote{margin:-2px 0 9px; font-size:12px; line-height:1.5; color:var(--muted);
+    background:var(--slate-bg); border-radius:9px; padding:8px 10px}
+  .gsylnote a{color:var(--primary); font-weight:700}
   .gtasks{margin-top:7px; display:flex; flex-direction:column; gap:3px}
   .gtask{display:flex; align-items:center; gap:8px; width:100%; text-align:left;
     padding:7px 8px; border-radius:8px; border:1px solid transparent;

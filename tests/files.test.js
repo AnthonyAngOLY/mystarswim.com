@@ -198,5 +198,46 @@ step('every printed document carries the current SSM number', () => {
     throw new Error('app.js never prints the current registration number');
 });
 
+// ── The MAS badge artwork ───────────────────────────────────────────────
+// supabase_grading_mas_badges.sql points every level at one of these,
+// and the apps draw them with no tile behind. A roundel saved without
+// transparency is a circle on a white square on a tinted card, which is
+// the thing it was redrawn to stop being -- and nothing about the file
+// name says which it is.
+step('every MAS roundel is on disk, transparent, and web-sized', () => {
+  const want = ['mas-1-starfish', 'mas-2-sea-turtle', 'mas-3-guppy', 'mas-4-octopus',
+                'mas-5-frog', 'mas-6-swordfish', 'mas-7-dolphin', 'mas-badges-mark'];
+  for (const n of want) {
+    const rel = 'badges/' + n + '.png';
+    if (!exists(rel)) throw new Error('missing: ' + rel);
+    const buf = fs.readFileSync(path.join(ROOT, rel));
+    if (buf.slice(1, 4).toString() !== 'PNG') throw new Error(rel + ' is not a PNG');
+    // IHDR: width, height, bit depth, then the colour type at byte 25.
+    // 4 and 6 carry an alpha channel; 3 is a palette, transparent only
+    // if a tRNS chunk says which entries are.
+    const type = buf[25];
+    const alpha = type === 4 || type === 6
+               || (type === 3 && buf.includes(Buffer.from('tRNS')));
+    if (!alpha) throw new Error(rel + ' has no transparency — it will draw as a square');
+    // A 3334px original dropped in here is 175 KB down a phone line, for
+    // a picture drawn at 40.
+    if (buf.length > 60 * 1024)
+      throw new Error(rel + ' is ' + Math.round(buf.length / 1024) + ' KB — resize it');
+  }
+});
+
+// And the migration points at exactly these, by the path the apps use.
+step('the migration and the artwork agree on the paths', () => {
+  const sql = read('supabase_grading_mas_badges.sql');
+  // The confirm block's `like '/badges/%'` is not one of them.
+  const paths = [...new Set([...sql.matchAll(/'(\/badges\/[^']+\.png)'/g)].map(m => m[1]))];
+  if (paths.length !== 8)
+    throw new Error('expected 8 artwork paths in the migration, found ' + paths.length
+                    + ': ' + paths.join(' '));
+  for (const p of paths)
+    if (!exists(p.replace(/^\//, '')))
+      throw new Error(p + ' is in the migration and not in the repository');
+});
+
 console.log(fail ? fail + ' FAILED' : 'all green');
 process.exit(fail ? 1 : 0);

@@ -37,14 +37,27 @@ const ago = (h) => new Date(Date.now() - h * 3600e3).toISOString();
 // done-first, as the database sorts them.
 const LADDER = {
   ok: true, graded: true,
-  program: { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', icon: null },
+  // The programme carries the syllabus it follows and its colour, as
+  // supabase_grading_syllabus.sql puts them there. The roundels are the
+  // repo's own /badges files, so a wrong path here fails as a broken
+  // image rather than passing on a string comparison.
+  program: { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim',
+             icon: '/badges/mas-badges-mark.png', colour: '#0A435E',
+             syllabus: { body: 'Malaysia Aquatics',
+                         name: 'BADGES \u2014 Swimming Proficiency Test',
+                         version: '1.0',
+                         note: 'A level lights up here when a coach has ticked every '
+                             + 'criterion. A MAS award is a separate assessment.',
+                         url: 'https://example.org/badges' } },
   level: 1, levels_total: 3,
   milestones: [
-    { id: 'ms1', level_no: 1, name: 'Guppy', icon: null, certificate: false,
+    { id: 'ms1', level_no: 1, name: 'Guppy', icon: '/badges/mas-1-starfish.png',
+      colour: '#F0713C', certificate: false,
       activated: true, total: 2, done: 2, tasks: [
         { id: 't1', name: 'Submerges whole head', done: true },
         { id: 't2', name: 'Blows bubbles', done: true } ] },
-    { id: 'ms2', level_no: 2, name: 'Tortoise', icon: null, certificate: true,
+    { id: 'ms2', level_no: 2, name: 'Tortoise', icon: null, colour: '#159C8B',
+      certificate: true,
       activated: false, total: 10, done: 5, tasks: [
         { id: 'a1', name: 'Glides from the wall', done: true },
         { id: 'a2', name: 'Kicks 10 metres', done: true },
@@ -56,7 +69,8 @@ const LADDER = {
         { id: 'b3', name: 'Treads water 30 seconds', done: false },
         { id: 'b4', name: 'Retrieves an object', done: false },
         { id: 'b5', name: 'Swims 25 metres', done: false } ] },
-    { id: 'ms3', level_no: 3, name: 'Crab', icon: null, certificate: true,
+    { id: 'ms3', level_no: 3, name: 'Crab', icon: '/badges/mas-3-guppy.png',
+      colour: null, certificate: true,
       activated: false, total: 4, done: 0, tasks: [
         { id: 'c1', name: 'Tumble turn', done: false } ] }
   ]

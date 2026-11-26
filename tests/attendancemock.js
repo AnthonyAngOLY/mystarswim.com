@@ -90,14 +90,25 @@ const BUDDIES = [
 // One child's ladder, mutated by ticks so the pad re-reads real changes.
 const LADDER = {
   ok: true, graded: true,
-  program: { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim' },
+  // With the syllabus it follows and its artwork, as
+  // supabase_grading_syllabus.sql and the MAS file put them there.
+  program: { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim',
+             colour: '#0A435E',
+             syllabus: { body: 'Malaysia Aquatics',
+                         name: 'BADGES \u2014 Swimming Proficiency Test',
+                         version: '1.0',
+                         note: 'A level lights up here when a coach has ticked every '
+                             + 'criterion. A MAS award is a separate assessment.',
+                         url: 'https://example.org/badges' } },
   level: null, levels_total: 3,
   milestones: [
-    { id: 'ms1', level_no: 1, name: 'Guppy', certificate: false, activated: false,
+    { id: 'ms1', level_no: 1, name: 'Guppy', icon: '/badges/mas-1-starfish.png',
+      colour: '#F0713C', certificate: false, activated: false,
       total: 2, done: 0, tasks: [
         { id: 't1', name: 'Submerges whole head', done: false },
         { id: 't2', name: 'Blows bubbles', done: false } ] },
-    { id: 'ms2', level_no: 2, name: 'Tortoise', certificate: true, activated: false,
+    { id: 'ms2', level_no: 2, name: 'Tortoise', colour: '#159C8B',
+      certificate: true, activated: false,
       certificate_claimed_at: null, certificate_claimed_by: null,
       total: 1, done: 0, tasks: [
         { id: 't3', name: 'Glides from the wall', done: false } ] },

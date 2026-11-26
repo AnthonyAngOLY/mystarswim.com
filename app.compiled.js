@@ -9795,6 +9795,11 @@ function GradingAdminView({
   const [openMs, setOpenMs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // The syllabus panel, folded away: most of the time nobody is editing
+  // it, and a card that is five text boxes tall by default buries the
+  // levels that are the point of the page.
+  const [sylOpen, setSylOpen] = useState(false);
+  const [syl, setSyl] = useState(null);
   const prog = (programs || []).find(p => p.id === progId) || (programs || [])[0] || null;
   const levels = (milestones || []).filter(m => m.program_id === prog?.id).sort((a, b) => (a.level_no || 0) - (b.level_no || 0));
   const tasksFor = msId => (tasks || []).filter(t => t.milestone_id === msId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
@@ -9897,7 +9902,46 @@ function GradingAdminView({
     };
     input.click();
   }
-  const iconUrl = p => p ? `${cfg.supabaseUrl}/storage/v1/object/public/grading-icons/${encodeURI(p)}` : null;
+  // A path beginning with / is served by this site: the MAS roundels
+  // ship with the build, so standing up a new environment does not begin
+  // with seven uploads. Anything else is a key in the grading-icons
+  // bucket, which is where the uploader above still puts things.
+  const iconUrl = p => !p ? null : p.startsWith('/') ? p : `${cfg.supabaseUrl}/storage/v1/object/public/grading-icons/${encodeURI(p)}`;
+
+  // ── The syllabus a programme follows ──────────────────────────────────
+  // Typed here and nowhere else. Water Discovery is ours and leaves it
+  // empty; MAS BADGES credits Malaysia Aquatics, and carries the
+  // sentence about what a level here does NOT mean — which is the one
+  // the apps print when a parent or a coach asks.
+  const SYL = [['syllabus_body', 'Awarding body', 'e.g. Malaysia Aquatics', false], ['syllabus_name', 'Syllabus', 'e.g. BADGES — Swimming Proficiency Test', false], ['syllabus_version', 'Edition', 'e.g. 1.0', false], ['syllabus_url', 'Where to read it', 'https://… (http or https only)', false], ['syllabus_note', 'What a level here means — and does not', 'Shown to parents and coaches when they tap the credit line.', true]];
+  const sylLine = p => {
+    if (!p) return '';
+    const bits = [p.syllabus_body, p.syllabus_name].filter(Boolean).join(' · ');
+    return bits + (p.syllabus_version ? `${bits ? ' ' : ''}v${p.syllabus_version}` : '');
+  };
+  const openSyl = () => {
+    const d = {};
+    SYL.forEach(([f]) => {
+      d[f] = prog?.[f] || '';
+    });
+    setSyl(d);
+    setSylOpen(true);
+  };
+  const saveSyl = () => run(async () => {
+    const u = (syl.syllabus_url || '').trim();
+    // The column has a CHECK on it and the database would refuse this
+    // anyway — but a refusal from PostgREST reads as "could not save",
+    // and the person needs to know which box is wrong.
+    if (u && !/^https?:\/\//i.test(u)) throw new Error('The link must start with http:// or https://');
+    const patch = {};
+    SYL.forEach(([f]) => {
+      patch[f] = (syl[f] || '').trim() || null;
+    });
+    await patchRows('grading_programs', {
+      id: prog.id
+    }, patch);
+    setSylOpen(false);
+  });
   const iconBox = (table, row) => /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     title: row.icon_path ? 'Replace the badge image' : 'Upload a badge image',
@@ -10036,7 +10080,13 @@ function GradingAdminView({
     style: {
       color: '#B45309'
     }
-  }, "no lesson type points at this — it grades nobody"))), /*#__PURE__*/React.createElement("div", {
+  }, "no lesson type points at this — it grades nobody")), sylLine(prog) && /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginTop: 4,
+      fontWeight: 700
+    }
+  }, "Syllabus: ", sylLine(prog))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 6,
@@ -10081,8 +10131,77 @@ function GradingAdminView({
     }))
   })), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
+    onClick: () => sylOpen ? setSylOpen(false) : openSyl()
+  }, sylOpen ? 'Close syllabus' : 'Syllabus'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
     onClick: toggleActive('grading_programs', prog)
-  }, prog.is_active === false ? 'Turn on' : 'Turn off')))), /*#__PURE__*/React.createElement("div", {
+  }, prog.is_active === false ? 'Turn on' : 'Turn off'))), sylOpen && syl && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTop: '1px solid var(--border)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      marginBottom: 10,
+      lineHeight: 1.6
+    }
+  }, "Where this ladder comes from. Leave it all empty for a programme we wrote ourselves — nothing is shown then. What you type here is printed under the programme name in the parent app and the coaches’ app, quietly, with the note folded away until somebody taps it."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 8
+    }
+  }, SYL.map(([f, label, ph, big]) => /*#__PURE__*/React.createElement("label", {
+    key: f,
+    style: {
+      display: 'block'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontWeight: 700,
+      marginBottom: 3
+    }
+  }, label), big ? /*#__PURE__*/React.createElement("textarea", {
+    className: "input",
+    rows: 4,
+    placeholder: ph,
+    value: syl[f],
+    style: {
+      width: '100%',
+      resize: 'vertical'
+    },
+    onChange: e => setSyl({
+      ...syl,
+      [f]: e.target.value
+    })
+  }) : /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    placeholder: ph,
+    value: syl[f],
+    style: {
+      width: '100%'
+    },
+    onChange: e => setSyl({
+      ...syl,
+      [f]: e.target.value
+    })
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-primary small",
+    disabled: busy,
+    onClick: saveSyl
+  }, "Save"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: () => setSylOpen(false)
+  }, "Cancel")))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
