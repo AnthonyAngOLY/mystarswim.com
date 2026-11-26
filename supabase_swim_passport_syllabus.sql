@@ -150,13 +150,15 @@ begin
     (v_ms, 'Water exit parent & child together', 8),
     (v_ms, 'Water entry parent & child together', 9);
 
-  -- ── Stage B · Water Exploration ──────────────────────────────────────
+  -- ── Stage B · Water Explorer ─────────────────────────────────────────
+  -- The sticker reads "Water Explorer". The cover's summary panel calls
+  -- it "Water Exploration"; the sticker is what a parent is holding.
   insert into grading_milestones (program_id, level_no, label, name, description,
                                   certificate, colour, icon_path)
-  values (v_prog, 2, 'B', 'Water Exploration',
+  values (v_prog, 2, 'B', 'Water Explorer',
           'Swim Starters · Focuses on exploring body positions, blowing bubbles, '
        || 'and fundamental safety and aquatic skills.',
-          true, '#2CACE2', '/badges/ss-b-water-exploration.png')
+          true, '#2CACE2', '/badges/ss-b-water-explorer.png')
   returning id into v_ms;
   insert into grading_tasks (milestone_id, name, sort_order) values
     (v_ms, 'Blow bubbles mouth & nose submerged, assisted', 1),

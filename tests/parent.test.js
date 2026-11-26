@@ -637,6 +637,33 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
       throw new Error('the heading chip disagrees with the rows: ' + JSON.stringify(chip));
   });
 
+  // A four-year-old moves from Swim Starters to the Passport mid-year.
+  // The ladder on screen is the one their lesson type points at, so
+  // without this their first two badges simply disappear from their
+  // parent's phone — and a parent reads that as "we lost them".
+  await step('badges from an earlier ladder are still shown', async () => {
+    const row = page.locator('#childGrading .earlier');
+    if (!(await row.count())) throw new Error('nothing shows what was earned earlier');
+    const t = await row.innerText();
+    if (!/Water Discovery/.test(t) || !/Water Explorer/.test(t))
+      throw new Error('the earlier badges are not named: ' + JSON.stringify(t));
+    if (!/Swim Starters/.test(t))
+      throw new Error('it does not say which ladder they came from: ' + JSON.stringify(t));
+    const w = await row.locator('.earlier-b img').first().evaluate(el => el.naturalWidth);
+    if (!(w > 0)) throw new Error('an earlier badge image did not load');
+    // Below the current ladder, not above it: the rung she is on now is
+    // what she came to see.
+    const yEarlier = await row.evaluate(el => el.getBoundingClientRect().top);
+    const yLast = await page.locator('#childGrading .msrow').last()
+      .evaluate(el => el.getBoundingClientRect().top);
+    if (!(yEarlier > yLast))
+      throw new Error('history is drawn above the ladder it precedes');
+    // And it must not inflate the count: 1/3 is the current ladder.
+    const chip = await page.locator('#childGrading .lvlchip').first().innerText();
+    if (!/1\/3/.test(chip))
+      throw new Error('earlier badges were counted into the current ladder: ' + chip);
+  });
+
   await step('an ungraded child shows no collection at all', async () => {
     await page.locator('#childBack').click();
     await page.waitForTimeout(600);

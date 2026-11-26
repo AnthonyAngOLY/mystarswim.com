@@ -207,7 +207,7 @@ step('every printed document carries the current SSM number', () => {
 step('every roundel is on disk, transparent, and web-sized', () => {
   const want = ['mas-1-starfish', 'mas-2-sea-turtle', 'mas-3-guppy', 'mas-4-octopus',
                 'mas-5-frog', 'mas-6-swordfish', 'mas-7-dolphin', 'mas-badges-mark',
-                'ss-a-water-discovery', 'ss-b-water-exploration', 'ss-1-water-acclimation',
+                'ss-a-water-discovery', 'ss-b-water-explorer', 'ss-1-water-acclimation',
                 'ss-2-water-movement', 'ss-3-water-stamina', 'ss-4-stroke-introduction',
                 'ss-5-stroke-development', 'ss-6-stroke-mechanics', 'star-swim-mark'];
   for (const n of want) {

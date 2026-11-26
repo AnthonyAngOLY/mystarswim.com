@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 12;
+  var BUILD = 13;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -635,7 +635,26 @@
         + (open ? taskListHtml(m) : '')
         + '</div>';
     });
-    return out;
+    return out + earnedEarlierHtml(g);
+  }
+
+  // What this child holds on a ladder they are no longer on. Almost
+  // always nothing; everything, to the four-year-old who moved up from
+  // Swim Starters to the Passport this term and whose Water Discovery
+  // badge would otherwise have simply disappeared from their parent's
+  // phone.
+  function earnedEarlierHtml(g) {
+    var e = g.also_earned || [];
+    if (!e.length) return '';
+    return '<div class="earlier">'
+      + '<div class="earlier-h">Earned earlier</div>'
+      + '<div class="earlier-row">' + e.map(function (m) {
+          var c = hex(m.colour);
+          return '<span class="earlier-b"' + (c ? ' style="--c:' + c + '"' : '') + '>'
+            + (m.icon ? '<img src="' + esc(iconUrl(m.icon)) + '" alt="">' : '')
+            + '<span><b>' + esc(m.name) + '</b>'
+            + '<small>' + esc(m.program) + '</small></span></span>';
+        }).join('') + '</div></div>';
   }
 
   function taskListHtml(m) {

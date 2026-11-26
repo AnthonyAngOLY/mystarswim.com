@@ -50,6 +50,16 @@ const LADDER = {
                              + 'criterion. A MAS award is a separate assessment.',
                          url: 'https://example.org/badges' } },
   level: 1, levels_total: 3,
+  // This child moved up from Swim Starters. Their A and B badges are
+  // on a ladder they are no longer on, and must not vanish.
+  also_earned: [
+    { program: 'Swim Starters', level_no: 1, label: 'A', name: 'Water Discovery',
+      icon: '/badges/ss-a-water-discovery.png', colour: '#2CBDBE',
+      achieved_at: ago(900) },
+    { program: 'Swim Starters', level_no: 2, label: 'B', name: 'Water Explorer',
+      icon: '/badges/ss-b-water-explorer.png', colour: '#2CACE2',
+      achieved_at: ago(400) }
+  ],
   milestones: [
     // Labelled A, B, 1 -- the Swim Passport shape, where the sticker and
     // the rung deliberately disagree.

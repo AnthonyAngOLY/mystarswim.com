@@ -142,6 +142,20 @@
   .mscert{margin-top:10px; font-size:12.5px; font-weight:700; color:#92400E;
     background:#FEF3C7; border-radius:9px; padding:7px 10px}
 
+  /* Badges from a ladder this child has moved on from. Under the current
+     one, quieter than it, and never in the "x of y" count -- they are
+     history, not a rung still to climb. */
+  .earlier{margin:14px 0 4px}
+  .earlier-h{font-size:11px; font-weight:800; letter-spacing:.04em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:7px}
+  .earlier-row{display:flex; flex-wrap:wrap; gap:7px}
+  .earlier-b{display:inline-flex; align-items:center; gap:7px; padding:5px 10px 5px 5px;
+    border:1px solid var(--border); border-left:3px solid var(--c, var(--border));
+    border-radius:999px; background:var(--surface)}
+  .earlier-b img{width:28px; height:28px; border-radius:50%; object-fit:contain; flex:none}
+  .earlier-b b{display:block; font-size:12.5px; line-height:1.25}
+  .earlier-b small{display:block; font-size:10.5px; color:var(--muted)}
+
   main{padding:14px 16px 90px; max-width:520px; margin:0 auto}
   .card{
     background:var(--surface); border:1px solid var(--border);

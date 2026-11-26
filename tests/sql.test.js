@@ -319,6 +319,45 @@ const FILES = [
         if (!fs.existsSync(path.join(ROOT, ic.slice(1))))
           throw new Error(ic + ' is in the database and not in the repository');
       }
+    } },
+  { file: 'supabase_swim_passport_split.sql',
+    probe: () => {
+      // Ticks and earned stages must survive the move. Counted before
+      // the file runs is not possible from here, so count what is on the
+      // two halves together: the stages carry their ids across, so the
+      // join still reaches every mark that existed.
+      const starters = q(`select string_agg(m.label || ' ' || m.name, ',' order by m.level_no)
+                            from grading_milestones m join grading_programs p
+                              on p.id = m.program_id where p.name='Swim Starters'`);
+      if (starters !== 'A Water Discovery,B Water Explorer')
+        throw new Error('Swim Starters is not A and B: ' + JSON.stringify(starters));
+      // The sticker reads "Water Explorer", so the level must too.
+      if (q(`select count(*) from grading_milestones where name='Water Exploration'`) !== '0')
+        throw new Error('a level still says Water Exploration, which no sticker says');
+
+      const pass = q(`select string_agg(m.label || ':' || m.level_no, ',' order by m.level_no)
+                        from grading_milestones m join grading_programs p
+                          on p.id = m.program_id where p.name='Swim Passport'`);
+      // Renumbered 1..6 with the labels unchanged: the gap A and B left
+      // is closed, so the bar reads "3 of 6" and not "3 of 8".
+      if (pass !== '1:1,2:2,3:3,4:4,5:5,6:6')
+        throw new Error('the Passport did not close the gap: ' + JSON.stringify(pass));
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport'`) !== '6')
+        throw new Error('Swim Passport is not six stages');
+
+      // Same book, said in both places, which is what tells a parent the
+      // two ladders are halves of one passport.
+      const credit = q(`select string_agg(p.syllabus_body || '/' || p.syllabus_name, '|'
+                                 order by p.name)
+                          from grading_programs p
+                         where p.name in ('Swim Starters','Swim Passport')`);
+      if (credit !== 'Star Swim/Swim Passport|Star Swim/Swim Passport')
+        throw new Error('the two halves credit different things: ' + JSON.stringify(credit));
+
+      // And a child's history survives a move between them.
+      if (!/"also_earned"/.test(q(`select student_grading((select id from students limit 1))::text`)))
+        throw new Error('student_grading dropped also_earned');
     } }
 ];
 
