@@ -101,20 +101,21 @@ const LADDER = {
                              + 'criterion. A MAS award is a separate assessment.',
                          url: 'https://example.org/badges' } },
   level: null, levels_total: 3,
+  band: { name: 'Swim Starters', done: 0, total: 2 },
   milestones: [
     // Labelled A, B, 1 -- the Swim Passport shape, where the sticker on
     // the child's passport and the rung number deliberately disagree.
-    { id: 'ms1', level_no: 1, label: 'A', name: 'Guppy', icon: '/badges/mas-1-starfish.png',
+    { id: 'ms1', level_no: 1, label: 'A', band: 'Swim Starters', name: 'Guppy', icon: '/badges/mas-1-starfish.png',
       colour: '#F0713C', certificate: false, activated: false,
       total: 2, done: 0, tasks: [
         { id: 't1', name: 'Submerges whole head', done: false },
         { id: 't2', name: 'Blows bubbles', done: false } ] },
-    { id: 'ms2', level_no: 2, label: 'B', name: 'Tortoise', colour: '#159C8B',
+    { id: 'ms2', level_no: 2, label: 'B', band: 'Swim Starters', name: 'Tortoise', colour: '#159C8B',
       certificate: true, activated: false,
       certificate_claimed_at: null, certificate_claimed_by: null,
       total: 1, done: 0, tasks: [
         { id: 't3', name: 'Glides from the wall', done: false } ] },
-    { id: 'ms3', level_no: 3, label: '1', name: 'Crab', certificate: false, activated: false,
+    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', certificate: false, activated: false,
       total: 0, done: 0, tasks: [] }
   ]
 };
@@ -180,6 +181,9 @@ const RPC = {
     ms.done = ms.tasks.filter(x => x.done).length;
     ms.activated = ms.done === ms.total;
     LADDER.level = Math.max(0, ...LADDER.milestones.filter(m => m.activated).map(m => m.level_no)) || null;
+    // The band moves with it, as student_grading() recomputes it.
+    LADDER.band.done = LADDER.milestones
+      .filter(m => m.activated && m.band === LADDER.band.name).length;
     return { ok: true, task_id: a.p_task, milestone_id: ms.id, activated: ms.activated,
              milestone: ms.name, level_no: ms.level_no, certificate: !!ms.certificate };
   },

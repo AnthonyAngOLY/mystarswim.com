@@ -50,6 +50,10 @@ const LADDER = {
                              + 'criterion. A MAS award is a separate assessment.',
                          url: 'https://example.org/badges' } },
   level: 1, levels_total: 3,
+  // Bands, as the printed chart groups them. The child holds A, so
+  // the band they are CLIMBING is still Swim Starters, 1 of 2 — not
+  // 1 of 3 across the whole ladder.
+  band: { name: 'Swim Starters', done: 1, total: 2 },
   // This child moved up from Swim Starters. Their A and B badges are
   // on a ladder they are no longer on, and must not vanish.
   also_earned: [
@@ -63,12 +67,12 @@ const LADDER = {
   milestones: [
     // Labelled A, B, 1 -- the Swim Passport shape, where the sticker and
     // the rung deliberately disagree.
-    { id: 'ms1', level_no: 1, label: 'A', name: 'Guppy', icon: '/badges/mas-1-starfish.png',
+    { id: 'ms1', level_no: 1, label: 'A', band: 'Swim Starters', name: 'Guppy', icon: '/badges/mas-1-starfish.png',
       colour: '#F0713C', certificate: false,
       activated: true, total: 2, done: 2, tasks: [
         { id: 't1', name: 'Submerges whole head', done: true },
         { id: 't2', name: 'Blows bubbles', done: true } ] },
-    { id: 'ms2', level_no: 2, label: 'B', name: 'Tortoise', icon: null, colour: '#159C8B',
+    { id: 'ms2', level_no: 2, label: 'B', band: 'Swim Starters', name: 'Tortoise', icon: null, colour: '#159C8B',
       certificate: true,
       activated: false, total: 10, done: 5, tasks: [
         { id: 'a1', name: 'Glides from the wall', done: true },
@@ -81,7 +85,7 @@ const LADDER = {
         { id: 'b3', name: 'Treads water 30 seconds', done: false },
         { id: 'b4', name: 'Retrieves an object', done: false },
         { id: 'b5', name: 'Swims 25 metres', done: false } ] },
-    { id: 'ms3', level_no: 3, label: '1', name: 'Crab', icon: '/badges/mas-3-guppy.png',
+    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', icon: '/badges/mas-3-guppy.png',
       colour: null, certificate: true,
       activated: false, total: 4, done: 0, tasks: [
         { id: 'c1', name: 'Tumble turn', done: false } ] }

@@ -206,6 +206,19 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
   // A coach hands the certificate over at the poolside. If the sentence
   // about what a level here is NOT lives only in a SQL comment, the
   // person saying it out loud has never read it.
+  await step('the pad names the band the swimmer is in', async () => {
+    const t = await page.locator('#gradePad').innerText();
+    if (!/Swim Starters/.test(t))
+      throw new Error('the pad does not name the band: ' + JSON.stringify(t.slice(0, 160)));
+    if (!/0 of 2/.test(t))
+      throw new Error('the pad counts across the ladder, not within the band: '
+        + JSON.stringify(t.slice(0, 160)));
+    // And the stage is still there: the band must not cost the one fact
+    // the pad was opened to establish.
+    if (!/no stage yet/.test(t))
+      throw new Error('the band line swallowed the stage: ' + JSON.stringify(t.slice(0, 160)));
+  });
+
   await step('the pad says which syllabus this ladder is', async () => {
     const t = await page.locator('#gradePad .gsyl').innerText();
     if (!/Malaysia Aquatics/.test(t) || !/BADGES/.test(t) || !/v1\.0/.test(t))
@@ -289,9 +302,10 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
   await step('and the badge beside the name moves with it', async () => {
     const t = await page.locator('#gradePad').innerText();
     if (!/2\/2/.test(t)) throw new Error('Guppy does not read 2/2 after both ticks');
-    // "Stage A of 3", because this ladder's first rung is lettered.
-    if (!/Stage A of 3/.test(t))
-      throw new Error('the header does not show the new stage: ' + JSON.stringify(t.slice(0, 120)));
+    // The band leads, then the stage, then the count within the band.
+    if (!/Swim Starters . Stage A . 1 of 2/.test(t))
+      throw new Error('the header does not show band, stage and band count: '
+        + JSON.stringify(t.slice(0, 140)));
   });
 
   await step('a level with no certificate offers no button', async () => {

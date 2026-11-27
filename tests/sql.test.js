@@ -358,6 +358,49 @@ const FILES = [
       // And a child's history survives a move between them.
       if (!/"also_earned"/.test(q(`select student_grading((select id from students limit 1))::text`)))
         throw new Error('student_grading dropped also_earned');
+    } },
+  { file: 'supabase_grading_bands.sql',
+    probe: () => {
+      // One ladder again, eight stages, in the printed chart's own three
+      // groups. The split file ran first, so this also proves the fold
+      // back in works on top of it.
+      const lad = q(`select string_agg(m.band || '/' || m.label, ',' order by m.level_no)
+                       from grading_milestones m join grading_programs p
+                         on p.id = m.program_id where p.name='Swim Passport'`);
+      if (lad !== 'Swim Starters/A,Swim Starters/B,Swim Basics/1,Swim Basics/2,'
+                + 'Swim Basics/3,Swim Strokes/4,Swim Strokes/5,Swim Strokes/6')
+        throw new Error('the banded ladder is wrong: ' + JSON.stringify(lad));
+
+      // Swim Starters is empty and turned off, not deleted.
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Starters'`) !== '0')
+        throw new Error('Swim Starters still holds levels');
+      if (q(`select coalesce(is_active::text,'?') from grading_programs
+              where name='Swim Starters'`) !== 'false')
+        throw new Error('the emptied programme was deleted or left on');
+
+      // MAS BADGES keeps no bands, and must still count across its ladder.
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='MAS BADGES' and m.band is not null`) !== '0')
+        throw new Error('a programme with no bands was given some');
+
+      // The count a parent reads is the BAND's. The fixture child holds
+      // level 1 only, so Swim Starters reads 1 of 2 — not 1 of 8, which
+      // is the number this whole change exists to stop showing.
+      q(`update scheduler_lesson_types set grading_program_id =
+           (select id from grading_programs where name='Swim Passport')`);
+      const g = JSON.parse(q(`select student_grading((select id from students limit 1))`));
+      if (!g.band) throw new Error('no band came back for a banded programme');
+      if (g.band.total !== 2)
+        throw new Error('the band total is the whole ladder: ' + JSON.stringify(g.band));
+      if (g.band.total === g.levels_total)
+        throw new Error('band and ladder totals are the same, so banding bought nothing');
+      if (g.levels_total !== 8) throw new Error('the ladder is not eight stages');
+      // The band is the one they are CLIMBING, not the one they finished.
+      if (g.band.name !== 'Swim Starters')
+        throw new Error('wrong band for a child part-way through the first: ' + g.band.name);
+      if (g.milestones.some(m => !m.band))
+        throw new Error('a stage came back with no band');
     } }
 ];
 

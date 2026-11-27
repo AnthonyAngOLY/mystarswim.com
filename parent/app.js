@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 13;
+  var BUILD = 14;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -477,13 +477,15 @@
             var held = (g.milestones || []).filter(function (m) { return m.activated; });
             var top = held.length ? held[held.length - 1] : null;
             homeLevels[k.id] = {
-              program: g.program.name,
+              // The band, where there is one: a toddler's card should
+              // say "Swim Starters 2/2", not "Swim Passport 2/8".
+              program: (g.band && g.band.name) || g.program.name,
               icon: (top && top.icon) || g.program.icon,
               colour: (top && top.colour) || g.program.colour,
               label: top && top.label,
               level: g.level,
-              total: g.levels_total,
-              earned: held.length
+              total: g.band ? g.band.total : g.levels_total,
+              earned: g.band ? g.band.done : held.length
             };
             drawKids();
           }).catch(function () {});
@@ -592,16 +594,35 @@
     // smudge that says nothing.
     var topMs = held.length ? held[held.length - 1] : null;
     var topIcon = topMs && topMs.icon;
+    // Where there are bands, the count is the band's — "2 of 2", not
+    // "2 of 8". The band a family is enrolled for is the stretch they
+    // are actually climbing; the rest of the ladder is still drawn
+    // below it, so nothing is hidden.
+    var cnt = g.band ? (g.band.done + '/' + g.band.total)
+                     : (earned + '/' + String(g.levels_total));
     var out = '<div class="h" style="display:flex;align-items:center;gap:8px">'
-      + '<span>' + esc(g.program.name) + '</span>'
+      + '<span>' + esc(g.band ? g.band.name : g.program.name) + '</span>'
       + '<span class="lvlchip">'
       + (topIcon ? '<img src="' + esc(iconUrl(topIcon)) + '" alt="">' : '')
       + (g.level ? esc(stageWord(topMs && topMs.label, g.level)) : 'Starting out')
-      + '<small>' + earned + '/' + esc(String(g.levels_total)) + '</small></span></div>';
+      + '<small>' + esc(cnt) + '</small></span></div>';
 
     out += syllabusHtml(g.program);
 
+    // Band headings, where the programme has bands. The printed chart
+    // groups the ladder this way and so does the cover, so the screen
+    // uses the same three words. Without them a toddler's parent reads
+    // one list of eight and is told their two-year-old has six to go.
+    var lastBand = null;
     (g.milestones || []).forEach(function (m) {
+      if (m.band && m.band !== lastBand) {
+        lastBand = m.band;
+        var inBand = (g.milestones || []).filter(function (x) { return x.band === m.band; });
+        var gotBand = inBand.filter(function (x) { return x.activated; }).length;
+        out += '<div class="bandh' + (g.band && g.band.name === m.band ? ' is-here' : '') + '">'
+          + '<span>' + esc(m.band) + '</span>'
+          + '<small>' + gotBand + '/' + inBand.length + '</small></div>';
+      }
       var done = Number(m.done) || 0, total = Number(m.total) || 0;
       var pct = total ? Math.round(done * 100 / total) : 0;
       var open = !!gradeOpen[m.id];

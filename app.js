@@ -6516,6 +6516,7 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
                       badge actually says. On the Swim Passport stage "1" is
                       the third rung, because A and B come first. */}
                   <span className="small subtle" style={{marginRight:6}}>
+                    {ms.band ? `${ms.band} · ` : ''}
                     {ms.label ? `Stage ${ms.label}` : `Level ${ms.level_no}`}
                   </span>
                   {ms.name}
@@ -6534,6 +6535,10 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
               <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>
                 <button className="btn btn-ghost small" onClick={rename('grading_milestones', ms, 'name', `Level ${ms.level_no} name`)}>Rename</button>
                 <button className="btn btn-ghost small" onClick={rename('grading_milestones', ms, 'description', 'What this level means')}>Description</button>
+                <button className="btn btn-ghost small"
+                        title="The group this level belongs to on the printed chart. Progress is counted within the band, so a toddler reads 2 of 2 rather than 2 of 8."
+                        onClick={rename('grading_milestones', ms, 'band',
+                          `Which band is level ${ms.level_no} in? e.g. "Swim Starters", "Swim Basics", "Swim Strokes". Empty = no bands.`)}>Band</button>
                 <button className="btn btn-ghost small"
                         title="What the child's badge says — A, B, 1. Leave empty where it just says the level number."
                         onClick={rename('grading_milestones', ms, 'label',

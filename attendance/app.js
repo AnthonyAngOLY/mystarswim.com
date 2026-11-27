@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 22;
+  var BUILD = 23;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1433,6 +1433,20 @@
               return m.level_no === g.level ? m.label : a; }, null), g.level))
           : 'no level yet')
       + ' of ' + esc(String(g.levels_total)) + '</div>';
+
+    // With bands, the band leads and the count is the band's — it is
+    // what a coach says to a parent at the rail. The stage stays:
+    // replacing it with the band would cost the one fact the pad is
+    // open to establish. The programme name goes, because the syllabus
+    // line underneath already carries it.
+    if (g.band) {
+      out = '<div class="cls-sub" style="margin-bottom:8px"><b>' + esc(g.band.name) + '</b>'
+        + ' \u00b7 ' + (g.level
+            ? esc(stageWord((g.milestones || []).reduce(function (a, m) {
+                return m.level_no === g.level ? m.label : a; }, null), g.level))
+            : 'no stage yet')
+        + ' \u00b7 ' + g.band.done + ' of ' + g.band.total + '</div>';
+    }
 
     var s = g.program.syllabus;
     if (s) {

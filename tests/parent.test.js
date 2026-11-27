@@ -493,7 +493,11 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     // The badge's own name for that rung. This ladder letters its first
     // stage A, so "Level 1" would contradict the sticker.
     if (!/Stage A/i.test(t)) throw new Error('the chip does not name the stage: ' + JSON.stringify(t));
-    if (!/1\/3/.test(t)) throw new Error('the chip does not show earned of total: ' + JSON.stringify(t));
+    // Within the BAND. "1/3" would be the old behaviour, and for a
+    // toddler on an eight-stage ladder that number is the problem.
+    if (!/1\/2/.test(t)) throw new Error('the chip does not count within the band: ' + JSON.stringify(t));
+    if (/Swim Passport/.test(t))
+      throw new Error('the chip names the programme over the band: ' + JSON.stringify(t));
   });
 
   await step('opening the child draws every level, earned and not', async () => {
@@ -619,6 +623,32 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
       throw new Error('a level with no colour did not inherit the programme’s: ' + three);
   });
 
+  // The printed chart groups the ladder into bands, and the count a
+  // parent reads is the band's. A two-year-old on Swim Starters is
+  // "1 of 2" — telling them "1 of 8" is telling them their toddler has
+  // six levels to climb, which is not what they bought.
+  await step('the ladder is grouped into its printed bands', async () => {
+    const heads = await page.locator('#childGrading .bandh')
+      .evaluateAll(els => els.map(e => e.innerText.replace(/\s+/g, ' ').trim()));
+    if (heads.length !== 2)
+      throw new Error('expected 2 band headings, drew ' + heads.length
+        + ': ' + JSON.stringify(heads));
+    if (!/^Swim Starters 1\/2$/i.test(heads[0]))
+      throw new Error('the first band does not read 1/2: ' + JSON.stringify(heads[0]));
+    if (!/^Swim Basics 0\/1$/i.test(heads[1]))
+      throw new Error('the second band is wrong: ' + JSON.stringify(heads[1]));
+    // The band being climbed is marked out from the ones that follow.
+    const here = await page.locator('#childGrading .bandh.is-here').count();
+    if (here !== 1)
+      throw new Error('expected exactly one band marked as current, found ' + here);
+    // A heading must sit above the rungs it covers, not after them.
+    const yHead = await page.locator('#childGrading .bandh').nth(1)
+      .evaluate(el => el.getBoundingClientRect().top);
+    const yRow = await page.locator('#childGrading .msrow').nth(2)
+      .evaluate(el => el.getBoundingClientRect().top);
+    if (!(yHead < yRow)) throw new Error('a band heading is drawn below its own rungs');
+  });
+
   // The Swim Passport prints its stages A, B, 1 … 6, so the third rung
   // is stage 1. A child holding a sticker that says "Learn to Swim 1"
   // must not be told by the app that she is on level 3.
@@ -660,8 +690,8 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
       throw new Error('history is drawn above the ladder it precedes');
     // And it must not inflate the count: 1/3 is the current ladder.
     const chip = await page.locator('#childGrading .lvlchip').first().innerText();
-    if (!/1\/3/.test(chip))
-      throw new Error('earlier badges were counted into the current ladder: ' + chip);
+    if (!/1\/2/.test(chip))
+      throw new Error('earlier badges were counted into the current band: ' + chip);
   });
 
   await step('an ungraded child shows no collection at all', async () => {
