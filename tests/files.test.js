@@ -209,7 +209,8 @@ step('every roundel is on disk, transparent, and web-sized', () => {
                 'mas-5-frog', 'mas-6-swordfish', 'mas-7-dolphin', 'mas-badges-mark',
                 'ss-a-water-discovery', 'ss-b-water-explorer', 'ss-1-water-acclimation',
                 'ss-2-water-movement', 'ss-3-water-stamina', 'ss-4-stroke-introduction',
-                'ss-5-stroke-development', 'ss-6-stroke-mechanics', 'star-swim-mark'];
+                'ss-5-stroke-development', 'ss-6-stroke-mechanics', 'star-swim-mark',
+                'ms-self-rescue', 'ms-novice-swimmer', 'ms-competent-swimmer'];
   for (const n of want) {
     const rel = 'badges/' + n + '.png';
     if (!exists(rel)) throw new Error('missing: ' + rel);
@@ -238,7 +239,10 @@ step('every roundel is on disk, transparent, and web-sized', () => {
 step('every roundel is the circle, centred, filling its frame', () => {
   const magick = (args) => require('child_process')
     .execFileSync('convert', args, { encoding: 'utf8' }).trim();
-  for (const f of fs.readdirSync(path.join(ROOT, 'badges')).filter(f => !/-mark\.png$/.test(f))) {
+  // ms-* are the milestone awards: a ring buoy, a shield and a star.
+  // They are not roundels and must not be measured as if they were.
+  for (const f of fs.readdirSync(path.join(ROOT, 'badges'))
+                    .filter(f => !/-mark\.png$/.test(f) && !/^ms-/.test(f))) {
     const rel = path.join(ROOT, 'badges', f);
     // The opaque part of the image, measured. Must fill the canvas
     // corner to corner: anything less is margin, and margin off-centre
@@ -257,7 +261,8 @@ step('every roundel is the circle, centred, filling its frame', () => {
 
 // And the migrations point at exactly these, by the path the apps use.
 for (const [file, n] of [['supabase_grading_mas_badges.sql', 8],
-                         ['supabase_swim_passport_syllabus.sql', 9]]) {
+                         ['supabase_swim_passport_syllabus.sql', 9],
+                         ['supabase_grading_awards.sql', 11]]) {
   step(file + ' and the artwork agree on the paths', () => {
     const sql = read(file);
     // The confirm blocks' `like '/badges/%'` is not one of them.

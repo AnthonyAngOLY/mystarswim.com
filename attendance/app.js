@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 23;
+  var BUILD = 24;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1501,13 +1501,28 @@
         // button that only the office had would mean nobody records it.
         + (m.certificate && m.activated
             ? '<button class="gcert' + (m.certificate_claimed_at ? ' is-given' : '') + '"'
-              + ' data-cert="' + esc(m.id) + '"'
+              + ' data-cert="' + esc(m.id) + '" data-kind="certificate"'
               + ' data-given="' + (m.certificate_claimed_at ? '1' : '0') + '">'
               + (m.certificate_claimed_at
                   ? '\u2713 Certificate given'
                     + (m.certificate_claimed_by ? ' \u00b7 ' + esc(m.certificate_claimed_by) : '')
                   : '\u2605 Certificate waiting \u2014 tap when handed over')
               + '</button>'
+            : '')
+        // Three stages carry a second, named certificate — Self Rescue,
+        // Novice Swimmer, Competent Swimmer. Two separate buttons,
+        // because they are two separate pieces of paper and the office
+        // needs to know which of them actually reached the family.
+        + (m.award && m.activated
+            ? '<button class="gcert gaward' + (m.award_claimed_at ? ' is-given' : '') + '"'
+              + ' data-cert="' + esc(m.id) + '" data-kind="award"'
+              + ' data-given="' + (m.award_claimed_at ? '1' : '0') + '">'
+              + (m.award_icon ? '<img src="' + esc(iconUrl(m.award_icon)) + '" alt="">' : '')
+              + '<span>' + (m.award_claimed_at
+                  ? '\u2713 ' + esc(m.award) + ' given'
+                    + (m.award_claimed_by ? ' \u00b7 ' + esc(m.award_claimed_by) : '')
+                  : esc(m.award) + ' certificate waiting \u2014 tap when handed over')
+              + '</span></button>'
             : '')
         + '</div>';
     });
@@ -1536,7 +1551,8 @@
               + 'Use this only if it was recorded by mistake.')) return;
         b.disabled = true;
         rpc('claim_certificate', {
-          p_student: studentId, p_milestone: b.getAttribute('data-cert'), p_claimed: !given
+          p_student: studentId, p_milestone: b.getAttribute('data-cert'), p_claimed: !given,
+          p_kind: b.getAttribute('data-kind') || 'certificate'
         }).then(function (res) {
           if (!res || res.ok !== true) throw new Error((res && res.error) || 'Could not save that.');
           return loadGradePad(studentId);

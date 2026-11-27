@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 14;
+  var BUILD = 15;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -695,6 +695,18 @@
             ? '\u2713 Certificate collected'
             : '\u2605 A certificate is waiting \u2014 ask at the centre next time you are in.')
         + '</div>';
+    }
+    // Three stages carry a second, named certificate. It is the one a
+    // family frames, so it is drawn as itself rather than folded into
+    // the line above.
+    if (m.award && m.activated) {
+      out += '<div class="msaward">'
+        + (m.award_icon ? '<img src="' + esc(iconUrl(m.award_icon)) + '" alt="">' : '')
+        + '<span><b>' + esc(m.award) + '</b>'
+        + (m.award_claimed_at
+            ? '<small>\u2713 Collected</small>'
+            : '<small>Waiting at the centre</small>')
+        + '</span></div>';
     }
     return out;
   }

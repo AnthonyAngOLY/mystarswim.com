@@ -113,6 +113,9 @@ const LADDER = {
     { id: 'ms2', level_no: 2, label: 'B', band: 'Swim Starters', name: 'Tortoise', colour: '#159C8B',
       certificate: true, activated: false,
       certificate_claimed_at: null, certificate_claimed_by: null,
+      // This stage carries a second, named certificate as well.
+      award: 'Self Rescue', award_icon: '/badges/ms-self-rescue.png',
+      award_claimed_at: null, award_claimed_by: null,
       total: 1, done: 0, tasks: [
         { id: 't3', name: 'Glides from the wall', done: false } ] },
     { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', certificate: false, activated: false,
@@ -165,11 +168,19 @@ const RPC = {
   claim_certificate: (a) => {
     const ms = LADDER.milestones.find(m => m.id === a.p_milestone);
     if (!ms) return { ok: false, error: 'no such level' };
-    if (!ms.certificate) return { ok: false, error: 'That level does not come with a certificate.' };
+    const kind = a.p_kind || 'certificate';
+    if (kind === 'certificate' && !ms.certificate)
+      return { ok: false, error: 'That level does not come with a certificate.' };
+    if (kind === 'award' && !ms.award)
+      return { ok: false, error: 'That level does not come with an award.' };
     if (!ms.activated) return { ok: false, error: 'This swimmer has not earned that level yet.' };
-    ms.certificate_claimed_at = a.p_claimed ? new Date().toISOString() : null;
-    ms.certificate_claimed_by = 'Lee Mei Ling';
-    return { ok: true, claimed: !!a.p_claimed, by: 'Lee Mei Ling' };
+    const stamp = a.p_claimed ? new Date().toISOString() : null;
+    if (kind === 'certificate') {
+      ms.certificate_claimed_at = stamp; ms.certificate_claimed_by = 'Lee Mei Ling';
+    } else {
+      ms.award_claimed_at = stamp; ms.award_claimed_by = 'Lee Mei Ling';
+    }
+    return { ok: true, claimed: !!a.p_claimed, kind: kind, by: 'Lee Mei Ling' };
   },
 
   mark_grading_task: (a) => {

@@ -671,6 +671,40 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
   // The ladder on screen is the one their lesson type points at, so
   // without this their first two badges simply disappear from their
   // parent's phone — and a parent reads that as "we lost them".
+  await step('a milestone award is shown as itself, not as a level', async () => {
+    // The award sits inside the level's own panel, so the level has to
+    // be open for any of this to mean anything — a closed accordion
+    // shows nothing and an assertion against it passes for ever.
+    const rows = page.locator('#childGrading .msrow');
+    // Earlier steps have been tapping these open and shut, so open by
+    // checking rather than by toggling — a blind click here closed it.
+    const open = async (i) => {
+      if (await rows.nth(i).locator('.mstasks').count() === 0) {
+        await rows.nth(i).locator('.msrow-head').click();
+        await page.waitForTimeout(350);
+      }
+      if (await rows.nth(i).locator('.mstasks').count() === 0)
+        throw new Error('level ' + i + ' would not open');
+    };
+    await open(0);                                          // Guppy: earned
+    const earned = rows.nth(0).locator('.msaward');
+    if (await earned.count() !== 1)
+      throw new Error('no award shown on an earned level that carries one');
+    if (!/Self Rescue/.test(await earned.innerText()))
+      throw new Error('the award is not named: ' + JSON.stringify(await earned.innerText()));
+    if (!(await earned.locator('img').evaluate(el => el.naturalWidth) > 0))
+      throw new Error('the award badge did not load');
+    // It is not a level: it must not add a row to the ladder.
+    if (await rows.count() !== 3)
+      throw new Error('the award was drawn as another level');
+
+    // Crab carries the same award but has not been earned, so it stays
+    // hidden — an award a child has not earned is not news.
+    await open(2);
+    if (await rows.nth(2).locator('.msaward').count() !== 0)
+      throw new Error('an unearned award was shown');
+  });
+
   await step('badges from an earlier ladder are still shown', async () => {
     const row = page.locator('#childGrading .earlier');
     if (!(await row.count())) throw new Error('nothing shows what was earned earlier');

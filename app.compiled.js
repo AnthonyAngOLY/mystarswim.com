@@ -10259,7 +10259,18 @@ function GradingAdminView({
       style: {
         marginRight: 6
       }
-    }, ms.band ? `${ms.band} · ` : '', ms.label ? `Stage ${ms.label}` : `Level ${ms.level_no}`), ms.name, ms.certificate && /*#__PURE__*/React.createElement("span", {
+    }, ms.band ? `${ms.band} · ` : '', ms.label ? `Stage ${ms.label}` : `Level ${ms.level_no}`), ms.name, ms.award_name && /*#__PURE__*/React.createElement("span", {
+      title: "A named award is handed over at this level",
+      style: {
+        marginLeft: 7,
+        fontSize: 10.5,
+        fontWeight: 800,
+        padding: '2px 7px',
+        borderRadius: 999,
+        background: '#DBEAFE',
+        color: '#1E40AF'
+      }
+    }, ms.award_name.toUpperCase()), ms.certificate && /*#__PURE__*/React.createElement("span", {
       title: "A certificate can be claimed at this level",
       style: {
         marginLeft: 7,
@@ -10300,6 +10311,10 @@ function GradingAdminView({
       className: "btn btn-ghost small",
       onClick: rename('grading_milestones', ms, 'description', 'What this level means')
     }, "Description"), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost small",
+      title: "A second, named certificate handed over at this level — Self Rescue, Novice Swimmer, Competent Swimmer. Empty on a level that carries only its own.",
+      onClick: rename('grading_milestones', ms, 'award_name', `A named award handed over at level ${ms.level_no}, e.g. "Self Rescue". Empty = none.`)
+    }, "Award"), /*#__PURE__*/React.createElement("button", {
       className: "btn btn-ghost small",
       title: "The group this level belongs to on the printed chart. Progress is counted within the band, so a toddler reads 2 of 2 rather than 2 of 8.",
       onClick: rename('grading_milestones', ms, 'band', `Which band is level ${ms.level_no} in? e.g. "Swim Starters", "Swim Basics", "Swim Strokes". Empty = no bands.`)

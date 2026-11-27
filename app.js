@@ -6520,6 +6520,9 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
                     {ms.label ? `Stage ${ms.label}` : `Level ${ms.level_no}`}
                   </span>
                   {ms.name}
+                  {ms.award_name && <span title="A named award is handed over at this level"
+                    style={{marginLeft:7,fontSize:10.5,fontWeight:800,padding:'2px 7px',borderRadius:999,
+                            background:'#DBEAFE',color:'#1E40AF'}}>{ms.award_name.toUpperCase()}</span>}
                   {ms.certificate && <span title="A certificate can be claimed at this level"
                     style={{marginLeft:7,fontSize:10.5,fontWeight:800,padding:'2px 7px',borderRadius:999,
                             background:'#FEF3C7',color:'#92400E'}}>CERTIFICATE</span>}
@@ -6535,6 +6538,10 @@ function GradingAdminView({ programs, milestones, tasks, lessonTypes, onReload }
               <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>
                 <button className="btn btn-ghost small" onClick={rename('grading_milestones', ms, 'name', `Level ${ms.level_no} name`)}>Rename</button>
                 <button className="btn btn-ghost small" onClick={rename('grading_milestones', ms, 'description', 'What this level means')}>Description</button>
+                <button className="btn btn-ghost small"
+                        title="A second, named certificate handed over at this level — Self Rescue, Novice Swimmer, Competent Swimmer. Empty on a level that carries only its own."
+                        onClick={rename('grading_milestones', ms, 'award_name',
+                          `A named award handed over at level ${ms.level_no}, e.g. "Self Rescue". Empty = none.`)}>Award</button>
                 <button className="btn btn-ghost small"
                         title="The group this level belongs to on the printed chart. Progress is counted within the band, so a toddler reads 2 of 2 rather than 2 of 8."
                         onClick={rename('grading_milestones', ms, 'band',

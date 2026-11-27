@@ -310,12 +310,12 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
 
   await step('a level with no certificate offers no button', async () => {
     // Guppy was completed above and carries no certificate.
-    const n = await page.locator('#gradePad .gms').first().locator('.gcert').count();
+    const n = await page.locator('#gradePad .gms').first().locator('.gcert:not(.gaward)').count();
     if (n) throw new Error('it offers a certificate on a level that has none');
   });
 
   await step('an unearned certificate level offers no button either', async () => {
-    const n = await page.locator('#gradePad .gms').nth(1).locator('.gcert').count();
+    const n = await page.locator('#gradePad .gms').nth(1).locator('.gcert:not(.gaward)').count();
     if (n) throw new Error('it offers a certificate before the level is earned');
   });
 
@@ -325,17 +325,45 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
     await page.locator('#gradePad .gms').nth(1).locator('.gtask').first().click();
     await page.waitForTimeout(900);
     void said;
-    const btn = page.locator('#gradePad .gms').nth(1).locator('.gcert');
+    const btn = page.locator('#gradePad .gms').nth(1).locator('.gcert:not(.gaward)');
     if (!(await btn.count())) throw new Error('an earned certificate level offers nothing');
     if (!/waiting/i.test(await btn.innerText()))
       throw new Error('it does not say one is waiting: ' + JSON.stringify(await btn.innerText()));
     await btn.click();
     await page.waitForTimeout(900);
-    const after = await page.locator('#gradePad .gms').nth(1).locator('.gcert').innerText();
+    const after = await page.locator('#gradePad .gms').nth(1).locator('.gcert:not(.gaward)').innerText();
     if (!/given/i.test(after))
       throw new Error('tapping it did not record the hand-over: ' + JSON.stringify(after));
     if (!/Lee Mei Ling/.test(after))
       throw new Error('it does not name who handed it over: ' + JSON.stringify(after));
+  });
+
+  // Three stages carry a second, named certificate. They are two
+  // separate pieces of paper and the office needs to know which of them
+  // actually reached the family, so they are two separate buttons.
+  await step('a milestone award is handed over on its own', async () => {
+    const row = page.locator('#gradePad .gms').nth(1);
+    const cert = row.locator('.gcert:not(.gaward)');
+    const award = row.locator('.gcert.gaward');
+    if (await award.count() !== 1)
+      throw new Error('no award button on the stage that carries one');
+    if (await cert.count() !== 1)
+      throw new Error('the award button replaced the certificate button');
+    if (!/Self Rescue/.test(await award.innerText()))
+      throw new Error('the award is not named on its button');
+    if (!(await award.locator('img').evaluate(el => el.naturalWidth) > 0))
+      throw new Error('the award badge did not load');
+
+    // Whatever the certificate's state is by now, the award must not
+    // change it: an earlier step already handed that one over.
+    const before = await cert.innerText();
+    await award.click();
+    await page.waitForTimeout(700);
+    const after = page.locator('#gradePad .gms').nth(1);
+    if (!/Self Rescue given/.test(await after.locator('.gcert.gaward').innerText()))
+      throw new Error('handing the award over was not recorded');
+    if (await after.locator('.gcert:not(.gaward)').innerText() !== before)
+      throw new Error('handing the award over also changed the stage certificate');
   });
 
   await step('a swimmer this coach is not rostered to is refused', async () => {

@@ -401,6 +401,88 @@ const FILES = [
         throw new Error('wrong band for a child part-way through the first: ' + g.band.name);
       if (g.milestones.some(m => !m.band))
         throw new Error('a stage came back with no band');
+    } },
+  { file: 'supabase_grading_awards.sql',
+    probe: () => {
+      // Eleven certificates on paper: eight stages and three awards.
+      const awards = q(`select string_agg(m.label || '=' || m.award_name, ',' order by m.level_no)
+                          from grading_milestones m join grading_programs p
+                            on p.id = m.program_id
+                         where p.name='Swim Passport' and m.award_name is not null`);
+      if (awards !== '3=Self Rescue,4=Novice Swimmer,6=Competent Swimmer')
+        throw new Error('the awards are not on 3, 4 and 6: ' + JSON.stringify(awards));
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport'
+                 and m.icon_path like '/badges/ss-%'`) !== '8')
+        throw new Error('the stages do not all point at the redrawn roundels');
+
+      // THE PUBLISHED CONTRACT. A phone still running the old build
+      // calls claim_certificate with three arguments. That call must
+      // still resolve, and must still mean the stage certificate.
+      // There must be exactly ONE claim_certificate. `create or replace`
+      // cannot change a signature -- it adds an overload -- and with two
+      // of them a three-argument call is ambiguous and every installed
+      // phone gets "could not choose a best candidate function".
+      const n = q(`select count(*) from pg_proc where proname = 'claim_certificate'`);
+      const args = q(`select string_agg(pronargs::text, ',' order by pronargs)
+                        from pg_proc where proname = 'claim_certificate'`);
+      if (n !== '1' || args !== '4')
+        throw new Error('expected one 4-argument claim_certificate, found ' + n
+          + ' with arities ' + args + ' — a 3-argument call from an installed '
+          + 'phone is now ambiguous');
+
+      // Earn stage 3 outright, then both pieces of paper.
+      const st = q(`select id from students limit 1`);
+      const ms3 = q(`select m.id from grading_milestones m join grading_programs p
+                       on p.id=m.program_id where p.name='Swim Passport' and m.label='3'`);
+      q(`insert into student_task_marks (student_id, task_id, marked_by_name)
+           select '${st}', t.id, 'Coach Sally' from grading_tasks t
+            where t.milestone_id = '${ms3}' on conflict do nothing`);
+      if (q(`select count(*) from student_milestones
+              where student_id='${st}' and milestone_id='${ms3}' and revoked_at is null`) !== '1')
+        throw new Error('ticking every task did not activate the stage');
+
+      // Three arguments: the stage certificate, as it has always meant.
+      if (q(`select claim_certificate('${st}','${ms3}',true)->>'kind'`) !== 'certificate')
+        throw new Error('a three-argument call no longer means the certificate');
+      if (q(`select certificate_claimed_at is not null from student_milestones
+              where student_id='${st}' and milestone_id='${ms3}'`) !== 't')
+        throw new Error('the certificate was not recorded');
+      if (q(`select award_claimed_at is null from student_milestones
+              where student_id='${st}' and milestone_id='${ms3}'`) !== 't')
+        throw new Error('handing over the certificate also marked the award given');
+
+      // Four arguments: the award, recorded separately.
+      if (q(`select claim_certificate('${st}','${ms3}',true,'award')->>'kind'`) !== 'award')
+        throw new Error('the award could not be handed over');
+      if (q(`select award_claimed_at is not null from student_milestones
+              where student_id='${st}' and milestone_id='${ms3}'`) !== 't')
+        throw new Error('the award was not recorded');
+
+      // And a stage with no award refuses one.
+      const ms1 = q(`select m.id from grading_milestones m join grading_programs p
+                       on p.id=m.program_id where p.name='Swim Passport' and m.label='1'`);
+      if (!/does not come with an award/i.test(
+            q(`select claim_certificate('${st}','${ms1}',true,'award')->>'error'`)))
+        throw new Error('a stage with no award handed one over anyway');
+
+      // It reaches the apps.
+      const g = JSON.parse(q(`select student_grading('${st}')`));
+      const m3 = g.milestones.find(m => m.label === '3');
+      if (!m3 || m3.award !== 'Self Rescue' || !m3.award_icon)
+        throw new Error('the award does not reach the apps: ' + JSON.stringify(m3 && m3.award));
+      if (!m3.award_claimed_at) throw new Error('the claim does not reach the apps');
+
+      // Put the child back as they were. This probe had to earn a stage
+      // outright to have anything to hand over, and the ladder steps
+      // further down assume nobody has climbed anything yet — a probe
+      // that leaves a child mid-ladder breaks six tests that are not
+      // about awards at all.
+      q(`delete from student_task_marks where student_id='${st}'
+           and task_id in (select id from grading_tasks where milestone_id='${ms3}')`);
+      q(`delete from student_milestones where student_id='${st}' and milestone_id='${ms3}'`);
+      if (q(`select count(*) from student_milestones where student_id='${st}'`) !== '0')
+        throw new Error('the probe left the child holding a stage');
     } }
 ];
 

@@ -67,7 +67,10 @@ const LADDER = {
   milestones: [
     // Labelled A, B, 1 -- the Swim Passport shape, where the sticker and
     // the rung deliberately disagree.
-    { id: 'ms1', level_no: 1, label: 'A', band: 'Swim Starters', name: 'Guppy', icon: '/badges/mas-1-starfish.png',
+    { id: 'ms1', level_no: 1, label: 'A', band: 'Swim Starters', name: 'Guppy',
+      award: 'Self Rescue', award_icon: '/badges/ms-self-rescue.png',
+      award_claimed_at: null,
+      icon: '/badges/mas-1-starfish.png',
       colour: '#F0713C', certificate: false,
       activated: true, total: 2, done: 2, tasks: [
         { id: 't1', name: 'Submerges whole head', done: true },
@@ -85,7 +88,10 @@ const LADDER = {
         { id: 'b3', name: 'Treads water 30 seconds', done: false },
         { id: 'b4', name: 'Retrieves an object', done: false },
         { id: 'b5', name: 'Swims 25 metres', done: false } ] },
-    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', icon: '/badges/mas-3-guppy.png',
+    // This stage carries a second, named certificate as well.
+    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab',
+      award: 'Self Rescue', award_icon: '/badges/ms-self-rescue.png',
+      award_claimed_at: null, icon: '/badges/mas-3-guppy.png',
       colour: null, certificate: true,
       activated: false, total: 4, done: 0, tasks: [
         { id: 'c1', name: 'Tumble turn', done: false } ] }
