@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 15;
+  var BUILD = 16;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -643,6 +643,10 @@
                       : (m.activated ? '\u2605' : '\u25cb')) + '</span>'
         +   '<span class="msrow-nm"><b>' + esc(m.name) + '</b>'
         +     '<span>' + esc(stageWord(m.label, m.level_no))
+        // Starfish is what the certificate says; Water Acclimation is
+        // what the chart on its back says. Both are in print, so both
+        // are here — the child's name leads.
+        +       (m.formal_name ? ' \u00b7 ' + esc(m.formal_name) : '')
         +       (m.activated ? ' \u00b7 earned' : '') + '</span></span>'
         +   '<span class="msrow-chev">' + (open ? '\u25b2' : '\u25bc') + '</span>'
         + '</div>'

@@ -89,7 +89,7 @@ const LADDER = {
         { id: 'b4', name: 'Retrieves an object', done: false },
         { id: 'b5', name: 'Swims 25 metres', done: false } ] },
     // This stage carries a second, named certificate as well.
-    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab',
+    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', formal_name: 'Water Stamina',
       award: 'Self Rescue', award_icon: '/badges/ms-self-rescue.png',
       award_claimed_at: null, icon: '/badges/mas-3-guppy.png',
       colour: null, certificate: true,

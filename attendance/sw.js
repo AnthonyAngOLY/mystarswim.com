@@ -5,7 +5,7 @@
 // punch must reach the server to get a server timestamp.
 // Must match BUILD in app.js — the database checks that number, and
 // this names the cache that would otherwise keep an old build alive.
-var BUILD = 24;
+var BUILD = 25;
 var CACHE = 'ssb-attendance-v' + BUILD;
 var SHELL = [
   './', './index.html', './app.js', './config.js', './manifest.json',

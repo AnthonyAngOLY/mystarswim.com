@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 24;
+  var BUILD = 25;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1479,7 +1479,9 @@
                 + '<img src="' + esc(iconUrl(m.icon)) + '" alt="'
                 + esc(stageWord(m.label, m.level_no)) + '"></span>'
               : '<span class="gms-lvl">' + esc(stageTag(m.label, m.level_no)) + '</span>')
-        +   '<span class="gms-nm">' + esc(m.name) + '</span>'
+        +   '<span class="gms-nm">' + esc(m.name)
+        +     (m.formal_name ? '<small>' + esc(m.formal_name) + '</small>' : '')
+        +   '</span>'
         +   (m.certificate ? '<span class="gms-cert" title="A certificate can be claimed">\u2605</span>' : '')
         +   '<span class="gms-count">' + done + '/' + total + '</span>'
         + '</div>'

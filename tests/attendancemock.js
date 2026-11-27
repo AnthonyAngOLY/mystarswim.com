@@ -118,7 +118,7 @@ const LADDER = {
       award_claimed_at: null, award_claimed_by: null,
       total: 1, done: 0, tasks: [
         { id: 't3', name: 'Glides from the wall', done: false } ] },
-    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', certificate: false, activated: false,
+    { id: 'ms3', level_no: 3, label: '1', band: 'Swim Basics', name: 'Crab', formal_name: 'Water Stamina', certificate: false, activated: false,
       total: 0, done: 0, tasks: [] }
   ]
 };

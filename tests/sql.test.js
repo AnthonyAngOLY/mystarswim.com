@@ -483,6 +483,46 @@ const FILES = [
       q(`delete from student_milestones where student_id='${st}' and milestone_id='${ms3}'`);
       if (q(`select count(*) from student_milestones where student_id='${st}'`) !== '0')
         throw new Error('the probe left the child holding a stage');
+    } },
+  { file: 'supabase_grading_friendly_names.sql',
+    probe: () => {
+      const lad = q(`select string_agg(m.label || '=' || m.name, ',' order by m.level_no)
+                       from grading_milestones m join grading_programs p
+                         on p.id = m.program_id where p.name='Swim Passport'`);
+      if (lad !== 'A=Water Discovery,B=Water Explorer,1=Starfish,2=Crab,3=Octopus,'
+                + '4=Turtle,5=Whale,6=Ray')
+        throw new Error('the ladder does not read as the certificates do: '
+          + JSON.stringify(lad));
+      // The syllabus name is kept, not thrown away — the chart still uses it.
+      const formal = q(`select string_agg(m.label || '=' || m.formal_name, ',' order by m.level_no)
+                          from grading_milestones m join grading_programs p
+                            on p.id = m.program_id
+                           where p.name='Swim Passport' and m.formal_name is not null`);
+      if (formal !== '1=Water Acclimation,2=Water Movement,3=Water Stamina,'
+                   + '4=Stroke Introduction,5=Stroke Development,6=Stroke Mechanics')
+        throw new Error('the syllabus names were lost: ' + JSON.stringify(formal));
+      // A and B already agree, so they must carry one name, not a duplicate.
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport'
+                 and m.label in ('A','B') and m.formal_name is not null`) !== '0')
+        throw new Error('A or B was given a second name it does not have in print');
+      // A rename must not disturb the awards, which hang off the same rows.
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport'
+                 and m.award_name is not null`) !== '3')
+        throw new Error('the rename cost an award');
+      // The band prefix is gone from the descriptions; band is its own column.
+      if (q(`select count(*) from grading_milestones m join grading_programs p
+               on p.id=m.program_id where p.name='Swim Passport'
+                 and m.description like 'Swim %'`) !== '0')
+        throw new Error('a description still repeats its band');
+
+      // And both names reach the apps on the same stage.
+      const g = JSON.parse(q(`select student_grading((select id from students limit 1))`));
+      const m3 = g.milestones.find(m => m.label === '3');
+      if (!m3 || m3.name !== 'Octopus' || m3.formal_name !== 'Water Stamina')
+        throw new Error('stage 3 does not carry both names: '
+          + JSON.stringify(m3 && [m3.name, m3.formal_name]));
     } }
 ];
 

@@ -671,6 +671,28 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
   // The ladder on screen is the one their lesson type points at, so
   // without this their first two badges simply disappear from their
   // parent's phone — and a parent reads that as "we lost them".
+  // The certificate says Crab; the chart on its back says Water
+  // Stamina. Both are in print and both belong on the screen, with the
+  // child's name leading — a parent holding the certificate should not
+  // have to work out which rung it is.
+  await step('a level carries both the names it is printed under', async () => {
+    const row = page.locator('#childGrading .msrow').nth(2);
+    const head = await row.locator('.msrow-nm').innerText();
+    if (!/Crab/.test(head))
+      throw new Error('the child\'s name is missing: ' + JSON.stringify(head));
+    if (!/Water Stamina/.test(head))
+      throw new Error('the syllabus name is missing: ' + JSON.stringify(head));
+    // Leading, not trailing: the friendly name is the headline.
+    if (head.indexOf('Crab') > head.indexOf('Water Stamina'))
+      throw new Error('the syllabus name leads over the child\'s: ' + JSON.stringify(head));
+    // And a stage with only one name must not print a stray separator.
+    const first = await page.locator('#childGrading .msrow').nth(0)
+      .locator('.msrow-nm span').innerText();
+    if (/\u00b7\s*\u00b7|\u00b7\s*$/.test(first))
+      throw new Error('a stage with one name printed an empty separator: '
+        + JSON.stringify(first));
+  });
+
   await step('a milestone award is shown as itself, not as a level', async () => {
     // The award sits inside the level's own panel, so the level has to
     // be open for any of this to mean anything — a closed accordion
