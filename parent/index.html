@@ -177,6 +177,22 @@
   .earlier-b b{display:block; font-size:12.5px; line-height:1.25}
   .earlier-b small{display:block; font-size:10.5px; color:var(--muted)}
 
+  /* The syllabus a swimmer was on before. Kept whole and kept quiet:
+     a parent who has not changed anything should barely register it,
+     and a parent whose child moved mid-term should be able to open it
+     and find every tick exactly where it was left. */
+  .prevsyl{margin:18px 0 4px; border-top:1px solid var(--border); padding-top:14px}
+  .prevsyl-h b{display:block; font-size:13px}
+  .prevsyl-h small{display:block; font-size:11.5px; color:var(--muted);
+    line-height:1.45; margin-top:2px}
+  .prevsyl-t{-webkit-appearance:none; appearance:none; width:100%; margin-top:9px;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    font:inherit; font-size:12.5px; font-weight:700; color:var(--primary);
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:9px 12px; cursor:pointer; text-align:left}
+  .prevsyl-t span{font-size:10px; opacity:.7}
+  .prevsyl-b{margin-top:10px; opacity:.92}
+
   main{padding:14px 16px 90px; max-width:520px; margin:0 auto}
   .card{
     background:var(--surface); border:1px solid var(--border);

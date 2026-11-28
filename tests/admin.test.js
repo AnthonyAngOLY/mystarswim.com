@@ -965,7 +965,10 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
 
   await step('a link that is not a link is refused before it is saved', async () => {
     await page.evaluate(() => fetch('/__patches').then(r => r.json()));
-    await page.locator('#gr-host button').filter({ hasText: 'Syllabus' }).first().click();
+    // "Source" since the screen itself became Syllabus: the panel is
+    // where a syllabus comes FROM, and two things called Syllabus on one
+    // card is how somebody edits the wrong one.
+    await page.locator('#gr-host button').filter({ hasText: /^Source$/ }).first().click();
     await page.waitForTimeout(400);
     const boxes = await page.locator('#gr-host input.input, #gr-host textarea').count();
     if (boxes !== 5) throw new Error('expected five boxes, found ' + boxes);
@@ -1001,6 +1004,82 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
         + JSON.stringify(body.syllabus_note));
     if (await page.locator('#gr-host textarea').count())
       throw new Error('the panel stayed open after saving');
+  });
+
+  // ── Deleting a syllabus ───────────────────────────────────────────────
+  // Two stages, and the second one is a word somebody has to type. The
+  // thing worth testing is not that the button exists -- it is that the
+  // screen never supplies the word itself, and that a syllabus children
+  // have been assessed on cannot be deleted at all.
+  await step('a syllabus children are on says so before anything is changed', async () => {
+    await page.locator('#gr-host button').filter({ hasText: 'Swim Passport' }).first().click();
+    await page.waitForTimeout(600);
+    const t = await page.locator('#gr-host').innerText();
+    if (!/3 swimmers with\s+progress recorded/i.test(t.replace(/\n/g, ' ')))
+      throw new Error('the screen does not say who is on it: '
+        + JSON.stringify(t.replace(/\n/g, ' ').slice(0, 400)));
+    // And it is a reminder, not a gate: everything stays editable.
+    const rename = page.locator('#gr-host button').filter({ hasText: /^Rename$/ }).first();
+    if (await rename.isDisabled())
+      throw new Error('the notice disabled the editing it was only meant to flag');
+  });
+
+  await step('delete opens a warning rather than deleting', async () => {
+    await page.evaluate(() => fetch('/__deletes').then(r => r.json()));
+    await page.locator('#gr-host button').filter({ hasText: /^Delete$/ }).first().click();
+    await page.waitForTimeout(400);
+    const t = await page.locator('#gr-host').innerText();
+    if (!/Delete .Swim Passport.\?/.test(t))
+      throw new Error('no warning: ' + JSON.stringify(t.slice(0, 300)));
+    const sent = await page.evaluate(() => fetch('/__deletes').then(r => r.json()));
+    if (sent.length)
+      throw new Error('pressing Delete once already called the database');
+  });
+
+  await step('and on a syllabus children are on, there is no way to confirm it', async () => {
+    const t = await page.locator('#gr-host').innerText();
+    if (!/cannot be deleted/i.test(t))
+      throw new Error('it offers to delete a syllabus holding records: '
+        + JSON.stringify(t.slice(0, 400)));
+    if (!/Turn it off instead/i.test(t))
+      throw new Error('it refuses without saying what to do instead');
+    if (await page.locator('#gr-host input[placeholder="type delete"]').count())
+      throw new Error('the confirmation box is offered for a syllabus that cannot be deleted');
+  });
+
+  await step('an unused one asks for the word, and will not act without it', async () => {
+    await page.locator('#gr-host button').filter({ hasText: /^Cancel$/ }).first().click();
+    await page.locator('#gr-host button').filter({ hasText: 'Water Discovery' }).first().click();
+    await page.waitForTimeout(600);
+    await page.locator('#gr-host button').filter({ hasText: /^Delete$/ }).first().click();
+    await page.waitForTimeout(400);
+    const box = page.locator('#gr-host input[placeholder="type delete"]');
+    if (!await box.count()) throw new Error('no confirmation box on a deletable syllabus');
+    const go = page.locator('#gr-host button').filter({ hasText: 'Delete for good' }).first();
+    if (!await go.isDisabled())
+      throw new Error('it would delete with nothing typed');
+    await box.fill('yes');
+    await page.waitForTimeout(200);
+    if (!await go.isDisabled())
+      throw new Error('the wrong word was accepted');
+    const sent = await page.evaluate(() => fetch('/__deletes').then(r => r.json()));
+    if (sent.length) throw new Error('it called the database while the word was wrong');
+  });
+
+  await step('and the word somebody typed is what reaches the database', async () => {
+    await page.locator('#gr-host input[placeholder="type delete"]').fill('delete');
+    await page.waitForTimeout(200);
+    await page.locator('#gr-host button').filter({ hasText: 'Delete for good' }).first().click();
+    await page.waitForTimeout(700);
+    const sent = await page.evaluate(() => fetch('/__deletes').then(r => r.json()));
+    if (sent.length !== 1)
+      throw new Error('expected one call, saw ' + sent.length);
+    if (sent[0].p_program !== 'pr2')
+      throw new Error('it deleted the wrong syllabus: ' + JSON.stringify(sent[0]));
+    // Passed through, not supplied. A screen that sends 'delete' of its
+    // own accord has a confirmation that confirms nothing.
+    if (sent[0].p_confirm !== 'delete')
+      throw new Error('the typed word did not reach the database: ' + JSON.stringify(sent[0]));
   });
 
   await step('a level with no tasks says it awards nothing', async () => {

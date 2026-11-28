@@ -523,6 +523,184 @@ const FILES = [
       if (!m3 || m3.name !== 'Octopus' || m3.formal_name !== 'Water Stamina')
         throw new Error('stage 3 does not carry both names: '
           + JSON.stringify(m3 && [m3.name, m3.formal_name]));
+    } },
+  { file: 'supabase_swim_passport_wording.sql',
+    probe: () => {
+      // The printed passport is the authority. These are the lines that
+      // were wrong, taken from the PDF Anthony sent, not from the seed.
+      const line = (label, n) =>
+        q(`select t.name from grading_tasks t
+             join grading_milestones m on m.id = t.milestone_id
+             join grading_programs p on p.id = m.program_id
+            where p.name='Swim Passport' and m.label='${label}' and t.sort_order=${n}`);
+      for (const [label, n, want] of [
+        ['A', 8, 'Water exit assisted'],
+        ['1', 2, 'Front glide assisted, to wall, 2 meters'],
+        ['2', 2, 'Front glide 5 meters'],
+        ['3', 2, 'Swim on front 15 meters'],
+        ['3', 7, 'Jump, swim, turn, swim, grab 10 meters'],
+        ['3', 8, 'Swim, float, swim 25 meters'],
+        ['4', 4, 'Back crawl swim 15 meters'],
+        ['6', 4, 'Back crawl pull & flip turn, 2 x 25 meters']]) {
+        const got = line(label, n);
+        if (got !== want)
+          throw new Error(`stage ${label} line ${n} reads ${JSON.stringify(got)}, `
+            + `the passport prints ${JSON.stringify(want)}`);
+      }
+      // Level 2's missing line, in the position the book puts it.
+      if (line('2', 6) !== 'Water exit independently')
+        throw new Error('Level 2 still has no "Water exit independently" at 6: '
+          + JSON.stringify(line('2', 6)));
+      if (line('2', 10) !== 'Swim, float, swim 5 meters')
+        throw new Error('the four lines below it did not move down: '
+          + JSON.stringify(line('2', 10)));
+      const counts = q(`select string_agg(x.label || ':' || x.n, ' ' order by x.level_no)
+                          from (select m.label, m.level_no,
+                                       (select count(*) from grading_tasks t
+                                         where t.milestone_id = m.id and t.is_active)::text n
+                                  from grading_milestones m
+                                  join grading_programs p on p.id = m.program_id
+                                 where p.name='Swim Passport' and m.is_active) x`);
+      if (counts !== 'A:9 B:9 1:9 2:10 3:8 4:8 5:8 6:8')
+        throw new Error('the stages do not hold what the passport prints: ' + counts);
+      // Nothing left in two spellings, nothing left calling it Backstroke.
+      if (q(`select count(*) from grading_tasks t
+               join grading_milestones m on m.id=t.milestone_id
+               join grading_programs p on p.id=m.program_id
+              where p.name='Swim Passport' and t.name like '%metres%'`) !== '0')
+        throw new Error('a task still spells it "metres" while the book says "meters"');
+      if (q(`select count(*) from grading_tasks t
+               join grading_milestones m on m.id=t.milestone_id
+               join grading_programs p on p.id=m.program_id
+              where p.name='Swim Passport' and t.name ~ '^Backstroke'`) !== '0')
+        throw new Error('a stroke is still called Backstroke; the chart says Back crawl');
+
+      // Running it twice must not insert the line twice or shift again.
+      // This is the fault the guard exists for and it is cheap to prove
+      // here, where the failure names the file, rather than at the end.
+      psql(`-d ${DB} -v ON_ERROR_STOP=1 -q -f `
+         + path.join(WORK, 'supabase_swim_passport_wording.sql'));
+      if (q(`select count(*) from grading_tasks t
+               join grading_milestones m on m.id=t.milestone_id
+               join grading_programs p on p.id=m.program_id
+              where p.name='Swim Passport' and m.label='2'`) !== '10')
+        throw new Error('a second run changed Level 2 — the file is not re-runnable');
+    } },
+  { file: 'supabase_syllabus_switch.sql',
+    probe: () => {
+      const sp  = q(`select id from grading_programs where name='Swim Passport'`);
+      const mas = q(`select id from grading_programs where name='MAS BADGES'`);
+      const stu = q(`select id from students limit 1`);
+      const was = q(`select grading_program_id from scheduler_lesson_types limit 1`);
+      q(`update scheduler_lesson_types set grading_program_id='${sp}'`);
+
+      // ── 1. The word, and nothing but the word ──────────────────────
+      // Aimed at an id that does not exist, deliberately. The first
+      // draft of this pointed the capitals-and-spaces case at the real
+      // Swim Passport, which at that moment had no ticks on it -- so the
+      // assertion passed by DELETING THE SYLLABUS, and every step after
+      // it failed. A test for a confirmation has to be written so that
+      // the confirmation succeeding is not a catastrophe.
+      const ghost = q(`select gen_random_uuid()`);
+      if (q(`select delete_grading_program('${sp}','yes')->>'error'`)
+            !== 'Type the word delete to confirm.')
+        throw new Error('a syllabus was deletable without typing the word');
+      if (q(`select delete_grading_program('${sp}','')->>'error'`)
+            !== 'Type the word delete to confirm.')
+        throw new Error('an empty confirmation got past the guard');
+      // Typed in a hurry is still typed. " Delete " is the word, and
+      // getting as far as "no such syllabus" is how we know it was read.
+      if (q(`select delete_grading_program('${ghost}',' Delete ')->>'error'`)
+            !== 'No such syllabus.')
+        throw new Error('the word was rejected over capitals and spaces, '
+          + 'which teaches people the confirmation is broken');
+      if (q(`select count(*) from grading_programs where id='${sp}'`) !== '1')
+        throw new Error('the word tests deleted the syllabus they were testing');
+
+      // ── 2. Usage names what is pointed at it, and does not gate ────
+      let u = JSON.parse(q(`select grading_program_usage('${sp}')`));
+      if (!Array.isArray(u.lesson_types) || u.lesson_types.length < 1)
+        throw new Error('usage did not name the lesson type using this syllabus: '
+          + JSON.stringify(u));
+      if (u.swimmers !== 0 || u.deletable !== true)
+        throw new Error('an untaught syllabus is reported as in use: '
+          + JSON.stringify([u.swimmers, u.deletable]));
+
+      // ── 3. One tick and it is a record, not a draft ────────────────
+      q(`insert into student_task_marks (student_id, task_id, marked_by_name)
+           select '${stu}', t.id, 'Coach Sally' from grading_tasks t
+            join grading_milestones m on m.id = t.milestone_id
+           where m.program_id='${sp}' and m.label='A' and t.sort_order=1`);
+      u = JSON.parse(q(`select grading_program_usage('${sp}')`));
+      if (u.swimmers !== 1 || u.deletable !== false)
+        throw new Error('a syllabus a child has been assessed on is still deletable');
+      const refused = q(`select delete_grading_program('${sp}','delete')->>'error'`);
+      if (!/1 swimmer\(s\) have progress/.test(refused || ''))
+        throw new Error('the refusal does not say who it is protecting: '
+          + JSON.stringify(refused));
+      if (q(`select count(*) from grading_programs where id='${sp}'`) !== '1')
+        throw new Error('it refused and deleted it anyway');
+
+      // ── 4. Moving syllabus keeps the old one, in full ──────────────
+      q(`update scheduler_lesson_types set grading_program_id='${mas}'`);
+      const moved = JSON.parse(q(`select student_grading('${stu}')`));
+      if (moved.program.name !== 'MAS BADGES')
+        throw new Error('the swimmer did not move: ' + moved.program.name);
+      if (!Array.isArray(moved.previous) || moved.previous.length !== 1)
+        throw new Error('the syllabus they came off is not carried: '
+          + JSON.stringify(moved.previous && moved.previous.length));
+      const prev = moved.previous[0];
+      if (prev.name !== 'Swim Passport')
+        throw new Error('the wrong syllabus is remembered: ' + prev.name);
+      if (!prev.last_seen)
+        throw new Error('no date on the previous syllabus, so the app cannot say when');
+      const pa = (prev.milestones || []).find(m => m.label === 'A');
+      if (!pa || pa.done !== 1 || pa.total !== 9)
+        throw new Error('the previous ladder lost its ticks: '
+          + JSON.stringify(pa && [pa.done, pa.total]));
+      if (!(pa.tasks || []).some(t => t.done))
+        throw new Error('the tick is not readable on the stage it was made against');
+      // Printed order, not done-first: a parent follows the book.
+      if (pa.tasks[0].name !== 'Blow bubbles on surface, assisted')
+        throw new Error('the previous ladder is not in printed order: '
+          + pa.tasks[0].name);
+
+      // ── 5. Reinstating it removes the remark, with nothing to undo ──
+      q(`update scheduler_lesson_types set grading_program_id='${sp}'`);
+      const back = JSON.parse(q(`select student_grading('${stu}')`));
+      if (back.program.name !== 'Swim Passport')
+        throw new Error('the swimmer did not come back');
+      if ((back.previous || []).length !== 0)
+        throw new Error('the old syllabus is still announced after it was reinstated: '
+          + JSON.stringify(back.previous.map(p => p.name)));
+      // And the current ladder is in printed order too.
+      const cur = back.milestones.find(m => m.label === 'A');
+      if (cur.tasks[0].name !== 'Blow bubbles on surface, assisted')
+        throw new Error('the current ladder reorders itself around what is done');
+
+      // ── 6. A syllabus nobody has used does delete ──────────────────
+      q(`insert into grading_programs (name, sort_order) values ('Scratch Syllabus', 99);
+         insert into grading_milestones (program_id, level_no, name)
+           select id, 1, 'Scratch Stage' from grading_programs where name='Scratch Syllabus';
+         insert into grading_tasks (milestone_id, name, sort_order)
+           select m.id, 'Scratch Task', 1 from grading_milestones m
+            join grading_programs p on p.id = m.program_id
+           where p.name='Scratch Syllabus'`);
+      const scr = q(`select id from grading_programs where name='Scratch Syllabus'`);
+      const gone = JSON.parse(q(`select delete_grading_program('${scr}','delete')`));
+      if (gone.ok !== true || gone.stages !== 1 || gone.tasks !== 1)
+        throw new Error('deleting an unused syllabus did not work: ' + JSON.stringify(gone));
+      if (q(`select count(*) from grading_programs where name='Scratch Syllabus'`) !== '0')
+        throw new Error('it reported success and left the row');
+      if (q(`select count(*) from grading_milestones where program_id='${scr}'`) !== '0')
+        throw new Error('the stages outlived the syllabus');
+
+      // ── put the fixture back the way the later steps expect it ─────
+      q(`delete from student_task_marks where student_id='${stu}'`);
+      q(`update scheduler_lesson_types set grading_program_id='${was}'`);
+      if (q(`select count(*) from student_task_marks where removed_at is null`) !== '0')
+        throw new Error('this probe left ticks behind and the steps after it '
+          + 'will assert against a dirty fixture');
     } }
 ];
 
@@ -900,16 +1078,22 @@ function q(sql) {
 
     // Up to here nothing has added `colour`, `label`, `band` or
     // `award_name`, so every one of these is out of order.
-    for (const [f, wants] of [['supabase_grading_syllabus.sql',       'colour'],
-                              ['supabase_grading_stage_labels.sql',   'syllabus_body'],
-                              ['supabase_grading_bands.sql',          'label'],
-                              ['supabase_grading_awards.sql',         'band'],
-                              ['supabase_grading_friendly_names.sql', 'band']]) {
+    // What each file must say when it is run too early. A file that
+    // refuses for some other reason has not been shown to have a guard.
+    const col = (c) => ({ why: c, says: new RegExp(c + ' does not exist') });
+    for (const [f, wants] of [
+        ['supabase_grading_syllabus.sql',       col('colour')],
+        ['supabase_grading_stage_labels.sql',   col('syllabus_body')],
+        ['supabase_grading_bands.sql',          col('label')],
+        ['supabase_grading_awards.sql',         col('band')],
+        ['supabase_grading_friendly_names.sql', col('band')],
+        ['supabase_syllabus_switch.sql',        col('band')],
+        ['supabase_swim_passport_wording.sql',  col('formal_name')]]) {
       const r = load(f);
       if (r.status === 0)
-        throw new Error(f + ' installed without ' + wants + ' — it will fail on '
+        throw new Error(f + ' installed without ' + wants.why + ' — it will fail on '
           + 'its first call instead, which shows as a blank ladder');
-      if (!new RegExp(wants + ' does not exist').test(r.stderr || ''))
+      if (!wants.says.test(r.stderr || ''))
         throw new Error(f + ' refused for some other reason: '
           + (r.stderr || '').trim().split('\n').slice(-2).join(' | '));
     }

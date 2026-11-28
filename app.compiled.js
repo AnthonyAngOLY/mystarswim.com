@@ -7717,7 +7717,7 @@ function App({
     ariaLabel: "Settings section",
     value: adminSection,
     onChange: setAdminSection,
-    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['grading', 'Grading'], ['classPolicy', 'Credits & Classes'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isOwner ? [['retention', 'Documents']] : [])]
+    items: [['summary', 'Summary'], ['branches', 'Branches'], ['pools', 'Pools & Hours'], ['instructors', 'Instructors'], ['lessonTypes', 'Lesson Types'], ['grading', 'Syllabus'], ['classPolicy', 'Credits & Classes'], ['programme', 'Programme'], ['terms', 'Terms'], ['billingTerms', 'Billing Terms'], ['products', 'Products'], ['paymentMethods', 'Payment Methods'], ['invoiceSettings', 'Invoice Numbering'], ['website', 'Website'], ['users', 'Users'], ...(isOwner ? [['retention', 'Documents']] : [])]
   }), /*#__PURE__*/React.createElement("div", {
     className: "side-content"
   }, adminSection === 'retention' && isOwner && /*#__PURE__*/React.createElement(DocRetentionView, {
@@ -9800,6 +9800,17 @@ function GradingAdminView({
   // levels that are the point of the page.
   const [sylOpen, setSylOpen] = useState(false);
   const [syl, setSyl] = useState(null);
+  // The two-stage delete. `delArm` is the syllabus the warning is open
+  // for; `delWord` is what has been typed into it. Both are thrown away
+  // whenever the selected syllabus changes, so a warning opened on one
+  // can never be confirmed against another.
+  const [delArm, setDelArm] = useState(null);
+  const [delWord, setDelWord] = useState('');
+  // What the database says is using this syllabus. Advisory only — it
+  // never stops an edit. The office usually knows exactly what it is
+  // changing, and being blocked by your own tool is worse than being
+  // told.
+  const [usage, setUsage] = useState(null);
   const prog = (programs || []).find(p => p.id === progId) || (programs || [])[0] || null;
   const levels = (milestones || []).filter(m => m.program_id === prog?.id).sort((a, b) => (a.level_no || 0) - (b.level_no || 0));
   const tasksFor = msId => (tasks || []).filter(t => t.milestone_id === msId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
@@ -9818,8 +9829,47 @@ function GradingAdminView({
       setBusy(false);
     }
   }
+
+  // How many swimmers have been assessed on this syllabus. The lesson
+  // types are in memory already; this is the part only the database
+  // knows, and it is what turns "turn it off" from advice into a reason.
+  useEffect(() => {
+    let live = true;
+    setUsage(null);
+    setDelArm(null);
+    setDelWord('');
+    if (!prog?.id) return;
+    rpcCall('grading_program_usage', {
+      p_program: prog.id
+    }).then(u => {
+      if (live) setUsage(u);
+    })
+    // Before supabase_syllabus_switch.sql has been run. The page is
+    // the page; the notice is extra.
+    .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [prog?.id]);
+
+  // Two stages, and the second one is the database's. The word is typed
+  // here and passed through to delete_grading_program, which refuses
+  // without it — so a confirmation that only existed in this component
+  // could not be skipped by anything calling the function directly.
+  async function confirmDelete() {
+    if (!prog) return;
+    await run(async () => {
+      await rpcCall('delete_grading_program', {
+        p_program: prog.id,
+        p_confirm: delWord
+      });
+      setDelArm(null);
+      setDelWord('');
+      setProgId(null);
+    });
+  }
   async function addProgram() {
-    const name = prompt('Programme name — e.g. "Swim Passport"');
+    const name = prompt('Syllabus name — e.g. "Swim Passport"');
     if (!name || !name.trim()) return;
     await run(async () => {
       const made = await insertRows('grading_programs', {
@@ -9983,17 +10033,17 @@ function GradingAdminView({
       fontWeight: 800,
       marginBottom: 6
     }
-  }, "No grading programmes yet"), /*#__PURE__*/React.createElement("div", {
+  }, "No syllabuses yet"), /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginBottom: 12,
       lineHeight: 1.6
     }
-  }, "Run ", /*#__PURE__*/React.createElement("b", null, "supabase_grading_programs.sql"), " to create the tables and seed three programmes to edit, or add one here and build it up."), /*#__PURE__*/React.createElement("button", {
+  }, "Run ", /*#__PURE__*/React.createElement("b", null, "supabase_grading_programs.sql"), " to create the tables and seed three syllabuses to edit, or add one here and build it up."), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-primary",
     onClick: addProgram,
     disabled: busy
-  }, "Add a programme"), err && /*#__PURE__*/React.createElement("div", {
+  }, "Add a syllabus"), err && /*#__PURE__*/React.createElement("div", {
     className: "small",
     style: {
       color: '#DC2626',
@@ -10047,7 +10097,7 @@ function GradingAdminView({
     className: "btn btn-ghost small",
     onClick: addProgram,
     disabled: busy
-  }, "+ Programme"))), prog && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  }, "+ Syllabus"))), prog && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "card",
     style: {
       marginBottom: 12
@@ -10076,11 +10126,17 @@ function GradingAdminView({
     style: {
       marginTop: 4
     }
-  }, levels.length, " level", levels.length === 1 ? '' : 's', " ·", ' ', usedBy(prog.id).length ? `graded by ${usedBy(prog.id).map(l => l.name).join(', ')}` : /*#__PURE__*/React.createElement("b", {
+  }, levels.length, " level", levels.length === 1 ? '' : 's', " ·", ' ', usedBy(prog.id).length ? `taught on ${usedBy(prog.id).map(l => l.name).join(', ')}` : /*#__PURE__*/React.createElement("b", {
     style: {
       color: '#B45309'
     }
-  }, "no lesson type points at this — it grades nobody")), sylLine(prog) && /*#__PURE__*/React.createElement("div", {
+  }, "no lesson type points at this — nobody is on it"), usage && usage.program?.id === prog.id && usage.swimmers > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, ' · ', /*#__PURE__*/React.createElement("b", null, usage.swimmers, " swimmer", usage.swimmers === 1 ? '' : 's', " with progress recorded"))), usage && usage.program?.id === prog.id && usage.swimmers > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      marginTop: 4,
+      color: '#B45309'
+    }
+  }, "Editing this changes what their coaches tick and what their parents see."), sylLine(prog) && /*#__PURE__*/React.createElement("div", {
     className: "small subtle",
     style: {
       marginTop: 4,
@@ -10094,7 +10150,7 @@ function GradingAdminView({
     }
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
-    onClick: rename('grading_programs', prog, 'name', 'Programme name')
+    onClick: rename('grading_programs', prog, 'name', 'Syllabus name')
   }, "Rename"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: rename('grading_programs', prog, 'subtitle', 'Subtitle — e.g. "Learn to Swim"')
@@ -10132,10 +10188,74 @@ function GradingAdminView({
   })), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: () => sylOpen ? setSylOpen(false) : openSyl()
-  }, sylOpen ? 'Close syllabus' : 'Syllabus'), /*#__PURE__*/React.createElement("button", {
+  }, sylOpen ? 'Close source' : 'Source'), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost small",
     onClick: toggleActive('grading_programs', prog)
-  }, prog.is_active === false ? 'Turn on' : 'Turn off'))), sylOpen && syl && /*#__PURE__*/React.createElement("div", {
+  }, prog.is_active === false ? 'Turn on' : 'Turn off'), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    style: {
+      color: '#DC2626'
+    },
+    onClick: () => {
+      setDelArm(delArm === prog.id ? null : prog.id);
+      setDelWord('');
+    }
+  }, delArm === prog.id ? 'Cancel' : 'Delete'))), delArm === prog.id && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTop: '1px solid var(--red-bd)'
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontWeight: 800,
+      color: '#DC2626',
+      marginBottom: 6
+    }
+  }, "Delete “", prog.name, "”?"), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      lineHeight: 1.6,
+      marginBottom: 10
+    }
+  }, "This removes ", levels.length, " level", levels.length === 1 ? '' : 's', " and", ' ', (tasks || []).filter(t => levels.some(m => m.id === t.milestone_id)).length, " task", (tasks || []).filter(t => levels.some(m => m.id === t.milestone_id)).length === 1 ? '' : 's', ".", usedBy(prog.id).length > 0 && /*#__PURE__*/React.createElement(React.Fragment, null, ' ', /*#__PURE__*/React.createElement("b", null, usedBy(prog.id).map(l => l.name).join(', ')), ' ', usedBy(prog.id).length === 1 ? 'is' : 'are', " pointed at it and will be left with no syllabus."), ' ', "It cannot be undone."), usage && usage.swimmers > 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: '#B45309',
+      fontWeight: 700,
+      lineHeight: 1.6
+    }
+  }, usage.swimmers, " swimmer", usage.swimmers === 1 ? ' has' : 's have', " progress recorded on this syllabus, so it cannot be deleted — those ticks and certificates are their record. Turn it off instead: nobody new is put on it, and what they earned stays readable in their parents’ app.") : /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 8,
+      alignItems: 'center',
+      flexWrap: 'wrap'
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    placeholder: "type delete",
+    value: delWord,
+    style: {
+      width: 140
+    },
+    autoFocus: true,
+    onChange: e => setDelWord(e.target.value),
+    onKeyDown: e => {
+      if (e.key === 'Enter' && delWord.trim().toLowerCase() === 'delete') confirmDelete();
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "btn small",
+    style: delWord.trim().toLowerCase() === 'delete' ? {
+      background: '#DC2626',
+      borderColor: '#DC2626',
+      color: '#fff'
+    } : {
+      opacity: .5
+    },
+    disabled: busy || delWord.trim().toLowerCase() !== 'delete',
+    onClick: confirmDelete
+  }, "Delete for good"))), sylOpen && syl && /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 12,
       paddingTop: 12,
@@ -10147,7 +10267,7 @@ function GradingAdminView({
       marginBottom: 10,
       lineHeight: 1.6
     }
-  }, "Where this ladder comes from. Leave it all empty for a programme we wrote ourselves — nothing is shown then. What you type here is printed under the programme name in the parent app and the coaches’ app, quietly, with the note folded away until somebody taps it."), /*#__PURE__*/React.createElement("div", {
+  }, "Where this syllabus comes from. Leave it all empty for one we wrote ourselves — nothing is shown then. What you type here is printed under the programme name in the parent app and the coaches’ app, quietly, with the note folded away until somebody taps it."), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       flexDirection: 'column',
@@ -10212,7 +10332,7 @@ function GradingAdminView({
     style: {
       padding: 22
     }
-  }, "No levels yet. A programme with no levels grades nobody."), levels.map(ms => {
+  }, "No levels yet. A syllabus with no levels grades nobody."), levels.map(ms => {
     const ts = tasksFor(ms.id);
     const open = openMs === ms.id;
     return /*#__PURE__*/React.createElement("div", {
@@ -10434,7 +10554,7 @@ function GradingAdminView({
       marginTop: 14,
       lineHeight: 1.6
     }
-  }, "A child is graded on whichever programme their lesson type points at — set that in ", /*#__PURE__*/React.createElement("b", null, "Settings → Lesson Types"), ". Their badge is the highest level where ", /*#__PURE__*/React.createElement("b", null, "every"), " task has been ticked, so one tick on a high level promotes nobody. Turning a task off, or adding one, changes who has finished what: the database works that out immediately.")));
+  }, "A swimmer follows whichever syllabus their lesson type points at — set that in ", /*#__PURE__*/React.createElement("b", null, "Settings → Lesson Types"), ". Their badge is the highest level where ", /*#__PURE__*/React.createElement("b", null, "every"), " task has been ticked, so one tick on a high level promotes nobody. Turning a task off, or adding one, changes who has finished what: the database works that out immediately.")));
 }
 function SettingsView({
   section,
@@ -12657,13 +12777,13 @@ function LessonTypeEditor({
     style: {
       gridColumn: '1 / 3'
     }
-  }, /*#__PURE__*/React.createElement("label", null, "Graded on"), /*#__PURE__*/React.createElement("select", {
+  }, /*#__PURE__*/React.createElement("label", null, "Syllabus"), /*#__PURE__*/React.createElement("select", {
     className: "input",
     value: draft.grading_program_id,
     onChange: e => setF('grading_program_id', e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "Not graded"), (gradingPrograms || []).filter(p => p.is_active !== false).map(p => /*#__PURE__*/React.createElement("option", {
+  }, "No syllabus"), (gradingPrograms || []).filter(p => p.is_active !== false).map(p => /*#__PURE__*/React.createElement("option", {
     key: p.id,
     value: p.id
   }, p.name, p.subtitle ? ` — ${p.subtitle}` : '')))), /*#__PURE__*/React.createElement("div", {

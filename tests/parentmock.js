@@ -64,6 +64,29 @@ const LADDER = {
       icon: '/badges/ss-b-water-explorer.png', colour: '#2CACE2',
       achieved_at: ago(400) }
   ],
+  // The syllabus this child was on before their lesson type was
+  // repointed. student_grading() builds this from real progress, not
+  // from a stored flag, so a syllabus nobody ticked anything on never
+  // appears and reinstating the old one empties this list by itself.
+  previous: [
+    { id: 'pr0', name: 'Swim Starters', subtitle: 'Parent & child',
+      icon: null, colour: '#2CBDBE', is_active: true,
+      syllabus: null, levels_total: 2, level: 2,
+      last_seen: ago(400),
+      milestones: [
+        { id: 'p0a', level_no: 1, label: 'A', name: 'Water Discovery',
+          icon: '/badges/ss-a-water-discovery.png', colour: '#2CBDBE',
+          certificate: true, activated: true, total: 2, done: 2,
+          certificate_claimed_at: ago(880), tasks: [
+            { id: 'p0a1', name: 'Blows bubbles on surface, assisted', done: true },
+            { id: 'p0a2', name: 'Front tow chin in water, assisted', done: true } ] },
+        { id: 'p0b', level_no: 2, label: 'B', name: 'Water Explorer',
+          icon: '/badges/ss-b-water-explorer.png', colour: '#2CACE2',
+          certificate: true, activated: true, total: 2, done: 1,
+          certificate_claimed_at: null, tasks: [
+            { id: 'p0b1', name: 'Monkey crawl assisted, on edge, 2 meters', done: false },
+            { id: 'p0b2', name: 'Water exit, assisted', done: true } ] } ] }
+  ],
   milestones: [
     // Labelled A, B, 1 -- the Swim Passport shape, where the sticker and
     // the rung deliberately disagree.
@@ -77,15 +100,20 @@ const LADDER = {
         { id: 't2', name: 'Blows bubbles', done: true } ] },
     { id: 'ms2', level_no: 2, label: 'B', band: 'Swim Starters', name: 'Tortoise', icon: null, colour: '#159C8B',
       certificate: true,
+      // PRINTED ORDER, deliberately interleaved. The server used to
+      // sort finished tasks to the top, and a mock that lists them
+      // that way cannot tell the two rules apart -- the app could
+      // re-sort and the test would still pass. Here a finished task
+      // sits below an unfinished one, so any reordering shows up.
       activated: false, total: 10, done: 5, tasks: [
         { id: 'a1', name: 'Glides from the wall', done: true },
+        { id: 'b1', name: 'Front crawl 10 metres', done: false },
         { id: 'a2', name: 'Kicks 10 metres', done: true },
         { id: 'a3', name: 'Floats on back', done: true },
-        { id: 'a4', name: 'Rolls front to back', done: true },
-        { id: 'a5', name: 'Jumps in and returns', done: true },
-        { id: 'b1', name: 'Front crawl 10 metres', done: false },
         { id: 'b2', name: 'Backstroke 10 metres', done: false },
+        { id: 'a4', name: 'Rolls front to back', done: true },
         { id: 'b3', name: 'Treads water 30 seconds', done: false },
+        { id: 'a5', name: 'Jumps in and returns', done: true },
         { id: 'b4', name: 'Retrieves an object', done: false },
         { id: 'b5', name: 'Swims 25 metres', done: false } ] },
     // This stage carries a second, named certificate as well.

@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 25;
+  var BUILD = 26;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1273,7 +1273,7 @@
       var badge = g
         ? '<button class="lvlbtn" data-grade="' + esc(r.student_id) + '"'
           + ' data-nm="' + esc(r.student_name || '') + '"'
-          + ' title="' + esc(g.program_name + ' — tap to tick a task') + '">'
+          + ' title="' + esc(g.program_name + ' syllabus — tap to tick a task') + '">'
           + (g.level_no ? esc(stageTag(g.label, g.level_no)) : '—')
           + '<small>/' + esc(String(g.levels_total || '?')) + '</small></button>'
         : '';
@@ -1388,8 +1388,8 @@
         return;
       }
       if (g.graded === false) {
-        el.innerHTML = '<p class="cls-sub">This swimmer\u2019s lesson type is not graded on '
-          + 'any programme. The office sets that in Settings \u2192 Lesson Types.</p>';
+        el.innerHTML = '<p class="cls-sub">This swimmer\u2019s lesson type has no '
+          + 'syllabus. The office sets that in Settings \u2192 Lesson Types.</p>';
         return;
       }
       el.innerHTML = gradePadHtml(g);

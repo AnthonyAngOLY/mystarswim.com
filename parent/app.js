@@ -15,7 +15,7 @@
   // Installable. Registered relative, so the scope is this directory and
   // never the whole site — which matters when the same files are also
   // served from the root of app.mystarswim.com.
-  var BUILD = 16;
+  var BUILD = 17;
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('./sw.js').catch(function () {});
@@ -511,6 +511,11 @@
   // program_id -> is the "who wrote this ladder" paragraph open.
   var sylOpen = {};
 
+  // program_id -> is an earlier syllabus expanded. Collapsed by default:
+  // it is history, and the ladder the swimmer is on now is what the app
+  // was opened for.
+  var prevOpen = {};
+
   function iconUrl(p) {
     if (!p) return null;
     // A path beginning with / is served by this site. The MAS roundels
@@ -550,7 +555,9 @@
     var s = prog && prog.syllabus; if (!s) return '';
     var line = [s.body, s.name].filter(Boolean).join(' · ');
     if (s.version) line += (line ? ' ' : '') + 'v' + s.version;
-    if (!line) line = 'About this syllabus';
+    // Named, not implied. A parent asking which syllabus their child is
+    // on should not have to work it out from a band heading.
+    line = line ? 'Syllabus: ' + line : 'About this syllabus';
     var url = webUrl(s.url);
     var more = !!(s.note || url);
     var open = !!sylOpen[prog.id];
@@ -586,7 +593,65 @@
     });
   }
 
+  // The whole syllabus panel: the one this swimmer is on, anything they
+  // hold from elsewhere, and the syllabus they were on before.
   function gradingHtml(g) {
+    return ladderHtml(g.program, g.milestones, g.band, g.levels_total, g.level, true)
+         + earnedEarlierHtml(g)
+         + previousHtml(g);
+  }
+
+  // What a swimmer was on before their lesson type was pointed at
+  // something else. Collapsed, because it is history and the current
+  // ladder is what a parent opened the app for -- but kept in full,
+  // every tick still against the stage it was made on.
+  //
+  // Nothing here is driven by a stored "they switched" flag. The server
+  // lists a syllabus as previous when this swimmer has real progress on
+  // it and it is not the current one. So putting the lesson type back
+  // makes it current again, which takes it out of this list, which
+  // removes the line below -- with nothing to undo and no second place
+  // the truth is written down.
+  function previousHtml(g) {
+    var ps = g.previous || [];
+    if (!ps.length) return '';
+    return ps.map(function (p) {
+      var open = !!prevOpen[p.id];
+      var when = p.last_seen ? ' Last marked ' + ago(p.last_seen) + '.' : '';
+      var got = (p.milestones || []).filter(function (m) { return m.activated; }).length;
+      // The count rides in this heading, so the ladder below it can be
+      // drawn without its own -- the name would otherwise be on the
+      // screen three times before a parent reaches a single stage.
+      var tally = p.levels_total
+        ? ' \u00b7 ' + got + ' of ' + p.levels_total + ' stage'
+          + (Number(p.levels_total) === 1 ? '' : 's') + ' earned'
+        : '';
+      return '<div class="prevsyl' + (open ? ' is-open' : '') + '">'
+        + '<div class="prevsyl-h">'
+        +   '<b>Previously on ' + esc(p.name) + esc(tally) + '</b>'
+        +   '<small>Now on ' + esc(g.program.name) + '.'
+        +     ' Everything marked here is kept.' + esc(when) + '</small>'
+        + '</div>'
+        + '<button type="button" class="prevsyl-t" data-prev="' + esc(p.id) + '"'
+        +   ' aria-expanded="' + (open ? 'true' : 'false') + '">'
+        +   (open ? 'Hide' : 'Show') + ' the ' + esc(p.name) + ' syllabus'
+        +   '<span>' + (open ? '▲' : '▼') + '</span></button>'
+        + (open
+            ? '<div class="prevsyl-b">'
+              + ladderHtml(p, p.milestones, null, p.levels_total, p.level, false)
+              + '</div>'
+            : '')
+        + '</div>';
+    }).join('');
+  }
+
+  // One syllabus drawn as a ladder. Used for the current one and for any
+  // the swimmer has moved off, so the two cannot drift apart.
+  // `heading` draws the programme name and the big chip. The previous
+  // syllabus turns it off: its own heading already carries both.
+  function ladderHtml(prog, milestones, band, levelsTotal, level, heading) {
+    var g = { program: prog, milestones: milestones, band: band,
+              levels_total: levelsTotal, level: level };
     var held = (g.milestones || []).filter(function (m) { return m.activated; });
     var earned = held.length;
     // The roundel of the level she is on, not the programme's mark: the
@@ -600,7 +665,8 @@
     // below it, so nothing is hidden.
     var cnt = g.band ? (g.band.done + '/' + g.band.total)
                      : (earned + '/' + String(g.levels_total));
-    var out = '<div class="h" style="display:flex;align-items:center;gap:8px">'
+    var out = heading === false ? ''
+      : '<div class="h" style="display:flex;align-items:center;gap:8px">'
       + '<span>' + esc(g.band ? g.band.name : g.program.name) + '</span>'
       + '<span class="lvlchip">'
       + (topIcon ? '<img src="' + esc(iconUrl(topIcon)) + '" alt="">' : '')
@@ -660,7 +726,7 @@
         + (open ? taskListHtml(m) : '')
         + '</div>';
     });
-    return out + earnedEarlierHtml(g);
+    return out;
   }
 
   // What this child holds on a ladder they are no longer on. Almost
@@ -686,9 +752,12 @@
     var ts = m.tasks || [];
     if (!ts.length) return '<div class="mstasks"><span class="mstask todo">'
       + 'Nothing set on this level yet.</span></div>';
-    // Done first, greyed ones after — the order the server already sorts
-    // them in, so what a parent sees is what their child can do, then
-    // what is next.
+    // Printed order, always -- the order of the passport in the child's
+    // bag. The server used to sort what was done to the top, so a line
+    // moved up the page the week it was ticked and a parent following
+    // along with the book lost their place. A line stays where it is
+    // and lights up instead: greyed while it is still to come, dark
+    // with a green tick once a coach has seen it.
     var out = '<div class="mstasks">' + ts.map(function (t) {
       return '<div class="mstask ' + (t.done ? 'done' : 'todo') + '">'
         + '<span class="tick">\u2713</span><span>' + esc(t.name) + '</span></div>';
@@ -731,6 +800,13 @@
       b.addEventListener('click', function () {
         var id = b.getAttribute('data-syl');
         sylOpen[id] = !sylOpen[id];
+        redraw();
+      });
+    });
+    Array.prototype.forEach.call($('childGrading').querySelectorAll('[data-prev]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-prev');
+        prevOpen[id] = !prevOpen[id];
         redraw();
       });
     });

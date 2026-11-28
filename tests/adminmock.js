@@ -61,6 +61,28 @@ const json = (res, code, obj) => send(res, code, JSON.stringify(obj));
 // table path -> the last PATCH body seen for it.
 const PATCHES = {};
 
+// Every delete_grading_program call, in order, with what was sent. The
+// point of a two-stage delete is the word, and the only way to know the
+// screen passed the word somebody typed -- rather than supplying it
+// itself on the way out -- is to look at what came over the wire.
+const DELETES = [];
+
+// Who is using each syllabus, as grading_program_usage() answers it.
+// pr1 has been taught; pr2 has not. The mock refuses exactly what the
+// real function refuses and no more: a mock that lets a delete through
+// where the database would not cannot catch the screen getting it
+// wrong.
+const USAGE = {
+  pr1: { ok: true, program: { id: 'pr1', name: 'Swim Passport', is_active: true },
+         lesson_types: [{ id: 'lt1', name: 'Learn to Swim' }],
+         stages: 2, tasks: 2, swimmers: 3, awards: 1, deletable: false,
+         reason: '3 swimmer(s) have progress recorded on this syllabus. '
+               + 'Turn it off instead -- their records stay readable.' },
+  pr2: { ok: true, program: { id: 'pr2', name: 'Water Discovery', is_active: true },
+         lesson_types: [], stages: 1, tasks: 1, swimmers: 0, awards: 0,
+         deletable: true, reason: null }
+};
+
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
@@ -75,6 +97,7 @@ http.createServer((req, res) => {
   // screen that closes its panel looks identical whether it sent the
   // right columns, the wrong ones, or none.
   if (p === '/__patches') return json(res, 200, PATCHES);
+  if (p === '/__deletes') return json(res, 200, DELETES);
   if (req.method === 'PATCH') {
     let raw = '';
     req.on('data', (c) => { raw += c; });
@@ -140,6 +163,26 @@ http.createServer((req, res) => {
     ]);
   }
   if (p === '/rest/v1/rpc/claim_certificate') return json(res, 200, { ok: true, claimed: true });
+
+  if (p === '/rest/v1/rpc/grading_program_usage' || p === '/rest/v1/rpc/delete_grading_program') {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    return req.on('end', () => {
+      let b = {};
+      try { b = JSON.parse(raw || '{}'); } catch (_e) { b = {}; }
+      if (p.endsWith('grading_program_usage')) {
+        return json(res, 200, USAGE[b.p_program] || { ok: false, error: 'No such syllabus.' });
+      }
+      DELETES.push(b);
+      if (String(b.p_confirm || '').trim().toLowerCase() !== 'delete')
+        return json(res, 200, { ok: false, error: 'Type the word delete to confirm.' });
+      const u = USAGE[b.p_program];
+      if (!u) return json(res, 200, { ok: false, error: 'No such syllabus.' });
+      if (!u.deletable) return json(res, 200, { ok: false, error: u.reason });
+      return json(res, 200, { ok: true, name: u.program.name, stages: u.stages,
+                              tasks: u.tasks, lesson_types_cleared: 0 });
+    });
+  }
 
   if (p === '/rest/v1/rpc/parent_otp_spend') {
     return json(res, 200, [

@@ -136,6 +136,39 @@ Void, do not delete. Attendance, leave and voucher history is the point
 of the system. The one documented exception is the test-data purge
 script, which says so in its own header.
 
+A syllabus is the near miss. `delete_grading_program` exists and it
+really does delete — but it refuses the moment any swimmer has a tick
+or a certificate against it, and says to turn it off instead. Deleting
+is for the ladder that was typed in, looked wrong, and was never
+taught. The refusal lives in the database, not in the admin screen,
+because a confirmation that only exists in JavaScript is one a stray
+call skips.
+
+## It is called Syllabus to everyone outside this repository
+
+Parents, coaches and the office see **Syllabus**. The word "grading"
+was ours, and no parent reading "grading programme" knew it meant the
+book in their child's bag.
+
+The database keeps its names anyway — `grading_programs`,
+`student_grading`, `my_roster_grading`, `mark_grading_task`. They are a
+published contract, an installed PWA calls them by name, and renaming
+them buys nothing a label does not. So the rule is: **rename the
+labels, never the functions.**
+
+### Moving a swimmer between syllabuses
+
+Point the lesson type somewhere else and nothing is lost. The parent
+app shows the current ladder and then, below it, the one they came off
+— collapsed, with every tick still against the stage it was made on.
+
+That list is built from **real progress**, not from a stored "they
+switched" flag: a syllabus is "previous" when the swimmer has ticks or
+stages on it and it is not the current one. Which is why reinstating
+the old one needs nothing undone — it becomes current, so it leaves the
+list, so the remark goes — and why a syllabus somebody pointed at by
+mistake and never ticked never appears at all.
+
 ## The company's own particulars
 
 Kept here because they are asked for constantly — invoices, LHDN

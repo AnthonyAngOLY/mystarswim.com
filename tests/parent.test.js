@@ -531,17 +531,79 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8906';
     if (empty > 1) throw new Error('an untouched level is not empty: ' + Math.round(empty));
   });
 
-  await step('tapping a level shows what is done, then what is next', async () => {
+  // The list is the passport's list, in the passport's order. It used
+  // to be sorted with the finished tasks on top, which meant a line
+  // climbed the page the week a coach ticked it and a parent reading
+  // along with the book in their hand lost their place. Now a line
+  // stays where it is printed and lights up instead.
+  await step('tapping a level shows the passport\u2019s list in the passport\u2019s order', async () => {
     await page.locator('#childGrading .msrow').nth(1).locator('.msrow-head').click();
     await page.waitForTimeout(400);
-    const classes = await page.locator('#childGrading .msrow').nth(1)
-      .locator('.mstask').evaluateAll(els => els.map(e => e.className));
-    if (classes.length !== 10) throw new Error('expected 10 tasks, drew ' + classes.length);
-    const firstTodo = classes.findIndex(c => /todo/.test(c));
-    const lastDone = classes.map(c => /done/.test(c)).lastIndexOf(true);
-    if (firstTodo === -1 || lastDone === -1) throw new Error('no mix of done and not done');
-    if (lastDone > firstTodo)
-      throw new Error('finished tasks are not all above the unfinished ones');
+    const rows = await page.locator('#childGrading .msrow').nth(1)
+      // The name is the second span; the first is the tick, whose
+      // glyph is in the DOM for both states and only coloured away.
+      .locator('.mstask').evaluateAll(els => els.map(e => ({
+        done: /done/.test(e.className),
+        name: (e.querySelectorAll('span')[1] || {}).textContent.trim() })));
+    if (rows.length !== 10) throw new Error('expected 10 tasks, drew ' + rows.length);
+    const want = ['Glides from the wall', 'Front crawl 10 metres', 'Kicks 10 metres',
+                  'Floats on back', 'Backstroke 10 metres', 'Rolls front to back',
+                  'Treads water 30 seconds', 'Jumps in and returns',
+                  'Retrieves an object', 'Swims 25 metres'];
+    const got = rows.map(r => r.name);
+    if (got.join('|') !== want.join('|'))
+      throw new Error('the app reordered the list:\n  got  ' + got.join(', ')
+        + '\n  want ' + want.join(', '));
+    // And a finished line still reads as finished where it sits.
+    if (!rows[0].done || rows[1].done)
+      throw new Error('done and not-done are not told apart any more');
+    const lastDone = rows.map(r => r.done).lastIndexOf(true);
+    const firstTodo = rows.findIndex(r => !r.done);
+    if (lastDone < firstTodo)
+      throw new Error('the mock no longer interleaves them, so this proves nothing');
+  });
+
+  // A swimmer whose lesson type was repointed mid-term. Their old
+  // syllabus is kept whole, announced quietly, and folded away.
+  await step('the syllabus they were on before is named, and folded away', async () => {
+    const t = await page.locator('#childGrading .prevsyl').innerText();
+    if (!/Previously on Swim Starters · 2 of 2 stages earned/.test(t))
+      throw new Error('the earlier syllabus does not carry its tally: ' + JSON.stringify(t));
+    if (!/Previously on Swim Starters/.test(t))
+      throw new Error('the earlier syllabus is not named: ' + JSON.stringify(t));
+    if (!/Now on Swim Passport/.test(t))
+      throw new Error('it does not say what they are on now: ' + JSON.stringify(t));
+    if (await page.locator('#childGrading .prevsyl-b').count() !== 0)
+      throw new Error('it is open by default — it is history, not the page');
+  });
+
+  await step('and opening it shows every stage and every tick still on it', async () => {
+    await page.locator('#childGrading .prevsyl-t').click();
+    await page.waitForTimeout(400);
+    const body = page.locator('#childGrading .prevsyl-b');
+    if (await body.locator('.msrow').count() !== 2)
+      throw new Error('the earlier ladder lost its stages');
+    const t = await body.innerText();
+    if (!/Water Discovery/.test(t) || !/Water Explorer/.test(t))
+      throw new Error('the earlier stages are not drawn: ' + JSON.stringify(t));
+    // Its name is in the heading above; repeating it over the ladder
+    // puts "Swim Starters" on the screen three times before the parent
+    // reaches a stage.
+    if (await body.locator('.h').count())
+      throw new Error('the earlier ladder repeats its own name');
+    await body.locator('.msrow').nth(1).locator('.msrow-head').click();
+    await page.waitForTimeout(400);
+    const marks = await body.locator('.msrow').nth(1).locator('.mstask')
+      .evaluateAll(els => els.map(e => /done/.test(e.className)));
+    if (marks.join(',') !== 'false,true')
+      throw new Error('the ticks on the earlier syllabus did not survive: ' + marks.join(','));
+  });
+
+  await step('and it folds away again', async () => {
+    await page.locator('#childGrading .prevsyl-t').click();
+    await page.waitForTimeout(400);
+    if (await page.locator('#childGrading .prevsyl-b').count() !== 0)
+      throw new Error('it will not close');
   });
 
   await step('a level with a certificate waiting says so', async () => {
