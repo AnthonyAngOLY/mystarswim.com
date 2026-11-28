@@ -32,6 +32,24 @@
 --  correct failure: it does not know they exist.
 -- ════════════════════════════════════════════════════════════════════════
 
+
+-- ─── Is what this file builds on actually here? ─────────────────────────
+-- The function below reads m.band. plpgsql resolves a column name when
+-- the query RUNS, not when the function is created -- so run out of
+-- order this file installs perfectly, every confirm block reports
+-- success, and the first parent to open the app gets a blank ladder with
+-- the real reason in a log nobody is reading. Exactly the shape of
+-- min(uuid). So: ask first, and refuse in the SQL editor where it can
+-- still be read.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'grading_milestones'
+                    and column_name = 'band') then
+    raise exception 'grading_milestones.band does not exist. Run supabase_grading_bands.sql first, then this file again.';
+  end if;
+end $$;
+
 alter table grading_milestones add column if not exists award_name      text;
 alter table grading_milestones add column if not exists award_icon_path text;
 

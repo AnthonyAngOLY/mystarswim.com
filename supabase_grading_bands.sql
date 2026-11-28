@@ -38,6 +38,24 @@
 --  an old audit row or a note. Void, do not delete.
 -- ════════════════════════════════════════════════════════════════════════
 
+
+-- ─── Is what this file builds on actually here? ─────────────────────────
+-- The function below reads m.label. plpgsql resolves a column name when
+-- the query RUNS, not when the function is created -- so run out of
+-- order this file installs perfectly, every confirm block reports
+-- success, and the first parent to open the app gets a blank ladder with
+-- the real reason in a log nobody is reading. Exactly the shape of
+-- min(uuid). So: ask first, and refuse in the SQL editor where it can
+-- still be read.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'grading_milestones'
+                    and column_name = 'label') then
+    raise exception 'grading_milestones.label does not exist. Run supabase_grading_stage_labels.sql first, then this file again.';
+  end if;
+end $$;
+
 alter table grading_milestones add column if not exists band text;
 
 comment on column grading_milestones.band is

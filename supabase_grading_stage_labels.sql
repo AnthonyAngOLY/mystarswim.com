@@ -30,6 +30,24 @@
 --  last week's build reads the keys it knows and ignores it.
 -- ════════════════════════════════════════════════════════════════════════
 
+
+-- ─── Is what this file builds on actually here? ─────────────────────────
+-- The function below reads p.syllabus_body. plpgsql resolves a column name when
+-- the query RUNS, not when the function is created -- so run out of
+-- order this file installs perfectly, every confirm block reports
+-- success, and the first parent to open the app gets a blank ladder with
+-- the real reason in a log nobody is reading. Exactly the shape of
+-- min(uuid). So: ask first, and refuse in the SQL editor where it can
+-- still be read.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'grading_programs'
+                    and column_name = 'syllabus_body') then
+    raise exception 'grading_programs.syllabus_body does not exist. Run supabase_grading_syllabus.sql first, then this file again.';
+  end if;
+end $$;
+
 alter table grading_milestones add column if not exists label text;
 
 comment on column grading_milestones.label is

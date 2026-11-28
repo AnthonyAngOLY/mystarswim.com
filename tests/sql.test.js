@@ -880,6 +880,42 @@ function q(sql) {
       throw new Error('the refusal still cost ' + (Number(mine) - Number(still)) + ' tick(s)');
   });
 
+  // Anthony runs these by hand, one at a time, and the grading chain is
+  // now long enough to skip a link. Each file that re-creates
+  // student_grading reads columns an earlier file adds -- and plpgsql
+  // resolves column names when the query RUNS. Out of order they install
+  // perfectly and the apps go blank.
+  //
+  // So every one of them is checked here against a database that has
+  // only what comes BEFORE its prerequisite. It must refuse, in the SQL
+  // editor, naming the file to run first.
+  step('a grading file run out of order refuses instead of installing', () => {
+    const DB2 = 'ssbooo';
+    psql(`-c "drop database if exists ${DB2}"`);
+    if (psql(`-c "create database ${DB2}"`).status !== 0)
+      throw new Error('could not make a scratch database');
+    const load = (f) => psql(`-d ${DB2} -v ON_ERROR_STOP=1 -q -f ` + path.join(WORK, f));
+    for (const f of ['sqlfixture.sql', 'supabase_grading_programs.sql'])
+      if (load(f).status !== 0) throw new Error('the base would not install: ' + f);
+
+    // Up to here nothing has added `colour`, `label`, `band` or
+    // `award_name`, so every one of these is out of order.
+    for (const [f, wants] of [['supabase_grading_syllabus.sql',       'colour'],
+                              ['supabase_grading_stage_labels.sql',   'syllabus_body'],
+                              ['supabase_grading_bands.sql',          'label'],
+                              ['supabase_grading_awards.sql',         'band'],
+                              ['supabase_grading_friendly_names.sql', 'band']]) {
+      const r = load(f);
+      if (r.status === 0)
+        throw new Error(f + ' installed without ' + wants + ' — it will fail on '
+          + 'its first call instead, which shows as a blank ladder');
+      if (!new RegExp(wants + ' does not exist').test(r.stderr || ''))
+        throw new Error(f + ' refused for some other reason: '
+          + (r.stderr || '').trim().split('\n').slice(-2).join(' | '));
+    }
+    psql(`-c "drop database if exists ${DB2}"`);
+  });
+
   step('a colour that is not a colour is refused', () => {
     const r = psql(`-d ${DB} -tAc "update grading_programs set colour='bright blue'"`);
     if (r.status === 0)

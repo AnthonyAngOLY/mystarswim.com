@@ -43,6 +43,24 @@
 --  function a phone calls is allowed to make.
 -- ════════════════════════════════════════════════════════════════════════
 
+
+-- ─── Is what this file builds on actually here? ─────────────────────────
+-- The function below reads p.colour. plpgsql resolves a column name when
+-- the query RUNS, not when the function is created -- so run out of
+-- order this file installs perfectly, every confirm block reports
+-- success, and the first parent to open the app gets a blank ladder with
+-- the real reason in a log nobody is reading. Exactly the shape of
+-- min(uuid). So: ask first, and refuse in the SQL editor where it can
+-- still be read.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'grading_programs'
+                    and column_name = 'colour') then
+    raise exception 'grading_programs.colour does not exist. Run supabase_grading_colours.sql first, then this file again.';
+  end if;
+end $$;
+
 alter table grading_programs add column if not exists syllabus_body    text;
 alter table grading_programs add column if not exists syllabus_name    text;
 alter table grading_programs add column if not exists syllabus_version text;
