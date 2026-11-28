@@ -7629,6 +7629,13 @@ function LessonTypeEditor({ row, pools, gradingPrograms, onSave }){
     <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:10}}>
       <button className="btn btn-primary" onClick={()=>{
         onSave({
+          // Every field with a control on this panel has to be here.
+          // The syllabus had a dropdown, a draft entry and no payload
+          // line, so Apply Changes saved everything except the one
+          // thing that had just been chosen -- and the panel looked
+          // like it had worked until it was reopened. A test now
+          // compares the setF() keys against these keys.
+          grading_program_id: draft.grading_program_id || null,
           name: draft.name.trim() || row.name,
           age_min_months: clean(draft.age_min_months),
           age_max_months: clean(draft.age_max_months),

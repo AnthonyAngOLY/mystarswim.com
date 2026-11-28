@@ -583,6 +583,31 @@ const FILES = [
               where p.name='Swim Passport' and t.name ~ '^Backstroke'`) !== '0')
         throw new Error('a stroke is still called Backstroke; the chart says Back crawl');
 
+      // THE PROGRAMME GETS RENAMED. "Swim Passport" became "Star Swim
+      // Passport" in the admin screen the same afternoon this file
+      // first ran -- there is a Rename button right beside the name.
+      // Matching on the name would have refused on the next run and
+      // sent the reader to the seed file, which on a renamed programme
+      // builds a SECOND passport beside the first. So the file finds it
+      // by its stages, and this proves it.
+      q(`update grading_programs set name = 'Star Swim Passport'
+          where id = '${q(`select id from grading_programs where name='Swim Passport'`)}'`);
+      const renamed = psql(`-d ${DB} -v ON_ERROR_STOP=1 -q -f `
+                         + path.join(WORK, 'supabase_swim_passport_wording.sql'));
+      const back = () => q(`update grading_programs set name = 'Swim Passport'
+                             where name = 'Star Swim Passport'`);
+      if (renamed.status !== 0) {
+        back();
+        throw new Error('the file refuses once the syllabus is renamed: '
+          + (renamed.stderr || '').trim().split('\n').filter(l => /ERROR/.test(l))
+              .slice(0, 1).join(' '));
+      }
+      const stillThere = q(`select count(*) from grading_programs
+                             where name in ('Swim Passport','Star Swim Passport')`);
+      back();
+      if (stillThere !== '1')
+        throw new Error('a renamed run produced a second passport: ' + stillThere);
+
       // Running it twice must not insert the line twice or shift again.
       // This is the fault the guard exists for and it is cheap to prove
       // here, where the failure names the file, rather than at the end.

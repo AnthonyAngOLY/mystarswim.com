@@ -19,6 +19,8 @@
 'use strict';
 
 const { launch, offline } = require('./browser');
+const fs = require('fs');
+const path = require('path');
 
 const BASE = process.env.BASE || 'http://127.0.0.1:8904';
 
@@ -1168,6 +1170,76 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       throw new Error('the dropdown has no chevron of its own: ' + r.select.img);
     if (parseFloat(r.select.pad) <= parseFloat(r.input.pad))
       throw new Error('nothing is reserved for the chevron, so it will sit on the text');
+  });
+
+  // ── The lesson type's syllabus ────────────────────────────────────────
+  // This is the connection that makes any of the grading work: a swimmer
+  // follows whichever syllabus their lesson type points at. The dropdown
+  // was there, the draft held the choice, and Apply Changes dropped it on
+  // the floor -- so the panel looked like it had saved until it was
+  // reopened, and every syllabus read "0 lesson type(s)".
+  await step('choosing a syllabus on a lesson type actually saves it', async () => {
+    await page.evaluate(() => {
+      let host = document.getElementById('lt-host');
+      if (!host) { host = document.createElement('div'); host.id = 'lt-host';
+                   document.body.appendChild(host); }
+      window.__saved = null;
+      ReactDOM.createRoot(host).render(React.createElement(LessonTypeEditor, {
+        row: { id: 'lt1', name: 'LTS Group', grading_program_id: null,
+               billing_model: 'monthly', class_type: 'group',
+               programme_type: 'lessons' },
+        pools: [{ id: 'po1', name: 'SSGT Pool A' }],
+        gradingPrograms: [
+          { id: 'pr1', name: 'Swim Passport', subtitle: 'Learn to Swim', is_active: true },
+          { id: 'pr2', name: 'MAS BADGES', is_active: true }
+        ],
+        onSave: (p) => { window.__saved = p; }
+      }));
+    });
+    await page.waitForTimeout(700);
+    const sel = page.locator('#lt-host select').filter({ hasText: 'Swim Passport' }).first();
+    await sel.selectOption('pr1');
+    await page.locator('#lt-host button').filter({ hasText: 'Apply Changes' }).first().click();
+    await page.waitForTimeout(400);
+    const saved = await page.evaluate(() => window.__saved);
+    if (!saved) throw new Error('Apply Changes sent nothing at all');
+    if (!('grading_program_id' in saved))
+      throw new Error('the payload has no grading_program_id — the syllabus is dropped '
+        + 'on save: ' + JSON.stringify(Object.keys(saved)));
+    if (saved.grading_program_id !== 'pr1')
+      throw new Error('it saved ' + JSON.stringify(saved.grading_program_id)
+        + ' instead of the syllabus that was chosen');
+  });
+
+  await step('and clearing it back to no syllabus saves null, not ""', async () => {
+    await page.locator('#lt-host select').filter({ hasText: 'Swim Passport' })
+      .first().selectOption('');
+    await page.locator('#lt-host button').filter({ hasText: 'Apply Changes' }).first().click();
+    await page.waitForTimeout(400);
+    const saved = await page.evaluate(() => window.__saved);
+    // The column is a uuid foreign key. '' is not a uuid and PostgREST
+    // rejects it, which reads as "could not save" and names no field.
+    if (saved.grading_program_id !== null)
+      throw new Error('clearing the syllabus sent '
+        + JSON.stringify(saved.grading_program_id) + ', which the column will refuse');
+  });
+
+  // The general form of the same bug: a field with a control, a draft
+  // entry, and no line in the payload. Checked against the source rather
+  // than by clicking twenty-one controls.
+  await step('every field the lesson-type panel edits is in what it saves', async () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+    const i = src.indexOf('function LessonTypeEditor(');
+    if (i < 0) throw new Error('LessonTypeEditor is not in app.js any more');
+    const body = src.slice(i, src.indexOf('\n}', src.indexOf('Apply Changes', i)));
+    const edits = new Set([...body.matchAll(/setF\('([a-z_]+)'/g)].map(m => m[1]));
+    if (edits.size < 15)
+      throw new Error('only found ' + edits.size + ' edited fields, so this is '
+        + 'reading the wrong part of the file and would pass whatever happened');
+    const payload = body.slice(body.indexOf('onSave({'));
+    const missing = [...edits].filter(k => !new RegExp('\\n\\s*' + k + ':').test(payload));
+    if (missing.length)
+      throw new Error('edited but never saved: ' + missing.join(', '));
   });
 
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });

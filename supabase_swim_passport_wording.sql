@@ -70,21 +70,50 @@
 -- looking for a typo in this file instead of running the file before
 -- it. A guard is only as good as the sentence it prints.
 do $$
-declare v_prog uuid;
 begin
   if not exists (select 1 from information_schema.columns
                   where table_schema = 'public' and table_name = 'grading_milestones'
                     and column_name = 'formal_name') then
     raise exception 'grading_milestones.formal_name does not exist. Run supabase_grading_friendly_names.sql first, then this file again.';
   end if;
-  select id into v_prog from grading_programs where name = 'Swim Passport';
-  if v_prog is null then
-    raise exception 'No grading program called "Swim Passport". Run supabase_swim_passport_syllabus.sql first, then this file again.';
+end $$;
+
+
+-- ─── Which programme is the passport ────────────────────────────────────
+-- FOUND BY ITS STAGES, NOT BY ITS NAME. The name is a text box with a
+-- Rename button beside it, and the office used it: "Swim Passport"
+-- became "Star Swim Passport" the same afternoon this file first ran. A
+-- file that matches on the name would then have refused with "no
+-- grading program called Swim Passport" and told the reader to run the
+-- seed file -- which, on a renamed programme, would have built a second
+-- one beside the first.
+--
+-- A stage labelled A and a stage labelled 6 on the same programme is
+-- the passport and nothing else: MAS BADGES is numbered 1-7 with no
+-- letters, and Swim Starters was folded into the passport by the bands
+-- migration and has no stages left at all.
+--
+-- A temporary table because this has to be readable from the eleven
+-- statements below it, and it disappears when the session ends -- so
+-- nothing is left behind in the database afterwards.
+drop table if exists _passport;
+create temporary table _passport as
+  select p.id
+    from grading_programs p
+   where exists (select 1 from grading_milestones m
+                  where m.program_id = p.id and m.label = 'A')
+     and exists (select 1 from grading_milestones m
+                  where m.program_id = p.id and m.label = '6')
+   order by p.sort_order, p.name
+   limit 1;
+
+do $$
+begin
+  if not exists (select 1 from _passport) then
+    raise exception 'No syllabus here has stages labelled A through 6, so there is no passport to correct. Run supabase_swim_passport_syllabus.sql and supabase_grading_bands.sql first, then this file again.';
   end if;
-  if not exists (select 1 from grading_milestones
-                  where program_id = v_prog and label = 'A') then
-    raise exception 'The Swim Passport has no stage labelled A. Run supabase_grading_bands.sql first, then this file again.';
-  end if;
+  raise notice 'Correcting "%"',
+    (select name from grading_programs where id = (select id from _passport));
 end $$;
 
 
@@ -116,7 +145,7 @@ begin
     select m.id into v_ms
       from grading_milestones m
       join grading_programs p on p.id = m.program_id
-     where p.name = 'Swim Passport' and m.label = v.label;
+     where p.id = (select id from _passport) and m.label = v.label;
 
     continue when v_ms is null;
     continue when exists (select 1 from grading_tasks
@@ -161,14 +190,14 @@ begin
       from grading_tasks t
       join grading_milestones m on m.id = t.milestone_id
       join grading_programs p on p.id = m.program_id
-     where p.name = 'Swim Passport' and m.label = v_label
+     where p.id = (select id from _passport) and m.label = v_label
        and t.name like 'Water entry%';
 
     select t.id, t.sort_order into v_exit
       from grading_tasks t
       join grading_milestones m on m.id = t.milestone_id
       join grading_programs p on p.id = m.program_id
-     where p.name = 'Swim Passport' and m.label = v_label
+     where p.id = (select id from _passport) and m.label = v_label
        and t.name like 'Water exit%';
 
     continue when v_entry.id is null or v_exit.id is null;
@@ -275,7 +304,7 @@ update grading_tasks t
     ('6', 8, 'Endurance: any stroke or combination of strokes, 150 meters')
   ) as v(label, sort_order, name)
   join grading_milestones m on m.label = v.label
-  join grading_programs  p on p.id = m.program_id and p.name = 'Swim Passport'
+  join grading_programs  p on p.id = m.program_id and p.id = (select id from _passport)
  where t.milestone_id = m.id
    and t.sort_order  = v.sort_order
    and t.name       is distinct from v.name;
@@ -297,7 +326,7 @@ select z.k as "#", z.thing, z.detail
                                     where t.milestone_id = m.id and t.is_active)::text as n
                              from grading_milestones m
                              join grading_programs p on p.id = m.program_id
-                            where p.name = 'Swim Passport' and m.is_active) x),
+                            where p.id = (select id from _passport) and m.is_active) x),
                   'NOTHING FOUND') as detail
   union all
   select 2, 'should read',
@@ -308,7 +337,7 @@ select z.k as "#", z.thing, z.detail
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
                      join grading_programs p on p.id = m.program_id
-                    where p.name = 'Swim Passport' and m.label = 'B' and t.is_active),
+                    where p.id = (select id from _passport) and m.label = 'B' and t.is_active),
                   'NOTHING FOUND')
   union all
   select 4, 'Level 2, in order',
@@ -316,7 +345,7 @@ select z.k as "#", z.thing, z.detail
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
                      join grading_programs p on p.id = m.program_id
-                    where p.name = 'Swim Passport' and m.label = '2' and t.is_active),
+                    where p.id = (select id from _passport) and m.label = '2' and t.is_active),
                   'NOTHING FOUND')
   union all
   select 5, 'anything still spelled "metres"',
@@ -324,7 +353,7 @@ select z.k as "#", z.thing, z.detail
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
                      join grading_programs p on p.id = m.program_id
-                    where p.name = 'Swim Passport' and t.name like '%metres%'),
+                    where p.id = (select id from _passport) and t.name like '%metres%'),
                   'none — the app and the book spell it the same way')
   union all
   select 6, 'anything still saying "Backstroke" as a stroke name',
@@ -332,7 +361,7 @@ select z.k as "#", z.thing, z.detail
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
                      join grading_programs p on p.id = m.program_id
-                    where p.name = 'Swim Passport'
+                    where p.id = (select id from _passport)
                       and t.name ~ '^Backstroke'),
                   'none — it is Back crawl throughout, as the chart has it')
   union all
@@ -341,7 +370,7 @@ select z.k as "#", z.thing, z.detail
             join grading_tasks t on t.id = k.task_id
             join grading_milestones m on m.id = t.milestone_id
             join grading_programs p on p.id = m.program_id
-           where p.name = 'Swim Passport' and k.removed_at is null)
+           where p.id = (select id from _passport) and k.removed_at is null)
       || ' live tick(s). A rename keeps the id, so none of them moved.'
   union all
   select 8, 'next',
