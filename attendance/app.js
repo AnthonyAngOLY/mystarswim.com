@@ -22,7 +22,7 @@
   // build from three weeks ago for as long as nobody refreshes it, and
   // nothing makes it refresh — so when a function it calls changes shape,
   // the database has to be able to say so.
-  var BUILD = 26;
+  var BUILD = 27;
 
   var cfg = window.APP_CONFIG || {};
   var TZ = 'Asia/Kuala_Lumpur';
@@ -1120,12 +1120,32 @@
       // Beside the roster rather than inside it: get_my_session_roster is
       // a published contract that installed phones call, and adding
       // columns to it means every old build reading a row it does not
-      // expect. A database without the grading module answers 404, which
-      // lands here as no badges and a class list that looks as it did.
+      // expect. A database without the grading module answers "function
+      // does not exist", which should leave the class list looking
+      // exactly as it did.
+      //
+      // ANYTHING ELSE IS KEPT AND SHOWN. This catch used to swallow
+      // every failure alike, and it hid a real one for a day:
+      // my_roster_grading asked for a column that does not exist, raised
+      // on every call, and the only symptom was a class list with no
+      // badges on it. Not installed is a shrug; broken is a sentence on
+      // the screen.
       rpc('my_roster_grading', { p_from: clsWeek, p_to: addDaysISO(clsWeek, 6) })
-        .catch(function () { return []; })
+        .catch(function (e) {
+          var m = String((e && e.message) || '');
+          // "does not exist" alone is not enough, and getting that wrong
+          // reproduced the original fault inside the fix: the message
+          // that mattered was "column ws.session_date does not exist",
+          // which matched and was swallowed as a missing module. Only a
+          // missing FUNCTION is the quiet case.
+          if (/PGRST202|schema cache|function[^]*does not exist|could not find the function/i.test(m))
+            return [];
+          return { __err: m || 'The syllabus badges could not be loaded.' };
+        })
     ]).then(function (res) {
       clsRows = res[0] || [];
+      clsGradeErr = (res[1] && res[1].__err) || '';
+      if (clsGradeErr) res[1] = [];
       clsLevels = {};
       (res[1] || []).forEach(function (g) { clsLevels[g.student_id] = g; });
       renderClasses();
@@ -1137,6 +1157,8 @@
 
   // student_id -> { program_name, level_no, levels_total }
   var clsLevels = {};
+  // Why there are no badges, when the reason is not "nobody is graded".
+  var clsGradeErr = '';
 
   // Rows arrive one per swimmer. The screen is one card per class.
   function clsSessions(day) {
@@ -1231,6 +1253,15 @@
 
     var html = list.length ? list.map(function (c) { return clsCard(c, today); }).join('')
       : '<p class="empty">Nothing on ' + esc(prettyDate(clsDay)) + '.</p>';
+
+    // Said once, above the list, when the badges failed for a reason
+    // that is not "this database has no syllabus module". A class list
+    // that is quietly missing something is how a fault lives for a day.
+    if (clsGradeErr) {
+      html = '<div class="note warn">Syllabus badges are not loading. '
+           + 'Attendance below is unaffected.<br><small>' + esc(clsGradeErr)
+           + '</small></div>' + html;
+    }
 
     $('clsBody').innerHTML = html;
     wireClsCards(today);

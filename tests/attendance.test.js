@@ -196,6 +196,52 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8907';
     if (!/3/.test(t)) throw new Error('the badge does not show how many levels there are');
   });
 
+  // A database with no grading module and a grading module that is
+  // broken look identical to this screen unless it is told to tell them
+  // apart. One is a shrug; the other cost a day of looking.
+  await step('a syllabus module that is not installed changes nothing', async () => {
+    await page.request.get(BASE + '/__drop?fn=my_roster_grading');
+    await openClasses();
+    if (await page.locator('#clsBody .lvlbtn').count() !== 0)
+      throw new Error('badges drawn from a function that is not there');
+    if (await page.locator('#clsBody .note.warn').count() !== 0)
+      throw new Error('a database without the grading module is not a fault, '
+        + 'and must not put a warning on a coach\u2019s class list');
+    if (!await page.locator('#clsBody .stu').count())
+      throw new Error('the class list itself did not survive');
+    await page.request.get(BASE + '/__drop?reset=1');
+  });
+
+  await step('but a syllabus module that raises says so, and attendance still works', async () => {
+    await page.request.get(BASE + '/__break?fn=my_roster_grading');
+    try {
+    await openClasses();
+    const warn = page.locator('#clsBody .note.warn');
+    if (await warn.count() !== 1)
+      throw new Error('the badges failed and the class list said nothing — '
+        + 'this is the whole fault, repeated');
+    const t = await warn.innerText();
+    if (!/badges/i.test(t))
+      throw new Error('it does not say what is not working: ' + JSON.stringify(t));
+    if (!/session_date/.test(t))
+      throw new Error('it does not pass on the database\u2019s own words, which are '
+        + 'the only thing that makes this findable: ' + JSON.stringify(t));
+    // The coach can still do the job they opened the app for.
+    if (!await page.locator('#clsBody .stu').count())
+      throw new Error('a failed badge took the class list with it');
+    if (!await page.locator('#clsBody .mk').count())
+      throw new Error('attendance can no longer be marked');
+    } finally {
+      // Put it back whatever happened above. The first run of this left
+      // the RPC broken for every test after it, and ten of them failed
+      // for a reason none of them named.
+      await page.request.get(BASE + '/__break?reset=1');
+    }
+    await openClasses();
+    if (await page.locator('#clsBody .note.warn').count() !== 0)
+      throw new Error('the warning outlived the fault');
+  });
+
   await step('tapping it opens every level, not just the next one', async () => {
     await page.locator('#clsBody .lvlbtn').first().click();
     await page.waitForTimeout(700);

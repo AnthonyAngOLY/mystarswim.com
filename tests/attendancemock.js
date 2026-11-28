@@ -126,6 +126,13 @@ const LADDER = {
 const CALLS = {};
 // RPCs withdrawn for the length of a test, via /__drop.
 const DROPPED = {};
+// RPCs that EXIST and raise, via /__break. A different thing from
+// dropped, and the app has to tell them apart: a database without the
+// grading module should look untouched, while a function that is
+// installed and broken has to say so. Swallowing both alike is how
+// my_roster_grading asked for a column that does not exist and the only
+// symptom was a class list with no badges on it.
+const BROKEN = {};
 
 const RPC = {
   client_gate:     () => ({ ok: true, known: true, min_build: 1 }),
@@ -262,6 +269,13 @@ http.createServer((req, res) => {
     if (u.searchParams.get('reset')) for (const k of Object.keys(DROPPED)) delete DROPPED[k];
     return send(res, 200, JSON.stringify(DROPPED));
   }
+  if (p === '/__break') {
+    const fn = u.searchParams.get('fn');
+    if (fn) BROKEN[fn] = u.searchParams.get('msg')
+      || 'column ws.session_date does not exist';
+    if (u.searchParams.get('reset')) for (const k of Object.keys(BROKEN)) delete BROKEN[k];
+    return send(res, 200, JSON.stringify(BROKEN));
+  }
   if (p === '/__dates') return send(res, 200, JSON.stringify(
     { today: TODAY, thisMon: THIS_MON, nextMon: NEXT_MON, afterMon: AFTER_MON }));
 
@@ -284,6 +298,10 @@ http.createServer((req, res) => {
       // An RPC this mock does not know answers 404, as a database without
       // the function would. The app must survive that.
       if (!fn) return send(res, 404, JSON.stringify({ message: 'function does not exist' }));
+      // As PostgREST answers a function whose body raises: 400, with the
+      // database's own words.
+      if (BROKEN[name]) return send(res, 400, JSON.stringify({
+        code: '42703', message: BROKEN[name] }));
       send(res, 200, JSON.stringify(fn(args)));
     });
   }

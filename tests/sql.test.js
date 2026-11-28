@@ -91,6 +91,32 @@ const FILES = [
       if (!/^\{/.test(q(`select reset_signin_attempts('012-524 3477')::text`)))
         throw new Error('the reset does not answer');
     } },
+  // Installed before the grading chain so that can_note_on_student() --
+  // the one check that decides who may tick -- is the REAL one from here
+  // on, not the fixture's switch. Five functions came under test with
+  // it: the suite had never executed this module at all, so a column
+  // named wrongly in any of them would have reached a coach's phone the
+  // way my_roster_grading did.
+  { file: 'supabase_progress_notes.sql',
+    probe: () => {
+      const stu = q(`select id from students limit 1`);
+      const out = JSON.parse(q(`select add_progress_note('${stu}','A note from the suite.',null)`));
+      if (out.ok !== true) throw new Error('a note could not be written: ' + JSON.stringify(out));
+      if (!out.author) throw new Error('the note carries no author');
+      const rows = q(`select count(*) from notes_for_student('${stu}')`);
+      if (rows !== '1') throw new Error('the office cannot read it back: ' + rows);
+      // The parent sees the same note, not a draft of it.
+      if (q(`select count(*) from my_child_notes('${stu}')`) !== '1')
+        throw new Error('the parent does not get the note the office just wrote');
+      const v = JSON.parse(q(`select void_progress_note('${out.id}','test')`));
+      if (v.ok !== true) throw new Error('it cannot be withdrawn: ' + JSON.stringify(v));
+      if (q(`select count(*) from my_child_notes('${stu}')`) !== '0')
+        throw new Error('a withdrawn note still reaches the parent');
+      // Void, do not delete.
+      if (q(`select count(*) from student_progress_notes`) !== '1')
+        throw new Error('withdrawing deleted the row instead of marking it');
+      q(`delete from student_progress_notes`);
+    } },
   { file: 'supabase_grading_programs.sql',
     probe: () => {
       if (q(`select count(*) from grading_programs`) === '0')
@@ -1289,10 +1315,15 @@ function q(sql) {
   });
 
   step('and a coach who is not rostered is refused outright', () => {
-    q(`update _test_state set may_note = false`);
+    // can_note_on_student() is the real one now, so this makes the
+    // caller genuinely nobody -- no office seat, no crew record -- which
+    // is what a coach rostered elsewhere looks like to it. Flipping the
+    // old fixture switch would no longer prove anything.
+    const crew = q(`select crew from _test_state`);
+    q(`update _test_state set office = false, crew = null`);
     const e = q(`select mark_grading_task((select id from students limit 1),
                    (select id from grading_tasks limit 1), true, null)->>'error'`);
-    q(`update _test_state set may_note = true`);
+    q(`update _test_state set office = true, crew = '${crew}'`);
     if (!/not rostered/i.test(e || '')) throw new Error('it let them tick: ' + JSON.stringify(e));
   });
 
@@ -1387,6 +1418,99 @@ function q(sql) {
           + (r.stderr || '').trim().split('\n').slice(-2).join(' | '));
     }
     psql(`-c "drop database if exists ${DB2}"`);
+  });
+
+  // ── Every grading function, actually called ───────────────────────────
+  // Today's two faults were the same shape: SQL naming something that is
+  // not there. plpgsql resolves a column, a table and a function name
+  // when the statement RUNS, so the file installs perfectly, the confirm
+  // block says success, and the first real call raises -- into an app
+  // that catches it and shows an empty screen.
+  //
+  // A probe that checks a function EXISTS cannot see that. A probe that
+  // calls it with arguments that make it return early cannot either:
+  // my_roster_grading was called by this suite every run, against an
+  // empty timetable, and returned no rows while being broken.
+  //
+  // So: call every one of them, with arguments that reach the body, each
+  // in its own transaction that is rolled back so the writers are safe.
+  // Only the "names something that is not there" family fails this --
+  // a refusal, a permission error or a business answer is fine, because
+  // the point is whether the SQL can run at all.
+  step('every grading function survives being called', () => {
+    const stu  = q(`select id from students limit 1`);
+    const prog = q(`select grading_program_id from scheduler_lesson_types
+                     where grading_program_id is not null limit 1`);
+    const ms   = q(`select id from grading_milestones where program_id='${prog}'
+                     order by level_no limit 1`);
+    const task = q(`select id from grading_tasks where milestone_id='${ms}'
+                     order by sort_order limit 1`);
+    const ghost = q(`select gen_random_uuid()`);
+    const today = q(`select current_date::text`);
+
+    const CALLS = [
+      `select acting_person_name()`,
+      `select can_note_on_student('${stu}')`,
+      `select count(*) from certificates_pending()`,
+      `select claim_certificate('${stu}','${ms}',true,'certificate')`,
+      `select coach_student_grading('${stu}')`,
+      `select delete_grading_program('${ghost}','delete')`,
+      `select grading_ladder('${stu}','${prog}')`,
+      `select grading_program_swimmers('${prog}')`,
+      `select grading_program_usage('${prog}')`,
+      `select grading_recompute('${stu}','${ms}')`,
+      `select mark_grading_task('${stu}','${task}',true,null)`,
+      `select mark_grading_task('${stu}','${task}',false,null)`,
+      `select my_child_grading('${stu}')`,
+      `select count(*) from my_child_notes('${stu}')`,
+      `select count(*) from my_roster_grading('${today}','${today}'::date + 6)`,
+      `select count(*) from notes_for_student('${stu}')`,
+      `select student_grading('${stu}')`,
+      `select add_progress_note('${stu}','A note from the suite.',null)`,
+      `select edit_progress_note('${ghost}','changed')`,
+      `select void_progress_note('${ghost}','because')`
+    ];
+    // The SQLSTATEs that mean "this SQL names something that is not
+    // there". Everything else is the function doing its job.
+    const FATAL = { '42703': 'undefined column', '42P01': 'undefined table',
+                    '42883': 'undefined function', '42702': 'ambiguous column',
+                    '42704': 'undefined object', '42P02': 'undefined parameter' };
+    const broken = [], uncovered = [];
+    for (const call of CALLS) {
+      const f = path.join(WORK, 'callprobe.sql');
+      // Rolled back, so a writer cannot leave the fixture dirty for the
+      // steps after this one.
+      fs.writeFileSync(f, `\\set ON_ERROR_STOP 0\nbegin;\n${call};\nrollback;\n`);
+      fs.chmodSync(f, 0o644);
+      const r = psql(`-d ${DB} -tAq -v VERBOSITY=verbose -f ${f}`);
+      const err = (r.stderr || '');
+      // A module this suite does not install is not a broken module.
+      // Reported below rather than failed, so the gap is visible.
+      // The function under test, not the count(*) wrapped around it --
+      // which this matched first and reported as "not installed",
+      // hiding whichever function was really missing behind it.
+      const fn = (call.replace(/^select\s+count\(\*\)\s+from\s+/i, 'select ')
+                      .match(/\b([a-z_]+)\s*\(/) || [])[1];
+      if (fn && q(`select count(*) from pg_proc p join pg_namespace n
+                     on n.oid = p.pronamespace
+                    where n.nspname='public' and p.proname='${fn}'`) === '0') {
+        if (!uncovered.includes(fn)) uncovered.push(fn);
+        continue;
+      }
+      const code = (err.match(/SQLSTATE:\s*([0-9A-Z]{5})/)
+                 || err.match(/ERROR:\s*([0-9A-Z]{5}):/) || [])[1];
+      if (process.env.SSB_SHOW_ERR && err.trim())
+        console.log('      [' + (code||'?') + '] ' + err.trim().split('\n')[0]);
+      if (code && FATAL[code])
+        broken.push(call.replace(/\s+/g, ' ').slice(0, 60) + '  ->  ' + FATAL[code]
+          + ': ' + (err.match(/ERROR:\s*(.+)/) || [,'?'])[1].trim());
+    }
+    if (uncovered.length)
+      console.log('      (not installed by this suite, so not called: '
+        + uncovered.join(', ') + ')');
+    if (broken.length)
+      throw new Error(broken.length + ' grading function(s) raise when called:\n   '
+        + broken.join('\n   '));
   });
 
   step('a colour that is not a colour is refused', () => {
