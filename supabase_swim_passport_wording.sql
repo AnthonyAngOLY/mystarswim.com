@@ -23,6 +23,8 @@
 --
 --  WHAT CHANGES, line by line
 --    A   8,9   "parent & child together"      -> "assisted"
+--    B   6,8,9,10  assisted                   -> unassisted
+--    B   new   "Wall grab, unassisted"        -- was absent
 --    1   2,5   glides 3 metres                -> 2 meters
 --    2   2,5   glides 3 metres                -> 5 meters
 --    2   new   "Water exit independently"     -- was absent
@@ -32,17 +34,22 @@
 --    4,5,6 4   "Backstroke"                   -> "Back crawl"
 --    all       "metres"                       -> "meters"
 --
+--  Stage B is the band where a child stops being held, and the seed had
+--  it as nine assisted skills. The passport and the Progression chart
+--  now agree that it is ten, and that four of them are unassisted --
+--  which is the whole difference between A and B.
+--
 --  "meters" over "metres" because the printed passport spells it that
 --  way on every line, and the parent reading the app has the book open
 --  beside it. The book is the one we cannot reissue.
 --
 --  NOTHING IS DELETED. Renaming a task keeps its id, so every tick a
---  coach has ever made still points at it. The one new line on Level 2
---  starts unticked for everyone, which is honest: nobody has been
---  assessed on it yet. A swimmer who already holds the Water Movement
---  certificate keeps it -- the award lives on the milestone, not on the
---  tick count -- and simply reads 9 of 10 until someone sees them climb
---  out of the pool unaided.
+--  coach has ever made still points at it. The two new lines start
+--  unticked for everyone, which is honest: nobody has been assessed on
+--  them yet. A swimmer who already holds the Water Movement certificate
+--  keeps it -- the award lives on the milestone, not on the tick count
+--  -- and simply reads 9 of 10 until someone sees them climb out of the
+--  pool unaided.
 -- ════════════════════════════════════════════════════════════════════════
 
 
@@ -80,9 +87,11 @@ begin
 end $$;
 
 
--- ─── Level 2 gains the line it was missing ──────────────────────────────
--- "Water exit independently" sits at 6 in the printed list, between the
--- back glide and the roll, so the four lines below it move down one.
+-- ─── Two stages gain a line each ────────────────────────────────────────
+-- Stage B gains "Wall grab, unassisted" at 7 and Level 2 gains "Water
+-- exit independently" at 6, both in the position the printed list puts
+-- them, so the lines below each one move down.
+--
 -- The shift runs DESCENDING. grading_tasks has no unique index on
 -- (milestone_id, sort_order) today, so an ascending shift would not
 -- error -- it would silently leave two tasks sharing a number and the
@@ -90,34 +99,38 @@ end $$;
 -- correct whether or not the index exists, so it does not matter which
 -- is true next year.
 --
--- The whole thing is wrapped in "only if the line is not already
--- there", which is what makes a second run a no-op rather than a second
--- insert and a second shift.
+-- Each is wrapped in "only if the line is not already there", which is
+-- what makes a second run a no-op rather than a second insert and a
+-- second shift.
 do $$
 declare
   v_ms uuid;
   r    record;
+  v    record;
 begin
-  select m.id into v_ms
-    from grading_milestones m
-    join grading_programs p on p.id = m.program_id
-   where p.name = 'Swim Passport' and m.label = '2';
+  for v in select * from (values ('B', 7, 'Wall grab, unassisted'),
+                                 ('2', 6, 'Water exit independently'))
+                       as t(label, at, name)
+  loop
+    select m.id into v_ms
+      from grading_milestones m
+      join grading_programs p on p.id = m.program_id
+     where p.name = 'Swim Passport' and m.label = v.label;
 
-  if v_ms is not null
-     and not exists (select 1 from grading_tasks
-                      where milestone_id = v_ms
-                        and name = 'Water exit independently') then
+    continue when v_ms is null;
+    continue when exists (select 1 from grading_tasks
+                           where milestone_id = v_ms and name = v.name);
 
     for r in select id, sort_order from grading_tasks
-              where milestone_id = v_ms and sort_order >= 6
+              where milestone_id = v_ms and sort_order >= v.at
               order by sort_order desc
     loop
       update grading_tasks set sort_order = r.sort_order + 1 where id = r.id;
     end loop;
 
     insert into grading_tasks (milestone_id, name, sort_order)
-    values (v_ms, 'Water exit independently', 6);
-  end if;
+    values (v_ms, v.name, v.at);
+  end loop;
 end $$;
 
 
@@ -142,15 +155,21 @@ update grading_tasks t
     ('A', 8, 'Water exit assisted'),
     ('A', 9, 'Water entry assisted'),
     -- B · Water Explorer
+    -- B is where a child stops being held. The print spells the word
+    -- "uassisted" on two of these lines; it is spelled properly here.
+    -- Copying a typo into the database to match the book would put it
+    -- on every phone and make it harder to fix, not easier -- and the
+    -- artwork is the thing that can still be reprinted.
     ('B', 1, 'Blow bubbles mouth & nose submerged, assisted'),
     ('B', 2, 'Front tow blow bubbles, assisted'),
     ('B', 3, 'Front float blow bubbles, assisted'),
     ('B', 4, 'Back float assisted, head on chest'),
     ('B', 5, 'Back tow assisted, head on chest'),
-    ('B', 6, 'Roll assisted, back to front & front to back'),
-    ('B', 7, 'Monkey crawl assisted, on edge, 2 meters'),
-    ('B', 8, 'Water exit, assisted'),
-    ('B', 9, 'Water entry, assisted'),
+    ('B', 6, 'Roll unassisted, back to front & front to back'),
+    ('B', 7, 'Wall grab, unassisted'),
+    ('B', 8, 'Monkey crawl unassisted, on edge, 2 meters'),
+    ('B', 9, 'Water exit, unassisted'),
+    ('B',10, 'Water entry, unassisted'),
     -- 1 · Starfish · Water Acclimation
     ('1', 1, 'Submerge, bob independently'),
     ('1', 2, 'Front glide assisted, to wall, 2 meters'),
@@ -236,9 +255,17 @@ select z.k as "#", z.thing, z.detail
                   'NOTHING FOUND') as detail
   union all
   select 2, 'should read',
-         'A:9  B:9  1:9  2:10  3:8  4:8  5:8  6:8 — Level 2 is the one with ten'
+         'A:9  B:10  1:9  2:10  3:8  4:8  5:8  6:8 — B and Level 2 are the tens'
   union all
-  select 3, 'Level 2, in order',
+  select 3, 'Stage B, in order',
+         coalesce((select string_agg(t.name, ' · ' order by t.sort_order)
+                     from grading_tasks t
+                     join grading_milestones m on m.id = t.milestone_id
+                     join grading_programs p on p.id = m.program_id
+                    where p.name = 'Swim Passport' and m.label = 'B' and t.is_active),
+                  'NOTHING FOUND')
+  union all
+  select 4, 'Level 2, in order',
          coalesce((select string_agg(t.name, ' · ' order by t.sort_order)
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
@@ -246,7 +273,7 @@ select z.k as "#", z.thing, z.detail
                     where p.name = 'Swim Passport' and m.label = '2' and t.is_active),
                   'NOTHING FOUND')
   union all
-  select 4, 'anything still spelled "metres"',
+  select 5, 'anything still spelled "metres"',
          coalesce((select string_agg(m.label || ' · ' || t.name, ' | ' order by m.label, t.sort_order)
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
@@ -254,7 +281,7 @@ select z.k as "#", z.thing, z.detail
                     where p.name = 'Swim Passport' and t.name like '%metres%'),
                   'none — the app and the book spell it the same way')
   union all
-  select 5, 'anything still saying "Backstroke" as a stroke name',
+  select 6, 'anything still saying "Backstroke" as a stroke name',
          coalesce((select string_agg(m.label || ' · ' || t.name, ' | ' order by m.label, t.sort_order)
                      from grading_tasks t
                      join grading_milestones m on m.id = t.milestone_id
@@ -263,7 +290,7 @@ select z.k as "#", z.thing, z.detail
                       and t.name ~ '^Backstroke'),
                   'none — it is Back crawl throughout, as the chart has it')
   union all
-  select 6, 'ticks carried through the rename',
+  select 7, 'ticks carried through the rename',
          (select count(*)::text from student_task_marks k
             join grading_tasks t on t.id = k.task_id
             join grading_milestones m on m.id = t.milestone_id
@@ -271,7 +298,7 @@ select z.k as "#", z.thing, z.detail
            where p.name = 'Swim Passport' and k.removed_at is null)
       || ' live tick(s). A rename keeps the id, so none of them moved.'
   union all
-  select 7, 'next',
+  select 8, 'next',
          'Nothing to deploy. The apps read these names from the database, '
       || 'so a coach opening the pad after this run sees the printed wording.'
   ) z

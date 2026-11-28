@@ -535,6 +535,13 @@ const FILES = [
             where p.name='Swim Passport' and m.label='${label}' and t.sort_order=${n}`);
       for (const [label, n, want] of [
         ['A', 8, 'Water exit assisted'],
+        // B is the band where a child stops being held. The seed had it
+        // as nine assisted skills; the book has ten, four unassisted.
+        ['B', 6, 'Roll unassisted, back to front & front to back'],
+        ['B', 7, 'Wall grab, unassisted'],
+        ['B', 8, 'Monkey crawl unassisted, on edge, 2 meters'],
+        ['B', 9, 'Water exit, unassisted'],
+        ['B',10, 'Water entry, unassisted'],
         ['1', 2, 'Front glide assisted, to wall, 2 meters'],
         ['2', 2, 'Front glide 5 meters'],
         ['3', 2, 'Swim on front 15 meters'],
@@ -561,7 +568,7 @@ const FILES = [
                                   from grading_milestones m
                                   join grading_programs p on p.id = m.program_id
                                  where p.name='Swim Passport' and m.is_active) x`);
-      if (counts !== 'A:9 B:9 1:9 2:10 3:8 4:8 5:8 6:8')
+      if (counts !== 'A:9 B:10 1:9 2:10 3:8 4:8 5:8 6:8')
         throw new Error('the stages do not hold what the passport prints: ' + counts);
       // Nothing left in two spellings, nothing left calling it Backstroke.
       if (q(`select count(*) from grading_tasks t
@@ -583,8 +590,15 @@ const FILES = [
       if (q(`select count(*) from grading_tasks t
                join grading_milestones m on m.id=t.milestone_id
                join grading_programs p on p.id=m.program_id
-              where p.name='Swim Passport' and m.label='2'`) !== '10')
-        throw new Error('a second run changed Level 2 — the file is not re-runnable');
+              where p.name='Swim Passport' and m.label in ('B','2')`) !== '20')
+        throw new Error('a second run changed B or Level 2 — the file is not re-runnable');
+      // The print spells it "uassisted" on two Stage B lines. The
+      // database must not carry the typo onto every phone.
+      if (q(`select count(*) from grading_tasks t
+               join grading_milestones m on m.id=t.milestone_id
+               join grading_programs p on p.id=m.program_id
+              where p.name='Swim Passport' and t.name like '%uassisted%'`) !== '0')
+        throw new Error('the artwork\u2019s "uassisted" was copied into the database');
     } },
   { file: 'supabase_syllabus_switch.sql',
     probe: () => {
