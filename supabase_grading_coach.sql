@@ -178,7 +178,11 @@ begin
     select distinct wss.student_id
       from weekly_sessions ws
       join weekly_session_students wss on wss.session_id = ws.id
-     where ws.session_date between p_from and p_to
+     -- The live table stores the week and the day, not the date. Every
+     -- other file derives it exactly this way; this one read a
+     -- ws.session_date that does not exist, which raised on every call
+     -- and left the class list with no badges and no error on screen.
+     where (ws.week_start_date + (ws.weekday - 1))::date between p_from and p_to
        and wss.student_id is not null
        and (can_write_office() or exists (
              select 1 from session_instructors si

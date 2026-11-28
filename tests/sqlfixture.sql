@@ -118,8 +118,22 @@ create or replace function attendance_my_crew_id() returns uuid
 language sql stable as $$ select crew from _test_state limit 1 $$;
 
 -- Enough of the timetable for my_roster_grading to run against.
+-- AS THE REAL TABLE IS SHAPED, which is the whole point. This stood as
+-- `session_date date` -- a column the live weekly_sessions does not
+-- have -- because my_roster_grading filtered on that name. So the
+-- fixture was built to fit the function instead of the database, the
+-- suite called the function happily, and in production every class list
+-- raised "column ws.session_date does not exist" and the app, which
+-- catches that call, drew no badges at all. A mock more capable than
+-- the real thing cannot catch misuse.
+--
+-- The live table stores the week and the day; every other file derives
+-- the date as (week_start_date + (weekday - 1)). weekday is 1-based
+-- from the week start.
 create table if not exists weekly_sessions (
-  id uuid primary key default gen_random_uuid(), session_date date);
+  id uuid primary key default gen_random_uuid(),
+  week_start_date date, weekday integer,
+  start_minute integer, duration_minutes integer);
 create table if not exists weekly_session_students (
   id uuid primary key default gen_random_uuid(), session_id uuid, student_id uuid);
 create table if not exists session_instructors (

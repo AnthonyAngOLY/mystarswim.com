@@ -122,6 +122,30 @@ const FILES = [
       // names when the body RUNS. Without the column this file installs
       // cleanly and dies on the first class list, so: call it.
       q(`select count(*) from my_roster_grading(current_date, current_date + 6)`);
+
+      // AND CALL IT WITH A CLASS IN FRONT OF IT. Calling it against an
+      // empty timetable returns no rows whatever is wrong inside, which
+      // is how it filtered on a ws.session_date that the live table does
+      // not have: the suite was happy, and every coach's class list came
+      // up with no badges and no error. So put a real session in the
+      // week, roster this coach to it, and insist on a badge back.
+      const crew = q(`select crew from _test_state`);
+      const stu  = q(`select id from students limit 1`);
+      q(`insert into weekly_sessions (id, week_start_date, weekday, start_minute, duration_minutes)
+           values ('11111111-1111-1111-1111-111111111111',
+                   date_trunc('week', current_date)::date, 1, 600, 50);
+         insert into weekly_session_students (session_id, student_id)
+           values ('11111111-1111-1111-1111-111111111111', '${stu}');
+         insert into session_instructors (session_id, instructor_id)
+           values ('11111111-1111-1111-1111-111111111111', '${crew}')`);
+      const from = q(`select date_trunc('week', current_date)::date`);
+      const got = q(`select count(*) from my_roster_grading('${from}', '${from}'::date + 6)`);
+      q(`delete from session_instructors;
+         delete from weekly_session_students where session_id='11111111-1111-1111-1111-111111111111';
+         delete from weekly_sessions where id='11111111-1111-1111-1111-111111111111'`);
+      if (got !== '1')
+        throw new Error('a coach rostered to a class with a graded swimmer in it got '
+          + got + ' badges — this is what an empty class list looks like');
       // The coach app signs in as `authenticated`, and a drop-and-create
       // drops the grants along with the function.
       if (q(`select has_function_privilege('authenticated',
@@ -854,6 +878,46 @@ const FILES = [
       if (q(`select count(*) from student_task_marks where removed_at is null`) !== '0')
         throw new Error('this probe left ticks behind and the steps after it '
           + 'will assert against a dirty fixture');
+    } },
+  { file: 'supabase_grading_roster_date.sql',
+    probe: () => {
+      // The hand-off file: it re-creates my_roster_grading on its own,
+      // so a database already carrying the broken one is fixed without
+      // re-running supabase_grading_coach.sql (which would also put the
+      // older mark_grading_task back).
+      // The FILTER, not the words. Looking for the column name anywhere
+      // in the body matched the comment that explains the fix, so a
+      // correct install reported itself broken -- and the file's own
+      // confirm block had the same flaw, which would have told Anthony
+      // the fix had not taken.
+      if (/session_date\s+between/.test(q(`select prosrc from pg_proc
+                                           where proname='my_roster_grading'`)))
+        throw new Error('the file left the session_date filter in place');
+      const crew = q(`select crew from _test_state`);
+      const stu  = q(`select id from students limit 1`);
+      q(`insert into weekly_sessions (id, week_start_date, weekday, start_minute, duration_minutes)
+           values ('22222222-2222-2222-2222-222222222222',
+                   date_trunc('week', current_date)::date, 3, 600, 50);
+         insert into weekly_session_students (session_id, student_id)
+           values ('22222222-2222-2222-2222-222222222222', '${stu}');
+         insert into session_instructors (session_id, instructor_id)
+           values ('22222222-2222-2222-2222-222222222222', '${crew}')`);
+      const from = q(`select date_trunc('week', current_date)::date`);
+      const row = q(`select program_name || '|' || coalesce(level_no::text,'-')
+                       || '|' || levels_total
+                       from my_roster_grading('${from}', '${from}'::date + 6)`);
+      // A class outside the week must not bring a badge with it.
+      q(`update weekly_sessions set week_start_date = date_trunc('week', current_date)::date + 21
+          where id='22222222-2222-2222-2222-222222222222'`);
+      const outside = q(`select count(*) from my_roster_grading('${from}', '${from}'::date + 6)`);
+      q(`delete from session_instructors;
+         delete from weekly_session_students where session_id='22222222-2222-2222-2222-222222222222';
+         delete from weekly_sessions where id='22222222-2222-2222-2222-222222222222'`);
+      if (!row || !/\|/.test(row))
+        throw new Error('a rostered coach still gets no badge: ' + JSON.stringify(row));
+      if (outside !== '0')
+        throw new Error('a class three weeks away was counted as this week, so the '
+          + 'date filter is not filtering: ' + outside);
     } },
   { file: 'supabase_grading_marked_by.sql',
     probe: () => {
