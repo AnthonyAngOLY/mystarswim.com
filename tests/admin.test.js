@@ -1424,6 +1424,147 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       throw new Error('these draw a border at rest: ' + allowed.join(', '));
   });
 
+  // ── The Swimmers table and one swimmer's particulars ──────────────────
+  // The table answers "who is on the books". The window behind a name
+  // answers "how is this child doing", which is the question the office
+  // is actually asked on the phone.
+  const SESSIONS = [
+    { id: 'se1', weekStartDate: '2026-11-02', day: 2, startMinute: 600,
+      type: 'LTS Group', cancelledAt: null,
+      students: [{ studentId: 's1', attendance: 'attended', isReplacement: false, remark: '' }] },
+    { id: 'se2', weekStartDate: '2026-11-09', day: 2, startMinute: 600,
+      type: 'LTS Group', cancelledAt: null,
+      students: [{ studentId: 's1', attendance: 'absent', isReplacement: false, remark: 'Fever' }] },
+    { id: 'se3', weekStartDate: '2026-11-16', day: 2, startMinute: 600,
+      type: 'LTS Group', cancelledAt: null,
+      students: [{ studentId: 's1', attendance: 'pending', isReplacement: true, remark: '' }] },
+    // A class that did not happen. Counting it as an absence would be an
+    // accusation, so it must not appear at all.
+    { id: 'se4', weekStartDate: '2026-11-23', day: 2, startMinute: 600,
+      type: 'LTS Group', cancelledAt: '2026-11-20T02:00:00Z',
+      students: [{ studentId: 's1', attendance: 'absent', isReplacement: false, remark: '' }] }
+  ];
+
+  const mountSwimmers = () => page.evaluate((sessions) => {
+    // The session modal mounted by an earlier step is still on the page,
+    // and its .modal-backdrop is fixed, full-screen and above everything
+    // — so every click here landed on the backdrop instead of the table.
+    // Taking the earlier hosts down is part of mounting this one.
+    for (const id of ['sm-host', 'lt-host', 'gp-host', 'gr-host']) {
+      const old = document.getElementById(id);
+      if (old) old.remove();
+    }
+    let host = document.getElementById('sw-host');
+    if (!host) { host = document.createElement('div'); host.id = 'sw-host';
+                 document.body.appendChild(host); }
+    const noop = () => {};
+    const lts = { id: 'lt1', name: 'LTS Group', sort_order: 1, is_active: true,
+                  grading_program_id: 'pr1' };
+    const hire = { id: 'lt2', name: 'Pool Hire', sort_order: 2, is_active: true,
+                   grading_program_id: null };
+    const students = [
+      { id: 's1', name: 'Mira Kwan', age: 6, lessonTypeIds: ['lt1'],
+        guardianName: 'Kwan Suk Lee', guardianPhone: '+60123456001',
+        tcAcceptedAt: '2026-01-02T02:00:00Z', enrollments: [] },
+      { id: 's2', name: 'Ungraded Child', age: 9, lessonTypeIds: ['lt2'],
+        guardianName: 'A Parent', guardianPhone: '+60123456002', enrollments: [] }
+    ];
+    ReactDOM.createRoot(host).render(React.createElement(StudentsView, {
+      students, lessonTypes: [lts, hire],
+      lessonTypeById: (id) => (id === 'lt1' ? lts : id === 'lt2' ? hire : null),
+      packages: [], packageById: () => null, groupById: () => null,
+      familyGroups: [], membersByGroup: {}, scheduleByStudent: {}, sessions,
+      jumpToWeek: noop, creditByKey: {}, purchasesByStudent: {}, subscriptions: [],
+      addCreditPurchase: noop, deleteCreditPurchase: noop, addSubscription: noop,
+      cancelSubscription: noop, adjustBalanceTo: noop, addStudent: noop,
+      updateStudent: noop, deleteStudent: noop, externalSearchQ: '',
+      gradingPrograms: [{ id: 'pr1', name: 'Star Swim Passport', sort_order: 1 }],
+      gradingMilestones: [
+        { id: 'ms1', program_id: 'pr1', level_no: 1, label: 'A', name: 'Water Discovery',
+          colour: '#2CBDBE', is_active: true },
+        { id: 'ms2', program_id: 'pr1', level_no: 2, label: 'B', name: 'Water Explorer',
+          colour: '#2CACE2', is_active: true }
+      ],
+      gradingHeld: [
+        { student_id: 's1', milestone_id: 'ms1', achieved_at: '2026-03-04T02:00:00Z', revoked_at: null },
+        // Revoked, so it must not count as the stage they hold.
+        { student_id: 's1', milestone_id: 'ms2', achieved_at: '2026-05-01T02:00:00Z',
+          revoked_at: '2026-05-02T02:00:00Z' }
+      ]
+    }));
+  }, SESSIONS);
+
+  await step('the Swimmers table names each swimmer\u2019s syllabus and stage', async () => {
+    await mountSwimmers();
+    await page.waitForTimeout(1200);
+    const cells = await page.locator('#sw-host tbody tr').evaluateAll(trs =>
+      trs.map(tr => tr.querySelector('.syl-cell')
+        ? tr.querySelector('.syl-cell').innerText.replace(/\s+/g, ' ').trim()
+        // Name, Age, Parent, Emergency, Lesson Type, Package, Credits,
+        // THEN Syllabus. Reading children[8] gave the T&C column, and the
+        // assertion failed on a tick mark.
+        : (tr.children[7] ? tr.children[7].innerText.trim() : '?')));
+    if (!/Star Swim Passport/.test(cells[0]))
+      throw new Error('the syllabus is not named: ' + JSON.stringify(cells[0]));
+    // A, not B: B was revoked, and a withdrawn stage is not one they hold.
+    if (!/\bA\b/.test(cells[0]) || /\bB\b/.test(cells[0]))
+      throw new Error('the stage chip is wrong — a revoked stage is being counted: '
+        + JSON.stringify(cells[0]));
+    if (!/1\/2/.test(cells[0]))
+      throw new Error('the count is wrong: ' + JSON.stringify(cells[0]));
+    if (cells[1] !== '—')
+      throw new Error('a swimmer on an ungraded lesson type shows a syllabus: '
+        + JSON.stringify(cells[1]));
+  });
+
+  await step('and the name opens that swimmer\u2019s particulars', async () => {
+    if (await page.locator('.particulars').count())
+      throw new Error('it is open before anybody clicked');
+    await page.locator('#sw-host .swimmer-name-link').first().click();
+    await page.waitForTimeout(900);
+    const t = await page.locator('.particulars').innerText();
+    if (!/Mira Kwan/.test(t)) throw new Error('the wrong swimmer: ' + t.slice(0, 120));
+    if (!/Kwan Suk Lee/.test(t)) throw new Error('no parent on the header');
+    for (const tab of ['Syllabus', 'Attendance', 'Progress notes', 'Grading record'])
+      if (!new RegExp(tab).test(t)) throw new Error('no ' + tab + ' tab');
+  });
+
+  await step('attendance is every class they were in, newest first, cancelled ones left out', async () => {
+    await page.locator('.particulars-tabs button').filter({ hasText: 'Attendance' }).click();
+    await page.waitForTimeout(600);
+    const rows = await page.locator('.particulars-table tbody tr')
+      .evaluateAll(trs => trs.map(tr => [...tr.children].map(td => td.innerText.trim())));
+    if (rows.length !== 3)
+      throw new Error('expected 3 classes (the cancelled one excluded), got ' + rows.length);
+    const dates = rows.map(r => r[0]);
+    if (dates.join('|') !== [...dates].sort().reverse().join('|')
+        && !/18 Nov/.test(dates[0]))
+      throw new Error('not newest first: ' + dates.join(', '));
+    const tally = await page.locator('.att-tally').innerText();
+    if (!/1 attended/.test(tally) || !/1 absent/.test(tally) || !/1 unmarked/.test(tally))
+      throw new Error('the tally counts the cancelled class: ' + JSON.stringify(tally));
+    const body = await page.locator('.particulars-body').innerText();
+    if (!/Fever/.test(body)) throw new Error('the remark on the absence is not shown');
+  });
+
+  await step('the grading record is dated, and says who ticked it', async () => {
+    await page.locator('.particulars-tabs button').filter({ hasText: 'Grading record' }).click();
+    await page.waitForTimeout(900);
+    const t = await page.locator('.particulars-body').innerText();
+    if (!/Stages earned/i.test(t)) throw new Error('no stages-earned section: ' + t.slice(0, 200));
+    if (!/Water Explorer/.test(t)) throw new Error('the earned stage is not listed');
+    if (!/Wall grab, unassisted/.test(t)) throw new Error('the tick is not listed');
+    if (!/the office/.test(t)) throw new Error('it does not say who ticked it');
+    if (!/2026/.test(t)) throw new Error('the ticks carry no date');
+  });
+
+  await step('and it closes', async () => {
+    await page.locator('.particulars .modal-head button').click();
+    await page.waitForTimeout(500);
+    if (await page.locator('.particulars').count())
+      throw new Error('the particulars window will not close');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

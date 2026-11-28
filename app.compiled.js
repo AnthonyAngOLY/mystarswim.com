@@ -996,6 +996,9 @@ function App({
   const [gradingPrograms, setGradingPrograms] = useState([]);
   const [gradingMilestones, setGradingMilestones] = useState([]);
   const [gradingTasks, setGradingTasks] = useState([]);
+  // student_id -> the stages they hold. Feeds the Swimmers table's stage
+  // chip without asking the server once per row.
+  const [gradingHeld, setGradingHeld] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [invoiceLines, setInvoiceLines] = useState([]);
   const [pmts, setPmts] = useState([]);
@@ -1061,10 +1064,14 @@ function App({
   // a row nobody can do anything with.
   async function loadGrading() {
     try {
-      const [progs, miles, tasks] = await Promise.all([selectAllRows('grading_programs', '*', '&order=sort_order.asc,name.asc'), selectAllRows('grading_milestones', '*', '&order=level_no.asc'), selectAllRows('grading_tasks', '*', '&order=sort_order.asc')]);
+      // `held` is every stage any swimmer has earned. Read in bulk rather
+      // than per swimmer: the Swimmers table shows a stage beside 400-odd
+      // names, and that is one query or four hundred.
+      const [progs, miles, tasks, held] = await Promise.all([selectAllRows('grading_programs', '*', '&order=sort_order.asc,name.asc'), selectAllRows('grading_milestones', '*', '&order=level_no.asc'), selectAllRows('grading_tasks', '*', '&order=sort_order.asc'), selectAllRows('student_milestones', 'student_id,milestone_id,achieved_at,revoked_at')]);
       setGradingPrograms(progs || []);
       setGradingMilestones(miles || []);
       setGradingTasks(tasks || []);
+      setGradingHeld(held || []);
     } catch (e) {
       // Before supabase_grading_programs.sql has been run. The lesson
       // type editor simply offers no programmes, which is honest.
@@ -1072,6 +1079,7 @@ function App({
       setGradingPrograms([]);
       setGradingMilestones([]);
       setGradingTasks([]);
+      setGradingHeld([]);
     }
   }
   async function loadInvoiceData() {
@@ -7546,6 +7554,9 @@ function App({
     membersByGroup: membersByGroup,
     scheduleByStudent: scheduleByStudent,
     sessions: sessions,
+    gradingPrograms: gradingPrograms,
+    gradingMilestones: gradingMilestones,
+    gradingHeld: gradingHeld,
     jumpToWeek: (weekStartDate, dayIndex) => {
       const d = fromDateStr(weekStartDate);
       d.setDate(d.getDate() + (dayIndex || 0));
@@ -12710,7 +12721,8 @@ function StudentGradingPanel({
   studentId,
   studentName,
   sessionId,
-  onClose
+  onClose,
+  historyOnly
 }) {
   const [g, setG] = useState(null);
   const [err, setErr] = useState('');
@@ -12768,15 +12780,55 @@ function StudentGradingPanel({
   const band = g.band;
   const held = (g.milestones || []).filter(m => m.activated);
   const top = held.length ? held[held.length - 1] : null;
+
+  // Every tick that has been made, newest first. Built from the same
+  // payload the ladder is drawn from rather than a second read: a list
+  // that could disagree with the ladder above it would be worse than no
+  // list at all.
+  if (historyOnly) {
+    const marks = [];
+    (g.milestones || []).forEach(m => (m.tasks || []).forEach(t => {
+      if (t.done) marks.push({
+        id: t.id,
+        stage: m,
+        task: t
+      });
+    }));
+    marks.sort((a, b) => String(b.task.marked_at || '').localeCompare(String(a.task.marked_at || '')));
+    const earned = (g.milestones || []).filter(m => m.activated && m.achieved_at).slice().sort((a, b) => String(b.achieved_at).localeCompare(String(a.achieved_at)));
+    return /*#__PURE__*/React.createElement("div", null, earned.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+      className: "pt-sub"
+    }, "Stages earned"), /*#__PURE__*/React.createElement("table", {
+      className: "particulars-table"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Stage"), /*#__PURE__*/React.createElement("th", null, "Earned"), /*#__PURE__*/React.createElement("th", null, "Certificate"))), /*#__PURE__*/React.createElement("tbody", null, earned.map(m => /*#__PURE__*/React.createElement("tr", {
+      key: m.id
+    }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("b", null, m.label ? `${m.label} · ` : '', m.name), m.formal_name ? /*#__PURE__*/React.createElement("span", {
+      className: "subtle"
+    }, " ", m.formal_name) : null), /*#__PURE__*/React.createElement("td", null, adminFmtDate(String(m.achieved_at).slice(0, 10))), /*#__PURE__*/React.createElement("td", {
+      className: "subtle"
+    }, !m.certificate ? '—' : m.certificate_claimed_at ? `Given ${adminFmtDate(String(m.certificate_claimed_at).slice(0, 10))}` : 'Waiting')))))) : null, /*#__PURE__*/React.createElement("div", {
+      className: "pt-sub"
+    }, "Every tick"), marks.length === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "small subtle"
+    }, "Nothing has been ticked for this swimmer yet.") : /*#__PURE__*/React.createElement("table", {
+      className: "particulars-table"
+    }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Date"), /*#__PURE__*/React.createElement("th", null, "Stage"), /*#__PURE__*/React.createElement("th", null, "Skill"), /*#__PURE__*/React.createElement("th", null, "By"))), /*#__PURE__*/React.createElement("tbody", null, marks.map(x => /*#__PURE__*/React.createElement("tr", {
+      key: x.id
+    }, /*#__PURE__*/React.createElement("td", null, x.task.marked_at ? adminFmtDate(String(x.task.marked_at).slice(0, 10)) : '—'), /*#__PURE__*/React.createElement("td", {
+      className: "subtle"
+    }, x.stage.label || x.stage.level_no), /*#__PURE__*/React.createElement("td", null, x.task.name), /*#__PURE__*/React.createElement("td", {
+      className: "subtle"
+    }, x.task.marked_by || '—'))))));
+  }
   return /*#__PURE__*/React.createElement("div", {
     className: "grade-pane"
   }, /*#__PURE__*/React.createElement("div", {
     className: "grade-head"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", null, studentName), /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement("div", null, studentName ? /*#__PURE__*/React.createElement("b", null, studentName) : null, /*#__PURE__*/React.createElement("span", {
     className: "small subtle",
-    style: {
+    style: studentName ? {
       marginLeft: 8
-    }
+    } : null
   }, g.program?.name, band ? ` · ${band.name} ${band.done} of ${band.total}` : '', top ? ` · ${top.label ? `Stage ${top.label}` : `Level ${top.level_no}`} ${top.name}` : ' · no stage yet')), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
@@ -19645,6 +19697,141 @@ function ReceiptsView({
     }
   }, "Page ", safePage, " of ", pageCount, " · ", filtered.length, " receipts")));
 }
+// ─── One swimmer, everything about them ──────────────────────────────────
+// The Swimmers table answers "who is on the books". This answers "how is
+// this child doing", which is the question the office is actually asked on
+// the phone -- and which used to mean three screens and a guess.
+//
+// Four things, in the order somebody asks about them: where they are on
+// the syllabus and what to tick next; whether they have been turning up;
+// what the coaches have written; and when each skill was signed off.
+//
+// Nothing here is new data. The attendance comes out of the sessions
+// already in memory, the notes out of the panel the account page uses, and
+// the syllabus out of the same function the coaches' pad reads. A second
+// way of working out any of them would be a second answer to the same
+// question.
+function SwimmerParticulars({
+  swimmer,
+  sessions,
+  lessonTypeById,
+  onClose
+}) {
+  const [tab, setTab] = useState('syllabus');
+
+  // Every class this swimmer was put in, newest first, with what was
+  // marked. Ghost sessions are skipped: a cancelled class is not an
+  // absence and counting it as one would be an accusation.
+  const history = useMemo(() => {
+    const out = [];
+    (sessions || []).forEach(se => {
+      if (se.cancelledAt) return;
+      const me = (se.students || []).find(x => x.studentId === swimmer.id);
+      if (!me) return;
+      out.push({
+        id: se.id + ':' + swimmer.id,
+        date: addDays(se.weekStartDate, se.day || 0),
+        week: se.weekStartDate,
+        time: se.startMinute,
+        type: se.type || '',
+        attendance: me.attendance || 'pending',
+        isReplacement: !!me.isReplacement,
+        remark: me.remark || ''
+      });
+    });
+    out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : b.time - a.time);
+    return out;
+  }, [sessions, swimmer.id]);
+  const tally = useMemo(() => {
+    const t = {
+      attended: 0,
+      absent: 0,
+      pending: 0
+    };
+    history.forEach(h => {
+      t[h.attendance] = (t[h.attendance] || 0) + 1;
+    });
+    return t;
+  }, [history]);
+  const TABS = [['syllabus', 'Syllabus'], ['attendance', 'Attendance'], ['notes', 'Progress notes'], ['record', 'Grading record']];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "modal-backdrop",
+    onMouseDown: e => {
+      if (e.target === e.currentTarget) onClose();
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-card particulars",
+    onMouseDown: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "modal-head"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      fontWeight: 800,
+      lineHeight: 1.15
+    }
+  }, swimmer.name), /*#__PURE__*/React.createElement("div", {
+    className: "small subtle",
+    style: {
+      fontSize: 10.5,
+      marginTop: 1
+    }
+  }, swimmer.age != null ? `${swimmer.age} yrs` : 'Age not given', swimmer.guardianName ? ` · ${swimmer.guardianName}` : '', swimmer.guardianPhone ? ` · ${swimmer.guardianPhone}` : '')), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onClose,
+    "aria-label": "Close",
+    title: "Close (Esc)"
+  }, "✕")), /*#__PURE__*/React.createElement("div", {
+    className: "particulars-tabs"
+  }, TABS.map(([k, label]) => /*#__PURE__*/React.createElement("button", {
+    key: k,
+    type: "button",
+    className: `sub-tab${tab === k ? ' active' : ''}`,
+    onClick: () => setTab(k)
+  }, label, k === 'attendance' && history.length ? /*#__PURE__*/React.createElement("span", {
+    className: "pt-count"
+  }, history.length) : null))), /*#__PURE__*/React.createElement("div", {
+    className: "modal-body particulars-body"
+  }, tab === 'syllabus' && /*#__PURE__*/React.createElement(StudentGradingPanel, {
+    studentId: swimmer.id,
+    studentName: null,
+    sessionId: null
+  }), tab === 'record' && /*#__PURE__*/React.createElement(StudentGradingPanel, {
+    studentId: swimmer.id,
+    studentName: null,
+    sessionId: null,
+    historyOnly: true
+  }), tab === 'notes' && /*#__PURE__*/React.createElement(ProgressNotesPanel, {
+    swimmer: swimmer
+  }), tab === 'attendance' && (history.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "This swimmer has not been put in a class yet.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "att-tally"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "att-tally-n att-tally-a"
+  }, tally.attended, " attended"), /*#__PURE__*/React.createElement("span", {
+    className: "att-tally-n att-tally-x"
+  }, tally.absent, " absent"), /*#__PURE__*/React.createElement("span", {
+    className: "att-tally-n att-tally-p"
+  }, tally.pending, " unmarked")), /*#__PURE__*/React.createElement("table", {
+    className: "particulars-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Date"), /*#__PURE__*/React.createElement("th", null, "Time"), /*#__PURE__*/React.createElement("th", null, "Class"), /*#__PURE__*/React.createElement("th", null, "Marked"), /*#__PURE__*/React.createElement("th", null, "Remark"))), /*#__PURE__*/React.createElement("tbody", null, history.map(h => /*#__PURE__*/React.createElement("tr", {
+    key: h.id
+  }, /*#__PURE__*/React.createElement("td", null, adminFmtDate(h.date)), /*#__PURE__*/React.createElement("td", {
+    className: "subtle"
+  }, minuteToTime(h.time)), /*#__PURE__*/React.createElement("td", null, h.type, h.isReplacement ? /*#__PURE__*/React.createElement("span", {
+    className: "pt-repl"
+  }, "R") : null), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+    className: `pt-att pt-att-${h.attendance}`
+  }, h.attendance === 'attended' ? 'Attended' : h.attendance === 'absent' ? 'Absent' : 'Not marked')), /*#__PURE__*/React.createElement("td", {
+    className: "subtle"
+  }, h.remark || ''))))))))));
+}
 function StudentsView({
   students,
   lessonTypes,
@@ -19668,8 +19855,58 @@ function StudentsView({
   addStudent,
   updateStudent,
   deleteStudent,
-  externalSearchQ
+  externalSearchQ,
+  gradingPrograms,
+  gradingMilestones,
+  gradingHeld
 }) {
+  // Which swimmer's particulars are open. Null for none.
+  const [particulars, setParticulars] = useState(null);
+
+  // ── Which syllabus a swimmer is on, and the stage they hold ──────────
+  // Worked out here rather than asked of the server: the lesson types are
+  // already in memory with their grading_program_id, and every earned
+  // stage came down in one read. Four hundred rows, no round trips.
+  //
+  // The rule is student_grading()'s rule, kept deliberately identical --
+  // the FIRST lesson type that points at a syllabus, in the order the
+  // office sorted them. A swimmer in two graded lesson types shows the
+  // same one here as on their parent's phone, which is the only way the
+  // office can answer a question about what a parent is looking at.
+  const syllabusFor = useMemo(() => {
+    const msById = {};
+    (gradingMilestones || []).forEach(m => {
+      msById[m.id] = m;
+    });
+    const heldByStudent = {};
+    (gradingHeld || []).forEach(h => {
+      if (h.revoked_at) return;
+      const m = msById[h.milestone_id];
+      if (!m) return;
+      (heldByStudent[h.student_id] = heldByStudent[h.student_id] || []).push(m);
+    });
+    const progById = {};
+    (gradingPrograms || []).forEach(p => {
+      progById[p.id] = p;
+    });
+    const stagesOf = pid => (gradingMilestones || []).filter(m => m.program_id === pid && m.is_active !== false).length;
+    return stu => {
+      const lts = (stu.lessonTypeIds || []).map(id => lessonTypeById ? lessonTypeById(id) : null).filter(lt => lt && lt.grading_program_id);
+      if (!lts.length) return null;
+      lts.sort((a, b) => (a.sort_order ?? 1e9) - (b.sort_order ?? 1e9) || String(a.name || '').localeCompare(String(b.name || '')));
+      const prog = progById[lts[0].grading_program_id];
+      if (!prog) return null;
+      const mine = (heldByStudent[stu.id] || []).filter(m => m.program_id === prog.id);
+      mine.sort((a, b) => (a.level_no || 0) - (b.level_no || 0));
+      const top = mine.length ? mine[mine.length - 1] : null;
+      return {
+        program: prog,
+        top,
+        earned: mine.length,
+        total: stagesOf(prog.id)
+      };
+    };
+  }, [gradingPrograms, gradingMilestones, gradingHeld, lessonTypeById]);
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState(null);
@@ -19815,7 +20052,7 @@ function StudentsView({
       s
     }));
   }, [filtered, sortBy]);
-  const COLS = 9;
+  const COLS = 10;
   function resetForm() {
     setName('');
     setDob('');
@@ -19918,6 +20155,10 @@ function StudentsView({
     }
   }, "Credits"), /*#__PURE__*/React.createElement("th", {
     style: {
+      width: '11%'
+    }
+  }, "Syllabus"), /*#__PURE__*/React.createElement("th", {
+    style: {
       width: '5%'
     }
   }, "T&C"), /*#__PURE__*/React.createElement("th", null, "Schedule"))), /*#__PURE__*/React.createElement("tbody", null, displayList.length ? displayList.map((row, ri) => {
@@ -19950,7 +20191,12 @@ function StudentsView({
       style: {
         fontWeight: 700
       }
-    }, s.name, s.gender ? /*#__PURE__*/React.createElement("span", {
+    }, /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "swimmer-name-link",
+      title: "Open this swimmer’s particulars",
+      onClick: () => setParticulars(s)
+    }, s.name), s.gender ? /*#__PURE__*/React.createElement("span", {
       style: {
         marginLeft: 4,
         fontSize: 10,
@@ -20018,7 +20264,34 @@ function StudentsView({
       className: rem != null && rem <= 2 ? 'credit-low' : ''
     }, rem != null ? rem : '—')) : null)) : /*#__PURE__*/React.createElement("span", {
       className: "subtle"
-    }, "—")), /*#__PURE__*/React.createElement("td", null, tcOk ? /*#__PURE__*/React.createElement("span", {
+    }, "—")), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontSize: 11
+      }
+    }, (() => {
+      const g = syllabusFor ? syllabusFor(s) : null;
+      if (!g) return /*#__PURE__*/React.createElement("span", {
+        className: "subtle"
+      }, "—");
+      return /*#__PURE__*/React.createElement("div", {
+        className: "syl-cell"
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "syl-cell-prog"
+      }, g.program.name), /*#__PURE__*/React.createElement("span", {
+        className: `syl-cell-stage${g.top ? '' : ' is-none'}`,
+        style: g.top && g.top.colour ? {
+          background: g.top.colour,
+          borderColor: g.top.colour,
+          color: '#fff'
+        } : null,
+        title: g.top ? `${g.top.name}${g.top.formal_name ? ' · ' + g.top.formal_name : ''}` : 'No stage earned yet'
+      }, g.top ? g.top.label || g.top.level_no : '–'), /*#__PURE__*/React.createElement("span", {
+        className: "subtle",
+        style: {
+          fontSize: 10
+        }
+      }, g.earned, "/", g.total));
+    })()), /*#__PURE__*/React.createElement("td", null, tcOk ? /*#__PURE__*/React.createElement("span", {
       className: "tc-badge-ok",
       title: `Accepted ${new Date(s.tcAcceptedAt).toLocaleDateString()} · ID: ${s.tcAcceptanceId}`
     }, "✅") : /*#__PURE__*/React.createElement("span", {
@@ -20067,7 +20340,12 @@ function StudentsView({
   }) : /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
     colSpan: COLS,
     className: "empty"
-  }, "No swimmers found.")))))));
+  }, "No swimmers found.")))))), particulars && /*#__PURE__*/React.createElement(SwimmerParticulars, {
+    swimmer: particulars,
+    sessions: sessions,
+    lessonTypeById: lessonTypeById,
+    onClose: () => setParticulars(null)
+  }));
 }
 
 // ============================================================================

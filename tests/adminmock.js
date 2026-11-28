@@ -68,7 +68,13 @@ const PATCHES = {};
 const DELETES = [];
 
 // Which task ids are ticked, and every mark_grading_task call made.
-const TICKS = new Set();
+// Seeded with one tick on stage B, NOT on the first task of stage A --
+// the test that proves a tick reaches the server clicks that one and
+// asserts it starts clear, so a fixture that pre-ticked it would make
+// that test pass by doing nothing.
+const TICKS = new Set(['t3']);
+const MARKED_AT = { t1: '2026-10-02T02:00:00Z', t2: '2026-10-09T02:00:00Z',
+                    t3: '2026-10-16T02:00:00Z' };
 const MARKS = [];
 
 // Who is using each syllabus, as grading_program_usage() answers it.
@@ -147,6 +153,22 @@ http.createServer((req, res) => {
       { id: 'ms3', program_id: 'pr2', level_no: 1, name: 'Droplet', certificate: false, is_active: true }
     ]);
   }
+  // Stages swimmers hold. The Swimmers table reads these in bulk rather
+  // than asking per row, so they come from a table and not an RPC.
+  if (p === '/rest/v1/student_milestones') {
+    return json(res, 200, [
+      { student_id: 's1', milestone_id: 'ms1', achieved_at: '2026-03-04T02:00:00Z',
+        revoked_at: null },
+      { student_id: 's1', milestone_id: 'ms2', achieved_at: '2026-05-01T02:00:00Z',
+        revoked_at: '2026-05-02T02:00:00Z' }
+    ]);
+  }
+  if (p === '/rest/v1/rpc/notes_for_student') {
+    return json(res, 200, [
+      { id: 'n1', body: 'Kobe held a float-and-glide for a full width today.',
+        author: 'Coach Sally', created_at: '2026-11-04T02:00:00Z', voided_at: null }
+    ]);
+  }
   if (p === '/rest/v1/grading_tasks') {
     return json(res, 200, [
       { id: 't1', milestone_id: 'ms1', name: 'Submerges whole head', sort_order: 1, is_active: true },
@@ -185,13 +207,17 @@ http.createServer((req, res) => {
         return json(res, 200, { ok: true, task_id: b.p_task });
       }
       const task = (id, name) => ({ id, name, done: TICKS.has(id),
+                                    marked_at: TICKS.has(id) ? MARKED_AT[id] || null : null,
                                     marked_by: TICKS.has(id) ? 'the office' : null });
       const ms = (id, label, name, formal, colour, tasks) => {
         const ts = tasks.map(([i, n]) => task(i, n));
         const done = ts.filter(t => t.done).length;
+        const on = done === ts.length;
         return { id, label, level_no: label === 'A' ? 1 : 2, name, formal_name: formal,
                  colour, band: 'Swim Starters', certificate: true,
-                 activated: done === ts.length, total: ts.length, done, tasks: ts };
+                 activated: on, achieved_at: on ? '2026-10-16T02:00:00Z' : null,
+                 certificate_claimed_at: null,
+                 total: ts.length, done, tasks: ts };
       };
       const mss = [
         ms('m1', 'A', 'Water Discovery', null, '#2CBDBE',

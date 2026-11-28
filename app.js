@@ -626,6 +626,9 @@ function App({ currentUser, onLogout }){
   const [gradingPrograms,setGradingPrograms] = useState([]);
   const [gradingMilestones,setGradingMilestones] = useState([]);
   const [gradingTasks,setGradingTasks] = useState([]);
+  // student_id -> the stages they hold. Feeds the Swimmers table's stage
+  // chip without asking the server once per row.
+  const [gradingHeld,setGradingHeld] = useState([]);
   const [invoices,setInvoices] = useState([]);
   const [invoiceLines,setInvoiceLines] = useState([]);
   const [pmts,setPmts] = useState([]);
@@ -672,17 +675,23 @@ function App({ currentUser, onLogout }){
   // a row nobody can do anything with.
   async function loadGrading(){
     try{
-      const [progs, miles, tasks] = await Promise.all([
+      // `held` is every stage any swimmer has earned. Read in bulk rather
+      // than per swimmer: the Swimmers table shows a stage beside 400-odd
+      // names, and that is one query or four hundred.
+      const [progs, miles, tasks, held] = await Promise.all([
         selectAllRows('grading_programs','*','&order=sort_order.asc,name.asc'),
         selectAllRows('grading_milestones','*','&order=level_no.asc'),
-        selectAllRows('grading_tasks','*','&order=sort_order.asc')
+        selectAllRows('grading_tasks','*','&order=sort_order.asc'),
+        selectAllRows('student_milestones','student_id,milestone_id,achieved_at,revoked_at')
       ]);
       setGradingPrograms(progs||[]); setGradingMilestones(miles||[]); setGradingTasks(tasks||[]);
+      setGradingHeld(held||[]);
     }catch(e){
       // Before supabase_grading_programs.sql has been run. The lesson
       // type editor simply offers no programmes, which is honest.
       console.warn('Grading tables not available yet (run supabase_grading_programs.sql):', e?.message || e);
       setGradingPrograms([]); setGradingMilestones([]); setGradingTasks([]);
+      setGradingHeld([]);
     }
   }
 
@@ -5127,6 +5136,8 @@ function App({ currentUser, onLogout }){
         packages={activePackages()} packageById={packageById}
         groupById={groupById} familyGroups={familyGroups} membersByGroup={membersByGroup}
         scheduleByStudent={scheduleByStudent} sessions={sessions}
+        gradingPrograms={gradingPrograms} gradingMilestones={gradingMilestones}
+        gradingHeld={gradingHeld}
         jumpToWeek={(weekStartDate, dayIndex)=>{ const d=fromDateStr(weekStartDate); d.setDate(d.getDate()+(dayIndex||0)); setSelectedDate(toDateStr(d)); setView('schedule'); setScheduleSection('week'); }}
         creditByKey={creditByKey} purchasesByStudent={purchasesByStudent}
         subscriptions={subscriptions} addCreditPurchase={addCreditPurchase}
@@ -7536,7 +7547,7 @@ function ProgrammeTermsPanel({ lessonTypeId, months }){
 // the level itself -- the panel reads the answer back rather than working
 // it out, so the screen and the database cannot disagree about whether
 // that tick just earned something.
-function StudentGradingPanel({ studentId, studentName, sessionId, onClose }){
+function StudentGradingPanel({ studentId, studentName, sessionId, onClose, historyOnly }){
   const [g, setG] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(null);
@@ -7574,11 +7585,58 @@ function StudentGradingPanel({ studentId, studentName, sessionId, onClose }){
   const held = (g.milestones||[]).filter(m => m.activated);
   const top = held.length ? held[held.length-1] : null;
 
+  // Every tick that has been made, newest first. Built from the same
+  // payload the ladder is drawn from rather than a second read: a list
+  // that could disagree with the ladder above it would be worse than no
+  // list at all.
+  if(historyOnly){
+    const marks = [];
+    (g.milestones||[]).forEach(m => (m.tasks||[]).forEach(t => {
+      if(t.done) marks.push({ id: t.id, stage: m, task: t });
+    }));
+    marks.sort((a,b) => String(b.task.marked_at||'').localeCompare(String(a.task.marked_at||'')));
+    const earned = (g.milestones||[]).filter(m => m.activated && m.achieved_at)
+      .slice().sort((a,b) => String(b.achieved_at).localeCompare(String(a.achieved_at)));
+    return <div>
+      {earned.length ? <>
+        <div className="pt-sub">Stages earned</div>
+        <table className="particulars-table"><thead><tr>
+          <th>Stage</th><th>Earned</th><th>Certificate</th>
+        </tr></thead><tbody>
+          {earned.map(m => <tr key={m.id}>
+            <td><b>{m.label ? `${m.label} · ` : ''}{m.name}</b>
+              {m.formal_name ? <span className="subtle"> {m.formal_name}</span> : null}</td>
+            <td>{adminFmtDate(String(m.achieved_at).slice(0,10))}</td>
+            <td className="subtle">{!m.certificate ? '—'
+              : (m.certificate_claimed_at
+                  ? `Given ${adminFmtDate(String(m.certificate_claimed_at).slice(0,10))}`
+                  : 'Waiting')}</td>
+          </tr>)}
+        </tbody></table>
+      </> : null}
+      <div className="pt-sub">Every tick</div>
+      {marks.length === 0
+        ? <div className="small subtle">Nothing has been ticked for this swimmer yet.</div>
+        : <table className="particulars-table"><thead><tr>
+            <th>Date</th><th>Stage</th><th>Skill</th><th>By</th>
+          </tr></thead><tbody>
+            {marks.map(x => <tr key={x.id}>
+              <td>{x.task.marked_at ? adminFmtDate(String(x.task.marked_at).slice(0,10)) : '—'}</td>
+              <td className="subtle">{x.stage.label || x.stage.level_no}</td>
+              <td>{x.task.name}</td>
+              <td className="subtle">{x.task.marked_by || '—'}</td>
+            </tr>)}
+          </tbody></table>}
+    </div>;
+  }
+
   return <div className="grade-pane">
     <div className="grade-head">
       <div>
-        <b>{studentName}</b>
-        <span className="small subtle" style={{marginLeft:8}}>
+        {/* Inside the particulars window the name is already the title,
+            so it is not repeated here. */}
+        {studentName ? <b>{studentName}</b> : null}
+        <span className="small subtle" style={studentName ? {marginLeft:8} : null}>
           {g.program?.name}
           {band ? ` · ${band.name} ${band.done} of ${band.total}` : ''}
           {top ? ` · ${top.label ? `Stage ${top.label}` : `Level ${top.level_no}`} ${top.name}` : ' · no stage yet'}
@@ -11520,7 +11578,158 @@ function ReceiptsView({ pmts, invoices, branches, externalSearchQ }){
     </div>}
   </>;
 }
-function StudentsView({ students, lessonTypes, lessonTypeById, packages, packageById, groupById, familyGroups, membersByGroup, scheduleByStudent, sessions, jumpToWeek, creditByKey, purchasesByStudent, subscriptions, addCreditPurchase, deleteCreditPurchase, addSubscription, cancelSubscription, adjustBalanceTo, addStudent, updateStudent, deleteStudent, externalSearchQ }){
+// ─── One swimmer, everything about them ──────────────────────────────────
+// The Swimmers table answers "who is on the books". This answers "how is
+// this child doing", which is the question the office is actually asked on
+// the phone -- and which used to mean three screens and a guess.
+//
+// Four things, in the order somebody asks about them: where they are on
+// the syllabus and what to tick next; whether they have been turning up;
+// what the coaches have written; and when each skill was signed off.
+//
+// Nothing here is new data. The attendance comes out of the sessions
+// already in memory, the notes out of the panel the account page uses, and
+// the syllabus out of the same function the coaches' pad reads. A second
+// way of working out any of them would be a second answer to the same
+// question.
+function SwimmerParticulars({ swimmer, sessions, lessonTypeById, onClose }){
+  const [tab, setTab] = useState('syllabus');
+
+  // Every class this swimmer was put in, newest first, with what was
+  // marked. Ghost sessions are skipped: a cancelled class is not an
+  // absence and counting it as one would be an accusation.
+  const history = useMemo(() => {
+    const out = [];
+    (sessions || []).forEach(se => {
+      if(se.cancelledAt) return;
+      const me = (se.students || []).find(x => x.studentId === swimmer.id);
+      if(!me) return;
+      out.push({
+        id: se.id + ':' + swimmer.id,
+        date: addDays(se.weekStartDate, se.day || 0),
+        week: se.weekStartDate,
+        time: se.startMinute,
+        type: se.type || '',
+        attendance: me.attendance || 'pending',
+        isReplacement: !!me.isReplacement,
+        remark: me.remark || ''
+      });
+    });
+    out.sort((a,b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.time - a.time));
+    return out;
+  }, [sessions, swimmer.id]);
+
+  const tally = useMemo(() => {
+    const t = { attended:0, absent:0, pending:0 };
+    history.forEach(h => { t[h.attendance] = (t[h.attendance] || 0) + 1; });
+    return t;
+  }, [history]);
+
+  const TABS = [['syllabus','Syllabus'], ['attendance','Attendance'],
+                ['notes','Progress notes'], ['record','Grading record']];
+
+  return <div className="modal-backdrop" onMouseDown={(e)=>{ if(e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-card particulars" onMouseDown={(e)=>e.stopPropagation()}>
+      <div className="modal-head">
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:14,fontWeight:800,lineHeight:1.15}}>{swimmer.name}</div>
+          <div className="small subtle" style={{fontSize:10.5,marginTop:1}}>
+            {swimmer.age != null ? `${swimmer.age} yrs` : 'Age not given'}
+            {swimmer.guardianName ? ` · ${swimmer.guardianName}` : ''}
+            {swimmer.guardianPhone ? ` · ${swimmer.guardianPhone}` : ''}
+          </div>
+        </div>
+        <button className="btn btn-ghost small" onClick={onClose} aria-label="Close" title="Close (Esc)">✕</button>
+      </div>
+
+      <div className="particulars-tabs">
+        {TABS.map(([k, label]) => <button key={k} type="button"
+          className={`sub-tab${tab === k ? ' active' : ''}`}
+          onClick={()=>setTab(k)}>{label}
+          {k === 'attendance' && history.length ? <span className="pt-count">{history.length}</span> : null}
+        </button>)}
+      </div>
+
+      <div className="modal-body particulars-body">
+        {tab === 'syllabus' && <StudentGradingPanel
+          studentId={swimmer.id} studentName={null} sessionId={null} />}
+
+        {tab === 'record' && <StudentGradingPanel
+          studentId={swimmer.id} studentName={null} sessionId={null}
+          historyOnly />}
+
+        {tab === 'notes' && <ProgressNotesPanel swimmer={swimmer} />}
+
+        {tab === 'attendance' && (history.length === 0
+          ? <div className="small subtle">This swimmer has not been put in a class yet.</div>
+          : <>
+            <div className="att-tally">
+              <span className="att-tally-n att-tally-a">{tally.attended} attended</span>
+              <span className="att-tally-n att-tally-x">{tally.absent} absent</span>
+              <span className="att-tally-n att-tally-p">{tally.pending} unmarked</span>
+            </div>
+            <table className="particulars-table"><thead><tr>
+              <th>Date</th><th>Time</th><th>Class</th><th>Marked</th><th>Remark</th>
+            </tr></thead><tbody>
+              {history.map(h => <tr key={h.id}>
+                <td>{adminFmtDate(h.date)}</td>
+                <td className="subtle">{minuteToTime(h.time)}</td>
+                <td>{h.type}{h.isReplacement ? <span className="pt-repl">R</span> : null}</td>
+                <td><span className={`pt-att pt-att-${h.attendance}`}>
+                  {h.attendance === 'attended' ? 'Attended'
+                    : h.attendance === 'absent' ? 'Absent' : 'Not marked'}</span></td>
+                <td className="subtle">{h.remark || ''}</td>
+              </tr>)}
+            </tbody></table>
+          </>)}
+      </div>
+    </div>
+  </div>;
+}
+
+function StudentsView({ students, lessonTypes, lessonTypeById, packages, packageById, groupById, familyGroups, membersByGroup, scheduleByStudent, sessions, jumpToWeek, creditByKey, purchasesByStudent, subscriptions, addCreditPurchase, deleteCreditPurchase, addSubscription, cancelSubscription, adjustBalanceTo, addStudent, updateStudent, deleteStudent, externalSearchQ, gradingPrograms, gradingMilestones, gradingHeld }){
+  // Which swimmer's particulars are open. Null for none.
+  const [particulars, setParticulars] = useState(null);
+
+  // ── Which syllabus a swimmer is on, and the stage they hold ──────────
+  // Worked out here rather than asked of the server: the lesson types are
+  // already in memory with their grading_program_id, and every earned
+  // stage came down in one read. Four hundred rows, no round trips.
+  //
+  // The rule is student_grading()'s rule, kept deliberately identical --
+  // the FIRST lesson type that points at a syllabus, in the order the
+  // office sorted them. A swimmer in two graded lesson types shows the
+  // same one here as on their parent's phone, which is the only way the
+  // office can answer a question about what a parent is looking at.
+  const syllabusFor = useMemo(() => {
+    const msById = {};
+    (gradingMilestones || []).forEach(m => { msById[m.id] = m; });
+    const heldByStudent = {};
+    (gradingHeld || []).forEach(h => {
+      if(h.revoked_at) return;
+      const m = msById[h.milestone_id]; if(!m) return;
+      (heldByStudent[h.student_id] = heldByStudent[h.student_id] || []).push(m);
+    });
+    const progById = {};
+    (gradingPrograms || []).forEach(p => { progById[p.id] = p; });
+    const stagesOf = (pid) => (gradingMilestones || [])
+      .filter(m => m.program_id === pid && m.is_active !== false).length;
+
+    return (stu) => {
+      const lts = (stu.lessonTypeIds || [])
+        .map(id => (lessonTypeById ? lessonTypeById(id) : null))
+        .filter(lt => lt && lt.grading_program_id);
+      if(!lts.length) return null;
+      lts.sort((a,b) => (a.sort_order ?? 1e9) - (b.sort_order ?? 1e9)
+                     || String(a.name||'').localeCompare(String(b.name||'')));
+      const prog = progById[lts[0].grading_program_id];
+      if(!prog) return null;
+      const mine = (heldByStudent[stu.id] || []).filter(m => m.program_id === prog.id);
+      mine.sort((a,b) => (a.level_no||0) - (b.level_no||0));
+      const top = mine.length ? mine[mine.length-1] : null;
+      return { program: prog, top, earned: mine.length, total: stagesOf(prog.id) };
+    };
+  }, [gradingPrograms, gradingMilestones, gradingHeld, lessonTypeById]);
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState(null);
@@ -11628,7 +11837,7 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
     return sorted.map(s => ({ kind: 'swimmer', s }));
   }, [filtered, sortBy]);
 
-  const COLS = 9;
+  const COLS = 10;
 
   function resetForm(){ setName(''); setDob(''); setGender(null); setEnrollments([{ lessonTypeId: '', packageId: '' }]); setGuardianName(''); setGuardianEmail(''); setGuardianPhone(''); setSameAsGuardian(false); setEmergencyPhone(''); setEmergencyRel(''); setAdultSelf(false); }
 
@@ -11659,6 +11868,7 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
           <th style={{width:'10%'}}>Lesson Type</th>
           <th style={{width:'17%'}}>Package</th>
           <th style={{width:'9%'}}>Credits</th>
+          <th style={{width:'11%'}}>Syllabus</th>
           <th style={{width:'5%'}}>T&amp;C</th>
           <th>Schedule</th>
         </tr></thead>
@@ -11679,7 +11889,11 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
             : (s.emergencyPhone ? <><span>{s.emergencyPhone}</span>{s.emergencyRelationship ? <><br/><span className="subtle small">{s.emergencyRelationship}</span></> : null}</> : <span className="subtle">—</span>);
           return <React.Fragment key={s.id}>
             <tr>
-              <td style={{fontWeight:700}}>{s.name}{s.gender?<span style={{marginLeft:4,fontSize:10,color:'var(--text-3)'}}>{s.gender==='female'?'♀':'♂'}</span>:null}</td>
+              <td style={{fontWeight:700}}>
+                <button type="button" className="swimmer-name-link"
+                        title="Open this swimmer’s particulars"
+                        onClick={()=>setParticulars(s)}>{s.name}</button>
+                {s.gender?<span style={{marginLeft:4,fontSize:10,color:'var(--text-3)'}}>{s.gender==='female'?'♀':'♂'}</span>:null}</td>
               <td>{s.age!=null?s.age:'—'}</td>
               <td style={{fontSize:11}}>{parentBits.length
                 ? <><div style={{fontWeight:600}}>{s.guardianName || '—'}</div>{s.guardianPhone ? <div className="subtle">{s.guardianPhone}</div> : null}</>
@@ -11690,6 +11904,19 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
               <td>{ltCredits.length
                 ? <div style={{display:'flex',flexDirection:'column',gap:2}}>{ltCredits.map(({lt, rem}) => lt ? <span key={lt.id} className="swimmer-cred-chip"><span className="subtle" style={{fontSize:9}}>{lt.name.split(' ').slice(0,2).join(' ')}:</span> <strong className={rem!=null && rem<=2?'credit-low':''}>{rem!=null ? rem : '—'}</strong></span> : null)}</div>
                 : <span className="subtle">—</span>}</td>
+              <td style={{fontSize:11}}>{(() => {
+                const g = syllabusFor ? syllabusFor(s) : null;
+                if(!g) return <span className="subtle">—</span>;
+                return <div className="syl-cell">
+                  <span className="syl-cell-prog">{g.program.name}</span>
+                  <span className={`syl-cell-stage${g.top ? '' : ' is-none'}`}
+                        style={g.top && g.top.colour ? { background:g.top.colour, borderColor:g.top.colour, color:'#fff' } : null}
+                        title={g.top ? `${g.top.name}${g.top.formal_name ? ' · ' + g.top.formal_name : ''}` : 'No stage earned yet'}>
+                    {g.top ? (g.top.label || g.top.level_no) : '–'}
+                  </span>
+                  <span className="subtle" style={{fontSize:10}}>{g.earned}/{g.total}</span>
+                </div>;
+              })()}</td>
               <td>{tcOk?<span className="tc-badge-ok" title={`Accepted ${new Date(s.tcAcceptedAt).toLocaleDateString()} · ID: ${s.tcAcceptanceId}`}>✅</span>:<span className="tc-badge-pending" title="Terms & Conditions not yet accepted">⚠</span>}</td>
               <td style={{fontSize:11}}>{sched?sched.map((g,gi)=>{
                 const targetWeek = jumpToWeek ? nextWeekFor(s.id, g.type) : null;
@@ -11707,6 +11934,8 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
         </tbody></table>
       </div>
     </div>
+    {particulars && <SwimmerParticulars swimmer={particulars} sessions={sessions}
+      lessonTypeById={lessonTypeById} onClose={()=>setParticulars(null)} />}
   </>;
 }
 
