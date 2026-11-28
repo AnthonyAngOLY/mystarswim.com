@@ -777,9 +777,55 @@ const FILES = [
       if (q(`select count(*) from grading_milestones where program_id='${scr}'`) !== '0')
         throw new Error('the stages outlived the syllabus');
 
-      // ── put the fixture back the way the later steps expect it ─────
-      q(`delete from student_task_marks where student_id='${stu}'`);
-      q(`update scheduler_lesson_types set grading_program_id='${was}'`);
+      // ── 7. The way Anthony actually runs it: no JWT ────────────────
+      // The Supabase SQL editor carries no token, so is_website_login()
+      // and can_write_office() are both false. Every gate in this file
+      // refuses there, which is correct -- and the file's own confirm
+      // block has to read as "refused", not as "this is broken". The
+      // first version of that block expected one exact sentence, got
+      // the other correct refusal, and told him not to ship working
+      // code. So: reproduce the editor here.
+      // Restored in a finally, not after the assertions. The first
+      // version of this threw on a sabotage run and left the database
+      // with no website login and a tick on a fixture other steps read,
+      // which failed three later steps for reasons none of them named.
+      try {
+      q(`create or replace function is_website_login() returns boolean
+           language sql stable as $f$ select false $f$;
+         update _test_state set office = false`);
+      const noJwt = q(`select delete_grading_program('${sp}','yes')->>'error'`);
+      if (noJwt !== 'Not allowed.')
+        throw new Error('without a login the delete said: ' + JSON.stringify(noJwt));
+      const usageOut = JSON.parse(q(`select grading_program_usage('${sp}')`));
+      if (usageOut.ok !== false)
+        throw new Error('usage answered a caller with no website login');
+      // THE FILE ITSELF, run again with no login, and its real output
+      // read. An earlier version of this check re-typed row 2's CASE
+      // into the test and asserted on the copy -- which passed happily
+      // while the file said something else entirely. A confirm block is
+      // only checked by running the confirm block.
+      const out = psql(`-d ${DB} -v ON_ERROR_STOP=1 -tAq -f `
+                     + path.join(WORK, 'supabase_syllabus_switch.sql'));
+      const said = (out.stdout || '') + (out.stderr || '');
+      if (out.status !== 0)
+        throw new Error('the file will not install without a website login: '
+          + said.trim().split('\n').slice(-2).join(' | '));
+      if (/DID NOT REFUSE/.test(said))
+        throw new Error('the confirm block cries wolf in the SQL editor — it reads '
+          + 'as a failure while the guards are doing their job');
+      if (!/refused outright/.test(said))
+        throw new Error('the confirm block does not report the refusal it got: '
+          + said.replace(/\n/g, ' | ').slice(0, 400));
+      if (!/Swim Passport/.test(said))
+        throw new Error('the usage row does not name the syllabuses: '
+          + said.replace(/\n/g, ' | ').slice(0, 400));
+      } finally {
+        q(`create or replace function is_website_login() returns boolean
+             language sql stable as $f$ select true $f$;
+           update _test_state set office = true;
+           delete from student_task_marks where student_id='${stu}';
+           update scheduler_lesson_types set grading_program_id='${was}'`);
+      }
       if (q(`select count(*) from student_task_marks where removed_at is null`) !== '0')
         throw new Error('this probe left ticks behind and the steps after it '
           + 'will assert against a dirty fixture');

@@ -147,6 +147,36 @@ comment on function grading_ladder(uuid, uuid) is
   'functions that call it have already done one.';
 
 
+-- ─── How many swimmers are on it ────────────────────────────────────────
+-- Counted here rather than inside grading_program_usage, because
+-- delete_grading_program needs the same number and must not inherit
+-- that function's "are you signed in to the website" gate. A delete
+-- that refused with a null reason because an inner function wanted a
+-- JWT would be the worst kind of refusal: correct, and unreadable.
+--
+-- A swimmer counts as "on it" for either reason: a coach has ticked
+-- something, or a stage has been awarded. Counting ticks alone would
+-- call a syllabus unused the moment every stage on it was complete.
+create or replace function grading_program_swimmers(p_program uuid)
+returns integer
+language sql stable security definer set search_path = public as $$
+  select count(distinct s)::integer from (
+    select k.student_id as s
+      from student_task_marks k
+      join grading_tasks t on t.id = k.task_id
+      join grading_milestones m on m.id = t.milestone_id
+     where m.program_id = p_program and k.removed_at is null
+    union
+    select sm.student_id
+      from student_milestones sm
+      join grading_milestones m on m.id = sm.milestone_id
+     where m.program_id = p_program and sm.revoked_at is null) u;
+$$;
+
+revoke all on function grading_program_swimmers(uuid) from public, anon;
+grant execute on function grading_program_swimmers(uuid) to authenticated, service_role;
+
+
 -- ─── Who is using this syllabus? ────────────────────────────────────────
 -- Advisory. It gates nothing; the admin screen shows it beside the
 -- editor so that a change to a syllabus taught to forty children is a
@@ -176,21 +206,7 @@ begin
     'tasks',  (select count(*) from grading_tasks t
                  join grading_milestones m on m.id = t.milestone_id
                 where m.program_id = p.id),
-    -- A swimmer counts as "on it" for either reason: a coach has ticked
-    -- something, or a stage has been awarded. Counting ticks alone would
-    -- call a syllabus unused the moment every stage on it was complete.
-    'swimmers', (
-      select count(distinct s) from (
-        select k.student_id as s
-          from student_task_marks k
-          join grading_tasks t on t.id = k.task_id
-          join grading_milestones m on m.id = t.milestone_id
-         where m.program_id = p.id and k.removed_at is null
-        union
-        select sm.student_id
-          from student_milestones sm
-          join grading_milestones m on m.id = sm.milestone_id
-         where m.program_id = p.id and sm.revoked_at is null) u),
+    'swimmers', grading_program_swimmers(p.id),
     'awards', (
       select count(*) from student_milestones sm
        join grading_milestones m on m.id = sm.milestone_id
@@ -218,8 +234,8 @@ create or replace function delete_grading_program(p_program uuid, p_confirm text
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
-  v_use  jsonb;
   v_name text;
+  v_on   integer;
   v_ms   integer; v_tk integer; v_lt integer;
 begin
   if not can_write_office() then
@@ -235,10 +251,11 @@ begin
     return jsonb_build_object('ok', false, 'error', 'No such syllabus.');
   end if;
 
-  v_use := grading_program_usage(p_program);
-  if (v_use->>'deletable')::boolean is not true then
-    return jsonb_build_object('ok', false, 'error', v_use->>'reason',
-                              'usage', v_use);
+  v_on := grading_program_swimmers(p_program);
+  if v_on > 0 then
+    return jsonb_build_object('ok', false, 'swimmers', v_on,
+      'error', v_on || ' swimmer(s) have progress recorded on this syllabus. '
+            || 'Turn it off instead -- their records stay readable.');
   end if;
 
   -- A lesson type pointing at a syllabus that is about to stop existing
@@ -432,34 +449,51 @@ notify pgrst, 'reload schema';
 -- statement only.
 select z.k as "#", z.thing, z.detail
   from (
-  select 1 k, 'the two new functions' as thing,
+  select 1 k, 'the new functions' as thing,
          coalesce((select string_agg(p.proname || '(' ||
                            pg_get_function_identity_arguments(p.oid) || ')',
                            '  ·  ' order by p.proname)
                      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                     where n.nspname = 'public'
                       and p.proname in ('grading_program_usage',
+                                        'grading_program_swimmers',
                                         'delete_grading_program',
                                         'grading_ladder')),
                   'NONE INSTALLED') as detail
   union all
+  -- THIS FILE IS RUN IN THE SUPABASE SQL EDITOR, which carries no JWT --
+  -- so is_website_login() and can_write_office() are both false there,
+  -- and every gate in this file refuses. That is correct behaviour and
+  -- the check has to say so. The first version of this row expected one
+  -- exact sentence, got the other correct refusal, and printed "do not
+  -- ship this" about working code. A self-check that cannot pass where
+  -- it runs is worse than no check: it teaches people to ignore it.
   select 2, 'a syllabus cannot be deleted by accident',
-         case when (select (delete_grading_program(
-                     (select id from grading_programs order by sort_order limit 1),
-                     'yes')->>'error'))
-                   = 'Type the word delete to confirm.'
-              then 'refused without the word — confirmed just now'
-              else 'THE GUARD DID NOT REFUSE — do not ship this' end
+         case (select delete_grading_program(
+                 (select id from grading_programs order by sort_order limit 1),
+                 'yes')->>'error')
+           when 'Type the word delete to confirm.'
+             then 'refused without the word — confirmed just now'
+           when 'Not allowed.'
+             then 'refused outright: the SQL editor is not an office login, which '
+               || 'is the stricter of the two guards. Both are in place.'
+           else 'THE GUARD DID NOT REFUSE — do not ship this' end
   union all
+  -- Counted straight off the tables. Going through grading_program_usage()
+  -- meant this row read "none" in the SQL editor -- not because nothing is
+  -- pointed at anything, but because that function wants a website login
+  -- and returned an error whose missing keys turned the whole line null.
   select 3, 'syllabuses and what is pointed at them',
          coalesce((select string_agg(x.line, E'\n' order by x.line)
-                     from (select p.name || ' — ' ||
+                     from (select p.name
+                             || case when p.is_active is false then ' (off)' else '' end
+                             || ' — ' ||
                              (select count(*) from scheduler_lesson_types lt
                                where lt.grading_program_id = p.id)::text
                              || ' lesson type(s), ' ||
-                             (grading_program_usage(p.id)->>'swimmers')
+                             grading_program_swimmers(p.id)::text
                              || ' swimmer(s)' ||
-                             case when (grading_program_usage(p.id)->>'deletable')::boolean
+                             case when grading_program_swimmers(p.id) = 0
                                   then ' — deletable' else ' — turn off, do not delete' end
                              as line
                              from grading_programs p) x), 'none')
