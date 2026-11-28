@@ -19715,6 +19715,8 @@ function SwimmerParticulars({
   swimmer,
   sessions,
   lessonTypeById,
+  schedule,
+  onJumpToWeek,
   onClose
 }) {
   const [tab, setTab] = useState('syllabus');
@@ -19808,7 +19810,19 @@ function SwimmerParticulars({
     historyOnly: true
   }), tab === 'notes' && /*#__PURE__*/React.createElement(ProgressNotesPanel, {
     swimmer: swimmer
-  }), tab === 'attendance' && (history.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }), tab === 'attendance' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "pt-sub"
+  }, "Timetable"), schedule && schedule.length ? /*#__PURE__*/React.createElement("div", {
+    className: "pt-sched"
+  }, schedule.map((g, gi) => /*#__PURE__*/React.createElement("div", {
+    key: gi
+  }, /*#__PURE__*/React.createElement("b", null, g.type, ":"), " ", /*#__PURE__*/React.createElement("span", {
+    className: "subtle"
+  }, g.times.join(', '))))) : /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Not scheduled."), /*#__PURE__*/React.createElement("div", {
+    className: "pt-sub"
+  }, "Attendance")), tab === 'attendance' && (history.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "small subtle"
   }, "This swimmer has not been put in a class yet.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "att-tally"
@@ -20052,7 +20066,7 @@ function StudentsView({
       s
     }));
   }, [filtered, sortBy]);
-  const COLS = 10;
+  const COLS = 9;
   function resetForm() {
     setName('');
     setDob('');
@@ -20129,41 +20143,42 @@ function StudentsView({
     className: "swimmers-table"
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '15%'
+      width: '20%'
     }
   }, "Name"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: 32
+      width: '4%'
     }
   }, "Age"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '12%'
+      width: '16%'
     }
   }, "Parent"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '7%'
-    }
-  }, "Emergency"), /*#__PURE__*/React.createElement("th", {
+      width: '5%'
+    },
+    title: "Emergency contact — ↗ means same as guardian"
+  }, "Emerg."), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '9%'
+      width: '12%'
     }
   }, "Lesson Type"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '10%'
+      width: '13%'
     }
   }, "Package"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '8%'
+      width: '11%'
     }
   }, "Credits"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '12%'
+      width: '15%'
     }
   }, "Syllabus"), /*#__PURE__*/React.createElement("th", {
     style: {
       width: '4%'
     }
-  }, "T&C"), /*#__PURE__*/React.createElement("th", null, "Schedule"))), /*#__PURE__*/React.createElement("tbody", null, displayList.length ? displayList.map((row, ri) => {
+  }, "T&C"))), /*#__PURE__*/React.createElement("tbody", null, displayList.length ? displayList.map((row, ri) => {
     const s = row.s;
     const sched = scheduleLines(s.id);
     const tcOk = !!s.tcAcceptedAt;
@@ -20179,32 +20194,52 @@ function StudentsView({
     });
     // Parent + emergency display
     const parentBits = [s.guardianName, s.guardianPhone].filter(Boolean);
+    // "↗ as guardian" on almost every row, in a column wide enough
+    // to print it, is 60px of table spent saying "nothing unusual
+    // here". The arrow alone carries that, with the words on the
+    // title; a row where the emergency contact is somebody ELSE is
+    // the one worth reading, and that one still prints.
     const emergencyBits = s.emergencySameAsGuardian ? /*#__PURE__*/React.createElement("span", {
       className: "subtle small",
-      title: "Same as guardian"
-    }, "↗ as guardian") : s.emergencyPhone ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", null, s.emergencyPhone), s.emergencyRelationship ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("span", {
-      className: "subtle small"
-    }, s.emergencyRelationship)) : null) : /*#__PURE__*/React.createElement("span", {
+      title: "Emergency contact: same as guardian"
+    }, "↗") : s.emergencyPhone ? /*#__PURE__*/React.createElement("span", {
+      title: `${s.emergencyPhone}${s.emergencyRelationship ? ' · ' + s.emergencyRelationship : ''}`
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "sw-clip",
+      style: {
+        display: 'block'
+      }
+    }, s.emergencyPhone), s.emergencyRelationship ? /*#__PURE__*/React.createElement("span", {
+      className: "subtle small sw-clip",
+      style: {
+        display: 'block'
+      }
+    }, s.emergencyRelationship) : null) : /*#__PURE__*/React.createElement("span", {
       className: "subtle"
     }, "—");
     return /*#__PURE__*/React.createElement(React.Fragment, {
       key: s.id
-    }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+    }, /*#__PURE__*/React.createElement("tr", {
+      className: "sw-row",
+      onClick: e => {
+        if (e.target.closest('button,a,input,select,textarea,label')) return;
+        setParticulars(s);
+      },
+      title: "Open this swimmer’s particulars"
+    }, /*#__PURE__*/React.createElement("td", {
       style: {
         fontWeight: 700
-      }
-    }, /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "swimmer-name-link",
-      title: "Open this swimmer’s particulars",
-      onClick: () => setParticulars(s)
-    }, s.name), s.gender ? /*#__PURE__*/React.createElement("span", {
+      },
+      title: s.name
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "sw-name-wrap"
+    }, s.name, s.gender ? /*#__PURE__*/React.createElement("span", {
       style: {
         marginLeft: 4,
         fontSize: 10,
         color: 'var(--text-3)'
       }
-    }, s.gender === 'female' ? '♀' : '♂') : null), /*#__PURE__*/React.createElement("td", null, s.age != null ? s.age : '—'), /*#__PURE__*/React.createElement("td", {
+    }, s.gender === 'female' ? '♀' : '♂') : null)), /*#__PURE__*/React.createElement("td", null, s.age != null ? s.age : '—'), /*#__PURE__*/React.createElement("td", {
       style: {
         fontSize: 11
       },
@@ -20247,7 +20282,8 @@ function StudentsView({
     }, "—"))), /*#__PURE__*/React.createElement("td", {
       style: {
         fontSize: 12
-      }
+      },
+      title: typeof packageLabel(s) === 'string' ? packageLabel(s) : undefined
     }, packageLabel(s)), /*#__PURE__*/React.createElement("td", null, ltCredits.length ? /*#__PURE__*/React.createElement("div", {
       style: {
         display: 'flex',
@@ -20301,9 +20337,9 @@ function StudentsView({
         className: "syl-btn-text"
       }, /*#__PURE__*/React.createElement("span", {
         className: "syl-btn-prog"
-      }, g.program.name), /*#__PURE__*/React.createElement("span", {
+      }, g.top ? g.top.name : 'No stage yet'), /*#__PURE__*/React.createElement("span", {
         className: "syl-btn-sub"
-      }, g.top ? g.top.name : 'No stage yet', " · ", g.earned, "/", g.total)), /*#__PURE__*/React.createElement("span", {
+      }, g.program.name, " · ", g.earned, "/", g.total)), /*#__PURE__*/React.createElement("span", {
         className: "syl-btn-go",
         "aria-hidden": "true"
       }, "↗"));
@@ -20313,48 +20349,7 @@ function StudentsView({
     }, "✅") : /*#__PURE__*/React.createElement("span", {
       className: "tc-badge-pending",
       title: "Terms & Conditions not yet accepted"
-    }, "⚠")), /*#__PURE__*/React.createElement("td", {
-      style: {
-        fontSize: 11
-      }
-    }, sched ? sched.map((g, gi) => {
-      const targetWeek = jumpToWeek ? nextWeekFor(s.id, g.type) : null;
-      const handleJump = e => {
-        e.stopPropagation();
-        if (targetWeek) jumpToWeek(targetWeek, 0);
-      };
-      const full = `${g.type}: ${g.times.join(', ')}`;
-      return targetWeek ? /*#__PURE__*/React.createElement("button", {
-        key: gi,
-        type: "button",
-        className: "swimmer-sched-link",
-        onClick: handleJump,
-        title: `${full} — jump to week of ${targetWeek}`
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 700
-        }
-      }, g.type, ":"), " ", /*#__PURE__*/React.createElement("span", {
-        className: "subtle"
-      }, g.times.join(', ')), /*#__PURE__*/React.createElement("span", {
-        className: "swimmer-sched-arrow",
-        "aria-hidden": "true"
-      }, "↗")) : /*#__PURE__*/React.createElement("div", {
-        key: gi,
-        style: {
-          marginBottom: 1
-        },
-        title: full
-      }, /*#__PURE__*/React.createElement("span", {
-        style: {
-          fontWeight: 700
-        }
-      }, g.type, ":"), " ", /*#__PURE__*/React.createElement("span", {
-        className: "subtle"
-      }, g.times.join(', ')));
-    }) : /*#__PURE__*/React.createElement("span", {
-      className: "subtle"
-    }, "Not scheduled"))));
+    }, "⚠"))));
   }) : /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
     colSpan: COLS,
     className: "empty"
@@ -20362,6 +20357,7 @@ function StudentsView({
     swimmer: particulars,
     sessions: sessions,
     lessonTypeById: lessonTypeById,
+    schedule: scheduleLines(particulars.id),
     onClose: () => setParticulars(null)
   }));
 }

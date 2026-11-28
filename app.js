@@ -11592,7 +11592,7 @@ function ReceiptsView({ pmts, invoices, branches, externalSearchQ }){
 // the syllabus out of the same function the coaches' pad reads. A second
 // way of working out any of them would be a second answer to the same
 // question.
-function SwimmerParticulars({ swimmer, sessions, lessonTypeById, onClose }){
+function SwimmerParticulars({ swimmer, sessions, lessonTypeById, schedule, onJumpToWeek, onClose }){
   const [tab, setTab] = useState('syllabus');
 
   // Every class this swimmer was put in, newest first, with what was
@@ -11660,6 +11660,19 @@ function SwimmerParticulars({ swimmer, sessions, lessonTypeById, onClose }){
 
         {tab === 'notes' && <ProgressNotesPanel swimmer={swimmer} />}
 
+        {tab === 'attendance' && <>
+          {/* The weekly timetable, moved here out of the Swimmers table.
+              It is the question "when is she in the water", which is
+              asked about one swimmer at a time -- not something worth a
+              fifth of every row of four hundred. */}
+          <div className="pt-sub">Timetable</div>
+          {(schedule && schedule.length)
+            ? <div className="pt-sched">{schedule.map((g, gi) => <div key={gi}>
+                <b>{g.type}:</b> <span className="subtle">{g.times.join(', ')}</span>
+              </div>)}</div>
+            : <div className="small subtle">Not scheduled.</div>}
+          <div className="pt-sub">Attendance</div>
+        </>}
         {tab === 'attendance' && (history.length === 0
           ? <div className="small subtle">This swimmer has not been put in a class yet.</div>
           : <>
@@ -11837,7 +11850,7 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
     return sorted.map(s => ({ kind: 'swimmer', s }));
   }, [filtered, sortBy]);
 
-  const COLS = 10;
+  const COLS = 9;
 
   function resetForm(){ setName(''); setDob(''); setGender(null); setEnrollments([{ lessonTypeId: '', packageId: '' }]); setGuardianName(''); setGuardianEmail(''); setGuardianPhone(''); setSameAsGuardian(false); setEmergencyPhone(''); setEmergencyRel(''); setAdultSelf(false); }
 
@@ -11861,23 +11874,21 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
     <div className="card" style={{padding:0,overflow:'hidden'}}>
       <div className="table-wrap" style={{border:'none',borderRadius:0}}>
         <table className="swimmers-table"><thead><tr>
-          {/* Schedule carries the most text of any column -- a swimmer
-              with three Sunday slots -- and had whatever was left over,
-              which was about a tenth. Package was given 17% to say
-              "Normal · RM200 · 4 credits" and Emergency 10% to say "as
-              guardian". Rebalanced so the column with the sentences in
-              it has twice the room, and Name has enough that most of
-              them stay on one line. */}
-          <th style={{width:'15%'}}>Name</th>
-          <th style={{width:32}}>Age</th>
-          <th style={{width:'12%'}}>Parent</th>
-          <th style={{width:'7%'}}>Emergency</th>
-          <th style={{width:'9%'}}>Lesson Type</th>
-          <th style={{width:'10%'}}>Package</th>
-          <th style={{width:'8%'}}>Credits</th>
-          <th style={{width:'12%'}}>Syllabus</th>
+          {/* Schedule has moved into the particulars window. It carried
+              the most text of any column -- a swimmer with three Sunday
+              slots -- for something nobody reads across four hundred
+              rows at once, and it was squeezing everything that IS read
+              at a glance. Its 23% is now spread over the columns that
+              were clipping. */}
+          <th style={{width:'20%'}}>Name</th>
+          <th style={{width:'4%'}}>Age</th>
+          <th style={{width:'16%'}}>Parent</th>
+          <th style={{width:'5%'}} title="Emergency contact — ↗ means same as guardian">Emerg.</th>
+          <th style={{width:'12%'}}>Lesson Type</th>
+          <th style={{width:'13%'}}>Package</th>
+          <th style={{width:'11%'}}>Credits</th>
+          <th style={{width:'15%'}}>Syllabus</th>
           <th style={{width:'4%'}}>T&amp;C</th>
-          <th>Schedule</th>
         </tr></thead>
         <tbody>{displayList.length ? displayList.map((row,ri)=>{
           const s=row.s; const sched=scheduleLines(s.id);
@@ -11891,23 +11902,40 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
           });
           // Parent + emergency display
           const parentBits = [s.guardianName, s.guardianPhone].filter(Boolean);
+          // "↗ as guardian" on almost every row, in a column wide enough
+          // to print it, is 60px of table spent saying "nothing unusual
+          // here". The arrow alone carries that, with the words on the
+          // title; a row where the emergency contact is somebody ELSE is
+          // the one worth reading, and that one still prints.
           const emergencyBits = s.emergencySameAsGuardian
-            ? <span className="subtle small" title="Same as guardian">↗ as guardian</span>
-            : (s.emergencyPhone ? <><span>{s.emergencyPhone}</span>{s.emergencyRelationship ? <><br/><span className="subtle small">{s.emergencyRelationship}</span></> : null}</> : <span className="subtle">—</span>);
+            ? <span className="subtle small" title="Emergency contact: same as guardian">↗</span>
+            : (s.emergencyPhone
+                ? <span title={`${s.emergencyPhone}${s.emergencyRelationship ? ' · ' + s.emergencyRelationship : ''}`}>
+                    <span className="sw-clip" style={{display:'block'}}>{s.emergencyPhone}</span>
+                    {s.emergencyRelationship ? <span className="subtle small sw-clip" style={{display:'block'}}>{s.emergencyRelationship}</span> : null}
+                  </span>
+                : <span className="subtle">—</span>);
           return <React.Fragment key={s.id}>
-            <tr>
-              <td style={{fontWeight:700}}>
-                <button type="button" className="swimmer-name-link"
-                        title="Open this swimmer’s particulars"
-                        onClick={()=>setParticulars(s)}>{s.name}</button>
-                {s.gender?<span style={{marginLeft:4,fontSize:10,color:'var(--text-3)'}}>{s.gender==='female'?'♀':'♂'}</span>:null}</td>
+            {/* The whole row opens the swimmer. An underlined name was a
+                target the width of a name, in a row the width of the
+                screen -- and nothing about the other nine columns said
+                they were part of the same door. Clicks on a control
+                inside the row still belong to that control. */}
+            <tr className="sw-row" onClick={(e)=>{
+                 if(e.target.closest('button,a,input,select,textarea,label')) return;
+                 setParticulars(s);
+               }}
+               title="Open this swimmer’s particulars">
+              <td style={{fontWeight:700}} title={s.name}>
+                <span className="sw-name-wrap">{s.name}
+                {s.gender?<span style={{marginLeft:4,fontSize:10,color:'var(--text-3)'}}>{s.gender==='female'?'♀':'♂'}</span>:null}</span></td>
               <td>{s.age!=null?s.age:'—'}</td>
               <td style={{fontSize:11}} title={parentBits.join(' · ')}>{parentBits.length
                 ? <><div style={{fontWeight:600}} className="sw-clip">{s.guardianName || '—'}</div>{s.guardianPhone ? <div className="subtle sw-clip">{s.guardianPhone}</div> : null}</>
                 : <span className="subtle">—</span>}</td>
               <td className="sw-emerg" style={{fontSize:11}}>{emergencyBits}</td>
               <td><div style={{display:'flex',flexWrap:'wrap',gap:3}}>{(s.lessonTypeIds||[]).length?s.lessonTypeIds.map(id=>{const c=colorsForId(id);return <span key={id} className="chip" style={{background:c.bg,borderColor:c.bd,color:c.tx,fontSize:10,padding:'2px 7px'}}>{c.name}</span>;}): <span className="subtle">—</span>}</div></td>
-              <td style={{fontSize:12}}>{packageLabel(s)}</td>
+              <td style={{fontSize:12}} title={typeof packageLabel(s) === 'string' ? packageLabel(s) : undefined}>{packageLabel(s)}</td>
               <td>{ltCredits.length
                 ? <div style={{display:'flex',flexDirection:'column',gap:2}}>{ltCredits.map(({lt, rem}) => lt ? <span key={lt.id} className="swimmer-cred-chip"><span className="subtle" style={{fontSize:9}}>{lt.name.split(' ').slice(0,2).join(' ')}:</span> <strong className={rem!=null && rem<=2?'credit-low':''}>{rem!=null ? rem : '—'}</strong></span> : null)}</div>
                 : <span className="subtle">—</span>}</td>
@@ -11929,25 +11957,18 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
                         style={g.top && g.top.colour ? { background:g.top.colour, borderColor:g.top.colour, color:'#fff' } : null}>
                     {g.top ? (g.top.label || g.top.level_no) : '–'}
                   </span>
+                  {/* The stage leads. It is what differs between one
+                      swimmer and the next; the syllabus is the same name
+                      on almost every row, so it is the one that can
+                      afford to clip. */}
                   <span className="syl-btn-text">
-                    <span className="syl-btn-prog">{g.program.name}</span>
-                    <span className="syl-btn-sub">{g.top ? g.top.name : 'No stage yet'} · {g.earned}/{g.total}</span>
+                    <span className="syl-btn-prog">{g.top ? g.top.name : 'No stage yet'}</span>
+                    <span className="syl-btn-sub">{g.program.name} · {g.earned}/{g.total}</span>
                   </span>
                   <span className="syl-btn-go" aria-hidden="true">↗</span>
                 </button>;
               })()}</td>
               <td>{tcOk?<span className="tc-badge-ok" title={`Accepted ${new Date(s.tcAcceptedAt).toLocaleDateString()} · ID: ${s.tcAcceptanceId}`}>✅</span>:<span className="tc-badge-pending" title="Terms & Conditions not yet accepted">⚠</span>}</td>
-              <td style={{fontSize:11}}>{sched?sched.map((g,gi)=>{
-                const targetWeek = jumpToWeek ? nextWeekFor(s.id, g.type) : null;
-                const handleJump = (e) => { e.stopPropagation(); if(targetWeek) jumpToWeek(targetWeek, 0); };
-                const full = `${g.type}: ${g.times.join(', ')}`;
-                return targetWeek
-                  ? <button key={gi} type="button" className="swimmer-sched-link" onClick={handleJump} title={`${full} — jump to week of ${targetWeek}`}>
-                      <span style={{fontWeight:700}}>{g.type}:</span> <span className="subtle">{g.times.join(', ')}</span>
-                      <span className="swimmer-sched-arrow" aria-hidden="true">↗</span>
-                    </button>
-                  : <div key={gi} style={{marginBottom:1}} title={full}><span style={{fontWeight:700}}>{g.type}:</span> <span className="subtle">{g.times.join(', ')}</span></div>;
-              }):<span className="subtle">Not scheduled</span>}</td>
             </tr>
           </React.Fragment>;
         }):<tr><td colSpan={COLS} className="empty">No swimmers found.</td></tr>}
@@ -11955,7 +11976,8 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
       </div>
     </div>
     {particulars && <SwimmerParticulars swimmer={particulars} sessions={sessions}
-      lessonTypeById={lessonTypeById} onClose={()=>setParticulars(null)} />}
+      lessonTypeById={lessonTypeById} schedule={scheduleLines(particulars.id)}
+      onClose={()=>setParticulars(null)} />}
   </>;
 }
 

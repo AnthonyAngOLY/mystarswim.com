@@ -400,8 +400,17 @@
        top alignment so the first line of every cell starts level, and
        the two cells that run long are clipped with the whole value on
        the title. */
+    /* FIXED, not auto. The column widths below are percentages, and an
+       auto table treats them as a suggestion -- it then widens any
+       column whose content will not wrap, which is every column once
+       nowrap was added to stop the rows going ragged. The table grew
+       past the window and the wrap sprouted a horizontal scrollbar,
+       while Name, which can wrap, was squeezed and wrapped anyway.
+       Fixed makes the percentages the answer: nothing can push a column
+       wider, so long values clip and the table always fits. */
+    .swimmers-table{table-layout:fixed}
     .swimmers-table th,.swimmers-table td{padding:6px 10px;vertical-align:top;
-      line-height:1.35}
+      line-height:1.35;overflow:hidden}
     .swimmers-table tbody tr:hover{background:var(--surface-2)}
     .sw-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
     .swimmers-table .syl-td{padding:4px 6px}
@@ -1404,6 +1413,17 @@
     /* The schedule is the column with sentences in it, so it gets the
        slack and the others are measured to what they actually say. */
     .swimmers-table td:last-child{white-space:normal}
+    /* A name is the one thing not to truncate: half a child's name is
+       worse than two lines. It wraps to two and then stops, so one very
+       long name cannot make its row twice the height of its neighbours. */
+    .swimmers-table td:first-child{white-space:normal;word-break:break-word}
+    .swimmers-table td:first-child .sw-name-wrap{display:-webkit-box;
+      -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    /* The row is the target. The hover has to say so, and the cursor
+       has to agree, or it is a secret. */
+    .swimmers-table tbody tr.sw-row{cursor:pointer}
+    .swimmers-table tbody tr.sw-row:hover{background:var(--primary-soft)}
+    .pt-sched{font-size:12px;line-height:1.6}
     /* "↗ as guardian" is a fixed phrase and wrapping it after "as" cost
        every row a second line for no information at all. */
     .swimmers-table .sw-emerg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

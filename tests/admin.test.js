@@ -1463,8 +1463,12 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     const hire = { id: 'lt2', name: 'Pool Hire', sort_order: 2, is_active: true,
                    grading_program_id: null };
     const students = [
+      // A real-length parent name on purpose. With short ones nothing
+      // forces a column to stretch, so the overflow check below passed
+      // even with the auto layout that caused the scrollbar.
       { id: 's1', name: 'Mira Kwan', age: 6, lessonTypeIds: ['lt1'],
-        guardianName: 'Kwan Suk Lee', guardianPhone: '+60123456001',
+        guardianName: 'Aamreetajeet Kaur a/p Sergit Singh',
+        guardianPhone: '+60123456001',
         tcAcceptedAt: '2026-01-02T02:00:00Z', enrollments: [] },
       { id: 's2', name: 'Ungraded Child', age: 9, lessonTypeIds: ['lt2'],
         guardianName: 'A Parent', guardianPhone: '+60123456002', enrollments: [] }
@@ -1541,11 +1545,11 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
   await step('and the name opens that swimmer\u2019s particulars', async () => {
     if (await page.locator('.particulars').count())
       throw new Error('it is open before anybody clicked');
-    await page.locator('#sw-host .swimmer-name-link').first().click();
+    await page.locator('#sw-host tbody tr').first().locator('td').first().click();
     await page.waitForTimeout(900);
     const t = await page.locator('.particulars').innerText();
     if (!/Mira Kwan/.test(t)) throw new Error('the wrong swimmer: ' + t.slice(0, 120));
-    if (!/Kwan Suk Lee/.test(t)) throw new Error('no parent on the header');
+    if (!/Aamreetajeet Kaur/.test(t)) throw new Error('no parent on the header');
     for (const tab of ['Syllabus', 'Attendance', 'Progress notes', 'Grading record'])
       if (!new RegExp(tab).test(t)) throw new Error('no ' + tab + ' tab');
   });
@@ -1584,6 +1588,90 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
     await page.waitForTimeout(500);
     if (await page.locator('.particulars').count())
       throw new Error('the particulars window will not close');
+  });
+
+  // Ten columns, three of which hold sentences. The first attempt set
+  // percentage widths on an auto-layout table, which treats them as a
+  // suggestion and then widens any column whose content will not wrap --
+  // so Parent stretched to fit "Aamreetajeet Kaur a/p Sergit Singh", the
+  // table outgrew the window, and the wrap sprouted a scrollbar.
+  // Measured at a narrow width, because that is where it showed.
+  await step('the Swimmers table fits its box, and no column hogs it', async () => {
+    await mountSwimmers();
+    await page.waitForTimeout(900);
+    await page.evaluate(() => {
+      const h = document.getElementById('sw-host');
+      h.style.width = '1100px'; h.style.maxWidth = '1100px';
+    });
+    await page.waitForTimeout(400);
+    const m = await page.evaluate(() => {
+      const t = document.querySelector('#sw-host table');
+      const box = t.parentElement;
+      const cols = [...t.querySelectorAll('thead th')].map(th => ({
+        name: th.innerText.trim(),
+        w: Math.round(th.getBoundingClientRect().width) }));
+      return { scrollW: t.scrollWidth, boxW: box.clientWidth,
+               total: Math.round(t.getBoundingClientRect().width), cols };
+    });
+    if (m.scrollW > m.boxW + 1)
+      throw new Error('the table is ' + m.scrollW + 'px in a ' + m.boxW
+        + 'px box — that is the horizontal scrollbar');
+    const hog = m.cols.find(c => c.w > m.total * 0.3);
+    if (hog)
+      throw new Error(hog.name + ' has taken ' + Math.round(100 * hog.w / m.total)
+        + '% of the table: ' + m.cols.map(c => c.name + '=' + c.w).join(' '));
+    // Schedule has moved into the particulars window. If it comes back
+    // to the table it will squeeze everything that IS read at a glance.
+    if (m.cols.some(c => /Schedule/i.test(c.name)))
+      throw new Error('the Schedule column is back in the table');
+    // And the name, which is what somebody scans for, must not be the
+    // runt either.
+    const name = m.cols.find(c => /Name/i.test(c.name));
+    if (!name || name.w < m.total * 0.15)
+      throw new Error('Name is too narrow to hold a name: '
+        + Math.round(100 * name.w / m.total) + '%');
+  });
+
+  // An underlined name was a target the width of a name, in a row the
+  // width of the screen, and nothing about the other columns said they
+  // were part of the same door.
+  await step('clicking anywhere on a row opens that swimmer', async () => {
+    await page.locator('#sw-host tbody tr').first().locator('td').nth(2).click();
+    await page.waitForTimeout(800);
+    const t = await page.locator('.particulars').innerText();
+    if (!/Mira Kwan/.test(t))
+      throw new Error('clicking the Parent cell did not open the swimmer');
+  });
+
+  await step('and the timetable moved into that window', async () => {
+    await page.locator('.particulars-tabs button').filter({ hasText: 'Attendance' }).click();
+    await page.waitForTimeout(600);
+    const t = await page.locator('.particulars-body').innerText();
+    if (!/Timetable/i.test(t)) throw new Error('no timetable section');
+    if (!/Not scheduled/i.test(t) && !/:/.test(t))
+      throw new Error('the timetable section says nothing either way');
+    await page.locator('.particulars .modal-head button').click();
+    await page.waitForTimeout(400);
+  });
+
+  // A control inside the row still belongs to that control -- the row
+  // handler must not swallow it.
+  await step('a button inside a row is still its own button', async () => {
+    await page.locator('#sw-host .syl-btn').first().click();
+    await page.waitForTimeout(700);
+    if (!await page.locator('.particulars').count())
+      throw new Error('the syllabus button stopped working inside a clickable row');
+    await page.locator('.particulars .modal-head button').click();
+    await page.waitForTimeout(400);
+  });
+
+  await step('and every row is the same height', async () => {
+    const hs = await page.locator('#sw-host tbody tr')
+      .evaluateAll(trs => trs.map(tr => Math.round(tr.getBoundingClientRect().height)));
+    const spread = Math.max(...hs) - Math.min(...hs);
+    if (spread > 24)
+      throw new Error('row heights run from ' + Math.min(...hs) + ' to ' + Math.max(...hs)
+        + 'px — the rows are ragged again');
   });
 
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
