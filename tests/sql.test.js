@@ -534,14 +534,15 @@ const FILES = [
              join grading_programs p on p.id = m.program_id
             where p.name='Swim Passport' and m.label='${label}' and t.sort_order=${n}`);
       for (const [label, n, want] of [
-        ['A', 8, 'Water exit assisted'],
+        ['A', 8, 'Water entry assisted'],
+        ['A', 9, 'Water exit assisted'],
         // B is the band where a child stops being held. The seed had it
         // as nine assisted skills; the book has ten, four unassisted.
         ['B', 6, 'Roll unassisted, back to front & front to back'],
         ['B', 7, 'Wall grab, unassisted'],
         ['B', 8, 'Monkey crawl unassisted, on edge, 2 meters'],
-        ['B', 9, 'Water exit, unassisted'],
-        ['B',10, 'Water entry, unassisted'],
+        ['B', 9, 'Water entry, unassisted'],
+        ['B',10, 'Water exit, unassisted'],
         ['1', 2, 'Front glide assisted, to wall, 2 meters'],
         ['2', 2, 'Front glide 5 meters'],
         ['3', 2, 'Swim on front 15 meters'],
@@ -599,6 +600,59 @@ const FILES = [
                join grading_programs p on p.id=m.program_id
               where p.name='Swim Passport' and t.name like '%uassisted%'`) !== '0')
         throw new Error('the artwork\u2019s "uassisted" was copied into the database');
+
+      // Entry moved above exit by moving the ROWS. Writing the new names
+      // over the old positions would have been one line shorter and
+      // quietly wrong -- a child ticked for getting out and not in would
+      // come back ticked for getting in and not out. So: the ids must
+      // have travelled with their skill.
+      const idOf = (label, like) =>
+        q(`select t.id from grading_tasks t
+             join grading_milestones m on m.id = t.milestone_id
+             join grading_programs p on p.id = m.program_id
+            where p.name='Swim Passport' and m.label='${label}'
+              and t.name like '${like}%'`);
+      const at = (id) => q(`select sort_order from grading_tasks where id='${id}'`);
+      for (const [label, lo, hi] of [['A', 8, 9], ['B', 9, 10]]) {
+        const entry = idOf(label, 'Water entry');
+        const exit  = idOf(label, 'Water exit');
+        if (!entry || !exit) throw new Error('stage ' + label + ' lost a water line');
+        if (at(entry) !== String(lo) || at(exit) !== String(hi))
+          throw new Error('stage ' + label + ' does not read entry then exit: entry at '
+            + at(entry) + ', exit at ' + at(exit));
+      }
+
+      // The order alone cannot tell a row-move from a rename in place:
+      // both end with "Water entry" at 8. So put stage A back the way it
+      // was, tick the entry line, run the file again, and see which skill
+      // the tick is on afterwards. A rename hands it to the exit line.
+      {
+        const entry = idOf('A', 'Water entry'), exit = idOf('A', 'Water exit');
+        q(`update grading_tasks set sort_order = 9,
+                  name = 'Water entry parent & child together' where id='${entry}';
+           update grading_tasks set sort_order = 8,
+                  name = 'Water exit parent & child together'  where id='${exit}';
+           insert into student_task_marks (student_id, task_id, marked_by_name)
+             values ((select id from students limit 1), '${entry}', 'Coach Sally')`);
+        psql(`-d ${DB} -v ON_ERROR_STOP=1 -q -f `
+           + path.join(WORK, 'supabase_swim_passport_wording.sql'));
+        const ticked = q(`select t.name from student_task_marks k
+                            join grading_tasks t on t.id = k.task_id
+                           where k.student_id = (select id from students limit 1)
+                             and k.removed_at is null`);
+        const moved = at(entry);
+        // Cleared BEFORE the assertions, not after. An earlier probe in
+        // this suite threw between its tick and its cleanup and left the
+        // fixture dirty, which failed six later steps for a reason none
+        // of them named.
+        q(`delete from student_task_marks
+            where student_id = (select id from students limit 1)`);
+        if (ticked !== 'Water entry assisted')
+          throw new Error('the tick was handed to another skill by the reorder: '
+            + JSON.stringify(ticked));
+        if (moved !== '8')
+          throw new Error('the entry row did not move, it was renamed over');
+      }
     } },
   { file: 'supabase_syllabus_switch.sql',
     probe: () => {

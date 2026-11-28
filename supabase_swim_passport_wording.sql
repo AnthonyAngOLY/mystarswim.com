@@ -23,6 +23,7 @@
 --
 --  WHAT CHANGES, line by line
 --    A   8,9   "parent & child together"      -> "assisted"
+--    A, B      water entry moves above water exit
 --    B   6,8,9,10  assisted                   -> unassisted
 --    B   new   "Wall grab, unassisted"        -- was absent
 --    1   2,5   glides 3 metres                -> 2 meters
@@ -134,6 +135,51 @@ begin
 end $$;
 
 
+-- ─── Entry before exit, on A and B ──────────────────────────────────────
+-- The passport lists water ENTRY above water EXIT on both Swim Starters
+-- stages. The seed had them the other way round.
+--
+-- This swaps the ROWS, not the words. Writing the new names over the old
+-- positions would be one line shorter and quietly wrong: a child ticked
+-- for getting out of the pool but not yet for getting in would come back
+-- the next morning ticked for getting in and not out. The tick belongs
+-- to the skill, so the skill moves and takes it with it.
+--
+-- Matched on "Water entry%" / "Water exit%" rather than the full name,
+-- because this has to work on a database still carrying the seed's
+-- "Water exit parent & child together" as well as one where an earlier
+-- run of this file already renamed it. Re-running is safe: once entry
+-- sits above exit the condition is false and nothing moves.
+do $$
+declare
+  v_entry record;
+  v_exit  record;
+  v_label text;
+begin
+  foreach v_label in array array['A', 'B'] loop
+    select t.id, t.sort_order into v_entry
+      from grading_tasks t
+      join grading_milestones m on m.id = t.milestone_id
+      join grading_programs p on p.id = m.program_id
+     where p.name = 'Swim Passport' and m.label = v_label
+       and t.name like 'Water entry%';
+
+    select t.id, t.sort_order into v_exit
+      from grading_tasks t
+      join grading_milestones m on m.id = t.milestone_id
+      join grading_programs p on p.id = m.program_id
+     where p.name = 'Swim Passport' and m.label = v_label
+       and t.name like 'Water exit%';
+
+    continue when v_entry.id is null or v_exit.id is null;
+    continue when v_entry.sort_order < v_exit.sort_order;
+
+    update grading_tasks set sort_order = v_exit.sort_order  where id = v_entry.id;
+    update grading_tasks set sort_order = v_entry.sort_order where id = v_exit.id;
+  end loop;
+end $$;
+
+
 -- ─── Every line, as the passport prints it ──────────────────────────────
 -- Set by (stage label, position), not by matching the old text. Matching
 -- old text means a file that silently does nothing the day someone has
@@ -152,8 +198,8 @@ update grading_tasks t
     ('A', 5, 'Back tow assisted, head on shoulder'),
     ('A', 6, 'Roll assisted, back to front & front to back'),
     ('A', 7, 'Wall grab, assisted'),
-    ('A', 8, 'Water exit assisted'),
-    ('A', 9, 'Water entry assisted'),
+    ('A', 8, 'Water entry assisted'),
+    ('A', 9, 'Water exit assisted'),
     -- B · Water Explorer
     -- B is where a child stops being held. The print spells the word
     -- "uassisted" on two of these lines; it is spelled properly here.
@@ -168,8 +214,8 @@ update grading_tasks t
     ('B', 6, 'Roll unassisted, back to front & front to back'),
     ('B', 7, 'Wall grab, unassisted'),
     ('B', 8, 'Monkey crawl unassisted, on edge, 2 meters'),
-    ('B', 9, 'Water exit, unassisted'),
-    ('B',10, 'Water entry, unassisted'),
+    ('B', 9, 'Water entry, unassisted'),
+    ('B',10, 'Water exit, unassisted'),
     -- 1 · Starfish · Water Acclimation
     ('1', 1, 'Submerge, bob independently'),
     ('1', 2, 'Front glide assisted, to wall, 2 meters'),
