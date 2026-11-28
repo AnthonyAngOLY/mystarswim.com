@@ -368,6 +368,43 @@
     .stu-fields{display:flex;gap:5px;min-width:0;flex-wrap:wrap;align-items:center}
     .stu-fields > .ssel{flex:1.25 1 0;min-width:140px}
     .stu-remark{flex:1 1 0;min-width:100px;font-size:11.5px}
+    /* Grading a swimmer from the scheduler. The panel is the third child
+       of .stu-row, which is a two-column grid — without the span it drops
+       into the 16px number column and reads as a vertical word. */
+    .stu-grade{padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;
+      border:1px solid var(--border-2);background:#fff;color:var(--text-2);line-height:1.3;white-space:nowrap}
+    .stu-grade:hover{border-color:var(--primary);color:var(--primary)}
+    .stu-grade.is-on{background:var(--primary);border-color:var(--primary);color:#fff}
+    .stu-row > .grade-pane{grid-column:2}
+    .grade-pane{margin:6px 0 10px;padding:10px 12px;border:1px solid var(--border);
+      border-radius:10px;background:var(--surface-2)}
+    .grade-head{display:flex;justify-content:space-between;align-items:center;gap:10px;
+      flex-wrap:wrap;margin-bottom:8px}
+    .grade-ms{margin-bottom:7px}
+    .grade-ms-head{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+      background:none;border:0;padding:3px 0;cursor:pointer;font:inherit}
+    .grade-ms-lvl{flex:none;min-width:22px;height:22px;padding:0 5px;border-radius:6px;
+      border:1px solid var(--border-2);background:var(--surface-3);color:var(--text-2);
+      font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+    .grade-ms-nm{flex:1;min-width:0;font-size:13px;font-weight:700;color:var(--text)}
+    .grade-ms-nm small{display:block;font-size:10.5px;font-weight:600;color:var(--text-3)}
+    .grade-ms-earned{flex:none;font-size:10px;font-weight:800;text-transform:uppercase;
+      letter-spacing:.4px;color:#047857;background:#D1FAE5;border-radius:5px;padding:2px 6px}
+    .grade-ms-count{flex:none;font-size:11.5px;font-weight:800;color:var(--text-3)}
+    .grade-ms-chev{flex:none;font-size:9px;color:var(--text-3)}
+    .grade-bar{height:5px;border-radius:999px;background:var(--border);overflow:hidden}
+    .grade-bar i{display:block;height:100%;border-radius:999px}
+    .grade-tasks{display:flex;flex-direction:column;gap:3px;margin:7px 0 2px}
+    .grade-task{display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;
+      font:inherit;font-size:12.5px;line-height:1.4;padding:4px 6px;border-radius:7px;
+      border:1px solid transparent;background:none;cursor:pointer;color:var(--text-3)}
+    .grade-task:hover{background:#fff;border-color:var(--border-2)}
+    .grade-task .grade-tick{flex:none;width:16px;height:16px;border-radius:5px;margin-top:1px;
+      border:1px solid var(--border-2);background:#fff;color:transparent;font-size:11px;
+      display:flex;align-items:center;justify-content:center}
+    .grade-task.is-done{color:var(--text);font-weight:600}
+    .grade-task.is-done .grade-tick{background:#10B981;border-color:#10B981;color:#fff}
+    .grade-task:disabled{opacity:.5;cursor:default}
     /* Group chips — quick-add row below the swimmer list. Two variants:
        - Discount (👪, grey): standard family billing group, flexible.
        - Bound (🔗, amber): must-attend-together, all-or-nothing add. */

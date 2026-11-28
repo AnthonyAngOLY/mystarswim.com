@@ -1242,6 +1242,76 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       throw new Error('edited but never saved: ' + missing.join(', '));
   });
 
+  // ── Grading from the scheduler ────────────────────────────────────────
+  // An owner teaching a class could see the swimmers and had no way to
+  // tick anything, so a level earned in their own lesson had to be
+  // entered from a coach's phone. The database always allowed it --
+  // can_note_on_student() returns true for any office seat before it
+  // looks at rosters at all -- so this was a missing screen.
+  const gradePanel = (studentId) => page.evaluate((id) => {
+    let host = document.getElementById('gp-host');
+    if (!host) { host = document.createElement('div'); host.id = 'gp-host';
+                 document.body.appendChild(host); }
+    ReactDOM.createRoot(host).render(React.createElement(StudentGradingPanel, {
+      studentId: id, studentName: 'Mira Kwan', sessionId: 'se1', onClose: () => {}
+    }));
+  }, studentId);
+
+  await step('the scheduler can draw a swimmer\u2019s ladder', async () => {
+    await gradePanel('s1');
+    await page.waitForTimeout(900);
+    const t = await page.locator('#gp-host').innerText();
+    if (!/Water Discovery/.test(t) || !/Water Explorer/.test(t))
+      throw new Error('no ladder drawn: ' + JSON.stringify(t.slice(0, 200)));
+    if (!/Ticks save immediately/.test(t))
+      throw new Error('it does not say the ticks are not part of the modal\u2019s Save, '
+        + 'which is how somebody cancels out of a class and thinks the grading went too');
+  });
+
+  await step('and a tick reaches the database, not just the screen', async () => {
+    await page.locator('#gp-host .grade-ms-head').first().click();
+    await page.waitForTimeout(400);
+    const first = page.locator('#gp-host .grade-task').first();
+    if (await first.evaluate(e => /is-done/.test(e.className)))
+      throw new Error('the fixture starts with a tick already, so this proves nothing');
+    await first.click();
+    await page.waitForTimeout(700);
+    const sent = await page.evaluate(() => fetch('/__marks').then(r => r.json()));
+    if (sent.length !== 1) throw new Error('expected one call, saw ' + sent.length);
+    if (sent[0].p_student !== 's1' || sent[0].p_on !== true)
+      throw new Error('the wrong call was sent: ' + JSON.stringify(sent[0]));
+    // The session is recorded with the mark, so a parent reading it later
+    // can be told which lesson it was seen in.
+    if (sent[0].p_session !== 'se1')
+      throw new Error('the mark does not say which class it was made in: '
+        + JSON.stringify(sent[0].p_session));
+    // And the panel re-read the server rather than trusting itself.
+    if (!await page.locator('#gp-host .grade-task.is-done').count())
+      throw new Error('the tick did not come back from the reload');
+  });
+
+  await step('and unticking it sends the other direction', async () => {
+    await page.locator('#gp-host .grade-task').first().click();
+    await page.waitForTimeout(700);
+    const sent = await page.evaluate(() => fetch('/__marks').then(r => r.json()));
+    if (sent.length !== 2) throw new Error('the untick sent nothing');
+    if (sent[1].p_on !== false)
+      throw new Error('unticking sent p_on ' + JSON.stringify(sent[1].p_on));
+    if (await page.locator('#gp-host .grade-task.is-done').count())
+      throw new Error('it still reads as done after being unticked');
+  });
+
+  await step('a swimmer with no syllabus is told so, not shown an empty ladder', async () => {
+    await gradePanel('ungraded');
+    await page.waitForTimeout(900);
+    const t = await page.locator('#gp-host').innerText();
+    if (!/no syllabus/i.test(t))
+      throw new Error('it does not say why there is nothing to tick: '
+        + JSON.stringify(t.slice(0, 200)));
+    if (!/Settings/.test(t))
+      throw new Error('it does not say where to fix it');
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');

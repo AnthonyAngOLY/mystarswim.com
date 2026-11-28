@@ -12690,6 +12690,161 @@ function ProgrammeTermsPanel({
   }, "Void")))))));
 }
 
+// ─── Grading a swimmer from the desktop ──────────────────────────────────
+// The coaches' app is not the only place this can happen. An owner on the
+// scheduler can see the class and the swimmers in it, and until now had
+// no way to tick anything -- so a level earned in a lesson the owner
+// taught had to be entered from a phone.
+//
+// The database already allowed it: can_note_on_student() returns true for
+// any office seat before it looks at rosters at all. This was a missing
+// screen, not a missing permission.
+//
+// Reads through coach_student_grading(), the same function the coaches'
+// pad uses, so the two cannot drift apart. Ticks go through
+// mark_grading_task(), which records who did it and when, and recomputes
+// the level itself -- the panel reads the answer back rather than working
+// it out, so the screen and the database cannot disagree about whether
+// that tick just earned something.
+function StudentGradingPanel({
+  studentId,
+  studentName,
+  sessionId,
+  onClose
+}) {
+  const [g, setG] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(null);
+  const [open, setOpen] = useState({});
+  async function load() {
+    try {
+      const out = await rpcCall('coach_student_grading', {
+        p_student: studentId
+      });
+      setG(out);
+      setErr('');
+    } catch (e) {
+      setErr(e.message || String(e));
+    }
+  }
+  useEffect(() => {
+    load();
+  }, [studentId]);
+  async function toggle(task) {
+    setBusy(task.id);
+    setErr('');
+    try {
+      await rpcCall('mark_grading_task', {
+        p_student: studentId,
+        p_task: task.id,
+        p_on: !task.done,
+        p_session: sessionId || null
+      });
+      await load();
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  if (err) return /*#__PURE__*/React.createElement("div", {
+    className: "grade-pane"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small",
+    style: {
+      color: 'var(--red-tx)'
+    }
+  }, err));
+  if (!g) return /*#__PURE__*/React.createElement("div", {
+    className: "grade-pane"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, "Loading…"));
+  if (g.graded === false) return /*#__PURE__*/React.createElement("div", {
+    className: "grade-pane"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "small subtle"
+  }, studentName || 'This swimmer', "’s lesson type has no syllabus, so there is nothing to tick. Set one in ", /*#__PURE__*/React.createElement("b", null, "Settings → Lesson Types"), "."));
+  const band = g.band;
+  const held = (g.milestones || []).filter(m => m.activated);
+  const top = held.length ? held[held.length - 1] : null;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "grade-pane"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grade-head"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", null, studentName), /*#__PURE__*/React.createElement("span", {
+    className: "small subtle",
+    style: {
+      marginLeft: 8
+    }
+  }, g.program?.name, band ? ` · ${band.name} ${band.done} of ${band.total}` : '', top ? ` · ${top.label ? `Stage ${top.label}` : `Level ${top.level_no}`} ${top.name}` : ' · no stage yet')), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: 'flex',
+      gap: 6,
+      alignItems: 'center'
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "small subtle"
+  }, "Ticks save immediately"), onClose && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost small",
+    onClick: onClose
+  }, "Close"))), (g.milestones || []).map(m => {
+    const done = Number(m.done) || 0,
+      total = Number(m.total) || 0;
+    const pct = total ? Math.round(done * 100 / total) : 0;
+    const isOpen = !!open[m.id];
+    return /*#__PURE__*/React.createElement("div", {
+      key: m.id,
+      className: `grade-ms${m.activated ? ' is-on' : ''}`
+    }, /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "grade-ms-head",
+      onClick: () => setOpen(o => ({
+        ...o,
+        [m.id]: !o[m.id]
+      }))
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "grade-ms-lvl",
+      style: m.colour ? {
+        background: m.colour,
+        color: '#fff',
+        borderColor: m.colour
+      } : null
+    }, m.label || m.level_no), /*#__PURE__*/React.createElement("span", {
+      className: "grade-ms-nm"
+    }, m.name, m.formal_name ? /*#__PURE__*/React.createElement("small", null, m.formal_name) : null), m.activated ? /*#__PURE__*/React.createElement("span", {
+      className: "grade-ms-earned"
+    }, "earned") : null, /*#__PURE__*/React.createElement("span", {
+      className: "grade-ms-count"
+    }, done, "/", total), /*#__PURE__*/React.createElement("span", {
+      className: "grade-ms-chev"
+    }, isOpen ? '▲' : '▼')), /*#__PURE__*/React.createElement("div", {
+      className: "grade-bar"
+    }, /*#__PURE__*/React.createElement("i", {
+      style: {
+        width: pct + '%',
+        background: m.colour || 'var(--primary)'
+      }
+    })), isOpen && /*#__PURE__*/React.createElement("div", {
+      className: "grade-tasks"
+    }, (m.tasks || []).length === 0 ? /*#__PURE__*/React.createElement("div", {
+      className: "small subtle",
+      style: {
+        padding: '4px 2px'
+      }
+    }, "No tasks on this level yet.") : (m.tasks || []).map(t => /*#__PURE__*/React.createElement("button", {
+      key: t.id,
+      type: "button",
+      className: `grade-task${t.done ? ' is-done' : ''}`,
+      disabled: busy === t.id,
+      title: t.done && t.marked_by ? `Ticked by ${t.marked_by}` : 'Tick what you have seen',
+      onClick: () => toggle(t)
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "grade-tick"
+    }, t.done ? '✓' : ''), /*#__PURE__*/React.createElement("span", null, t.name)))));
+  }));
+}
+
 // M2: inline editor for the new lesson-type fields. Saves on Apply.
 function LessonTypeEditor({
   row,
@@ -21010,6 +21165,10 @@ function SessionModal({
     patch.studentRows = rebuildRowsForCap(modal.form.studentRows, lt?.students_per_instructor);
     setForm(patch);
   }
+
+  // Which swimmer's syllabus is open under their row. One at a time: the
+  // modal is already dense, and two ladders open at once is a wall.
+  const [gradeFor, setGradeFor] = useState(null);
   function setRow(i, key, val) {
     const rows = (modal.form.studentRows || []).slice();
     rows[i] = {
@@ -21526,7 +21685,12 @@ function SessionModal({
       className: `att-btn att-absent ${r.attendance === 'absent' ? 'is-on' : ''}`,
       onClick: () => setAttendance(i, 'absent'),
       title: "Absent — −1 credit on save"
-    }, "✗")) : null, /*#__PURE__*/React.createElement("input", {
+    }, "✗")) : null, r.studentId ? /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: `stu-grade${gradeFor === r.studentId ? ' is-on' : ''}`,
+      title: "Tick what this swimmer has been seen to do",
+      onClick: () => setGradeFor(gradeFor === r.studentId ? null : r.studentId)
+    }, gradeFor === r.studentId ? 'Close' : 'Syllabus') : null, /*#__PURE__*/React.createElement("input", {
       className: "input stu-remark",
       placeholder: "Remark",
       value: r.remark || '',
@@ -21536,7 +21700,12 @@ function SessionModal({
       className: "stu-x",
       title: "Clear this slot (bound-group members prompt a group-remove)",
       onClick: () => removeRow(i)
-    }, "×") : null));
+    }, "×") : null), gradeFor === r.studentId && r.studentId ? /*#__PURE__*/React.createElement(StudentGradingPanel, {
+      studentId: r.studentId,
+      sessionId: modal.id,
+      studentName: studentById[r.studentId]?.name || r.name,
+      onClose: () => setGradeFor(null)
+    }) : null);
   })))), !isPersonal && /*#__PURE__*/React.createElement("div", {
     className: "repl-section"
   }, /*#__PURE__*/React.createElement("div", {

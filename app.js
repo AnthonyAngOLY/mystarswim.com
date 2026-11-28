@@ -7520,6 +7520,109 @@ function ProgrammeTermsPanel({ lessonTypeId, months }){
   </div>;
 }
 
+// ─── Grading a swimmer from the desktop ──────────────────────────────────
+// The coaches' app is not the only place this can happen. An owner on the
+// scheduler can see the class and the swimmers in it, and until now had
+// no way to tick anything -- so a level earned in a lesson the owner
+// taught had to be entered from a phone.
+//
+// The database already allowed it: can_note_on_student() returns true for
+// any office seat before it looks at rosters at all. This was a missing
+// screen, not a missing permission.
+//
+// Reads through coach_student_grading(), the same function the coaches'
+// pad uses, so the two cannot drift apart. Ticks go through
+// mark_grading_task(), which records who did it and when, and recomputes
+// the level itself -- the panel reads the answer back rather than working
+// it out, so the screen and the database cannot disagree about whether
+// that tick just earned something.
+function StudentGradingPanel({ studentId, studentName, sessionId, onClose }){
+  const [g, setG] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(null);
+  const [open, setOpen] = useState({});
+
+  async function load(){
+    try{
+      const out = await rpcCall('coach_student_grading', { p_student: studentId });
+      setG(out); setErr('');
+    }catch(e){ setErr(e.message || String(e)); }
+  }
+  useEffect(() => { load(); }, [studentId]);
+
+  async function toggle(task){
+    setBusy(task.id); setErr('');
+    try{
+      await rpcCall('mark_grading_task', {
+        p_student: studentId, p_task: task.id, p_on: !task.done,
+        p_session: sessionId || null });
+      await load();
+    }catch(e){ setErr(e.message || String(e)); }
+    finally{ setBusy(null); }
+  }
+
+  if(err) return <div className="grade-pane"><div className="small" style={{color:'var(--red-tx)'}}>{err}</div></div>;
+  if(!g) return <div className="grade-pane"><div className="small subtle">Loading…</div></div>;
+  if(g.graded === false) return <div className="grade-pane">
+    <div className="small subtle">
+      {studentName || 'This swimmer'}’s lesson type has no syllabus, so there is
+      nothing to tick. Set one in <b>Settings → Lesson Types</b>.
+    </div>
+  </div>;
+
+  const band = g.band;
+  const held = (g.milestones||[]).filter(m => m.activated);
+  const top = held.length ? held[held.length-1] : null;
+
+  return <div className="grade-pane">
+    <div className="grade-head">
+      <div>
+        <b>{studentName}</b>
+        <span className="small subtle" style={{marginLeft:8}}>
+          {g.program?.name}
+          {band ? ` · ${band.name} ${band.done} of ${band.total}` : ''}
+          {top ? ` · ${top.label ? `Stage ${top.label}` : `Level ${top.level_no}`} ${top.name}` : ' · no stage yet'}
+        </span>
+      </div>
+      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+        <span className="small subtle">Ticks save immediately</span>
+        {onClose && <button className="btn btn-ghost small" onClick={onClose}>Close</button>}
+      </div>
+    </div>
+
+    {(g.milestones||[]).map(m => {
+      const done = Number(m.done)||0, total = Number(m.total)||0;
+      const pct = total ? Math.round(done*100/total) : 0;
+      const isOpen = !!open[m.id];
+      return <div key={m.id} className={`grade-ms${m.activated?' is-on':''}`}>
+        <button type="button" className="grade-ms-head"
+                onClick={()=>setOpen(o => ({...o, [m.id]: !o[m.id]}))}>
+          <span className="grade-ms-lvl" style={m.colour?{background:m.colour,color:'#fff',borderColor:m.colour}:null}>
+            {m.label || m.level_no}</span>
+          <span className="grade-ms-nm">{m.name}
+            {m.formal_name ? <small>{m.formal_name}</small> : null}</span>
+          {m.activated ? <span className="grade-ms-earned">earned</span> : null}
+          <span className="grade-ms-count">{done}/{total}</span>
+          <span className="grade-ms-chev">{isOpen ? '▲' : '▼'}</span>
+        </button>
+        <div className="grade-bar"><i style={{width:pct+'%', background:m.colour||'var(--primary)'}} /></div>
+        {isOpen && <div className="grade-tasks">
+          {(m.tasks||[]).length === 0
+            ? <div className="small subtle" style={{padding:'4px 2px'}}>No tasks on this level yet.</div>
+            : (m.tasks||[]).map(t => <button key={t.id} type="button"
+                className={`grade-task${t.done?' is-done':''}`}
+                disabled={busy === t.id}
+                title={t.done && t.marked_by ? `Ticked by ${t.marked_by}` : 'Tick what you have seen'}
+                onClick={()=>toggle(t)}>
+                <span className="grade-tick">{t.done ? '✓' : ''}</span>
+                <span>{t.name}</span>
+              </button>)}
+        </div>}
+      </div>;
+    })}
+  </div>;
+}
+
 // M2: inline editor for the new lesson-type fields. Saves on Apply.
 function LessonTypeEditor({ row, pools, gradingPrograms, onSave }){
   const [draft, setDraft] = useState({
@@ -12356,6 +12459,9 @@ function SessionModal({ modal, setModal, saveBusy, canEditSess, saveSession, del
     setForm(patch);
   }
 
+  // Which swimmer's syllabus is open under their row. One at a time: the
+  // modal is already dense, and two ladders open at once is a wall.
+  const [gradeFor, setGradeFor] = useState(null);
   function setRow(i, key, val){ const rows = (modal.form.studentRows || []).slice(); rows[i] = { ...rows[i], [key]: val }; setForm({ studentRows: rows }); }
   function addRow(){ setForm({ studentRows: [...(modal.form.studentRows || []), { studentId:null, name:'', age:'', remark:'', attendance:'pending' }] }); }
   function onInstructorChange(id){
@@ -12608,9 +12714,22 @@ function SessionModal({ modal, setModal, saveBusy, canEditSess, saveSession, del
                     <button type="button" className={`att-btn att-attended ${r.attendance==='attended'?'is-on':''}`} onClick={()=>setAttendance(i,'attended')} title="Attended — −1 credit on save">✓</button>
                     <button type="button" className={`att-btn att-absent ${r.attendance==='absent'?'is-on':''}`} onClick={()=>setAttendance(i,'absent')} title="Absent — −1 credit on save">✗</button>
                   </div> : null}
+                  {/* Grading from the desktop. Only for a swimmer who is
+                      actually on the books -- a typed-in name has no record
+                      to tick against. */}
+                  {r.studentId ? <button type="button"
+                    className={`stu-grade${gradeFor === r.studentId ? ' is-on' : ''}`}
+                    title="Tick what this swimmer has been seen to do"
+                    onClick={()=>setGradeFor(gradeFor === r.studentId ? null : r.studentId)}>
+                    {gradeFor === r.studentId ? 'Close' : 'Syllabus'}</button> : null}
                   <input className="input stu-remark" placeholder="Remark" value={r.remark || ''} onChange={(e)=>setRemark(i, e.target.value)} />
                   {(r.studentId || (r.name||'').trim()) ? <button type="button" className="stu-x" title="Clear this slot (bound-group members prompt a group-remove)" onClick={()=>removeRow(i)}>×</button> : null}
                 </div>
+                {gradeFor === r.studentId && r.studentId
+                  ? <StudentGradingPanel studentId={r.studentId} sessionId={modal.id}
+                      studentName={studentById[r.studentId]?.name || r.name}
+                      onClose={()=>setGradeFor(null)} />
+                  : null}
               </div>;
             })}
           </div>

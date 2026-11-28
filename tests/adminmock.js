@@ -67,6 +67,10 @@ const PATCHES = {};
 // itself on the way out -- is to look at what came over the wire.
 const DELETES = [];
 
+// Which task ids are ticked, and every mark_grading_task call made.
+const TICKS = new Set();
+const MARKS = [];
+
 // Who is using each syllabus, as grading_program_usage() answers it.
 // pr1 has been taught; pr2 has not. The mock refuses exactly what the
 // real function refuses and no more: a mock that lets a delete through
@@ -98,6 +102,7 @@ http.createServer((req, res) => {
   // right columns, the wrong ones, or none.
   if (p === '/__patches') return json(res, 200, PATCHES);
   if (p === '/__deletes') return json(res, 200, DELETES);
+  if (p === '/__marks') return json(res, 200, MARKS);
   if (req.method === 'PATCH') {
     let raw = '';
     req.on('data', (c) => { raw += c; });
@@ -163,6 +168,46 @@ http.createServer((req, res) => {
     ]);
   }
   if (p === '/rest/v1/rpc/claim_certificate') return json(res, 200, { ok: true, claimed: true });
+
+  // One swimmer's ladder, and the ticks the office makes on it. The mock
+  // keeps the state so a tick has to actually reach the server to show
+  // up -- a mock that echoed success without recording would let a panel
+  // pass while saving nothing, which is the bug this is here to catch.
+  if (p === '/rest/v1/rpc/coach_student_grading' || p === '/rest/v1/rpc/mark_grading_task') {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    return req.on('end', () => {
+      let b = {}; try { b = JSON.parse(raw || '{}'); } catch (_e) { b = {}; }
+      if (b.p_student === 'ungraded') return json(res, 200, { ok: true, graded: false });
+      if (p.endsWith('mark_grading_task')) {
+        if (b.p_on) TICKS.add(b.p_task); else TICKS.delete(b.p_task);
+        MARKS.push(b);
+        return json(res, 200, { ok: true, task_id: b.p_task });
+      }
+      const task = (id, name) => ({ id, name, done: TICKS.has(id),
+                                    marked_by: TICKS.has(id) ? 'the office' : null });
+      const ms = (id, label, name, formal, colour, tasks) => {
+        const ts = tasks.map(([i, n]) => task(i, n));
+        const done = ts.filter(t => t.done).length;
+        return { id, label, level_no: label === 'A' ? 1 : 2, name, formal_name: formal,
+                 colour, band: 'Swim Starters', certificate: true,
+                 activated: done === ts.length, total: ts.length, done, tasks: ts };
+      };
+      const mss = [
+        ms('m1', 'A', 'Water Discovery', null, '#2CBDBE',
+           [['t1', 'Blow bubbles on surface, assisted'],
+            ['t2', 'Front tow chin in water, assisted']]),
+        ms('m2', 'B', 'Water Explorer', null, '#2CACE2',
+           [['t3', 'Wall grab, unassisted']])
+      ];
+      return json(res, 200, {
+        ok: true, graded: true,
+        program: { id: 'pr1', name: 'Star Swim Passport', colour: '#0A435E' },
+        level: null, levels_total: 2,
+        band: { name: 'Swim Starters', done: mss.filter(m => m.activated).length, total: 2 },
+        previous: [], also_earned: [], milestones: mss });
+    });
+  }
 
   if (p === '/rest/v1/rpc/grading_program_usage' || p === '/rest/v1/rpc/delete_grading_program') {
     let raw = '';
