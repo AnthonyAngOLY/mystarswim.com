@@ -21623,8 +21623,14 @@ function SessionModal({
       const pkg = enrol?.packageId ? packageById(enrol.packageId) : null;
       if (pkg) pkgLabel = pkg.name;
     }
+    const filled = !!(r.studentId || (r.name || '').trim());
+    // One grid, seven columns, every row the same. The old row was
+    // a flex-wrap of seven bordered boxes: each one carried its own
+    // border and padding, nothing lined up down the page, and a
+    // swimmer with a booking clash pushed their row taller than
+    // its neighbours. Most of the width was chrome.
     return /*#__PURE__*/React.createElement("div", {
-      className: "stu-row",
+      className: `stu-row${filled ? ' is-filled' : ''}`,
       key: i
     }, /*#__PURE__*/React.createElement("span", {
       className: "stu-num"
@@ -21642,31 +21648,15 @@ function SessionModal({
       pendingByKey: pendingByKey,
       weekStartDate: wk,
       lessonTypeId: ltId
-    }), pkgLabel && !isTrial ? /*#__PURE__*/React.createElement("span", {
-      className: "stu-pkg-label",
-      title: `Enrolled package for ${currentLt?.name}`
-    }, pkgLabel) : null, isTrial ? /*#__PURE__*/React.createElement("span", {
+    }), /*#__PURE__*/React.createElement("span", {
+      className: "stu-meta"
+    }, isTrial ? /*#__PURE__*/React.createElement("span", {
       className: "trial-pill",
       title: "Trial package — one-off booking."
-    }, "trial") : null, canMarkReplacement ? /*#__PURE__*/React.createElement("button", {
-      type: "button",
-      className: "repl-mark-btn",
-      title: "Move this swimmer out for replacement",
-      onClick: async () => {
-        const ok = await markForReplacement({
-          studentId: r.studentId,
-          sessionId: modal.id,
-          weekStartDate: wk,
-          lessonTypeId: ltId,
-          lessonTypeName: currentLt.name,
-          day: modal.day,
-          startMinute: modal.startMinute
-        });
-        if (ok) {
-          setModal(null);
-        }
-      }
-    }, "→ R") : null, r.studentId || (r.name || '').trim() ? /*#__PURE__*/React.createElement("div", {
+    }, "trial") : pkgLabel ? /*#__PURE__*/React.createElement("span", {
+      className: "stu-pkg-label",
+      title: `Enrolled package for ${currentLt?.name}`
+    }, pkgLabel) : null), filled ? /*#__PURE__*/React.createElement("div", {
       className: "att-seg",
       role: "group",
       "aria-label": "Attendance"
@@ -21685,22 +21675,40 @@ function SessionModal({
       className: `att-btn att-absent ${r.attendance === 'absent' ? 'is-on' : ''}`,
       onClick: () => setAttendance(i, 'absent'),
       title: "Absent — −1 credit on save"
-    }, "✗")) : null, r.studentId ? /*#__PURE__*/React.createElement("button", {
+    }, "✗")) : /*#__PURE__*/React.createElement("span", null), r.studentId ? /*#__PURE__*/React.createElement("button", {
       type: "button",
       className: `stu-grade${gradeFor === r.studentId ? ' is-on' : ''}`,
       title: "Tick what this swimmer has been seen to do",
       onClick: () => setGradeFor(gradeFor === r.studentId ? null : r.studentId)
-    }, gradeFor === r.studentId ? 'Close' : 'Syllabus') : null, /*#__PURE__*/React.createElement("input", {
+    }, "Syllabus") : /*#__PURE__*/React.createElement("span", null), /*#__PURE__*/React.createElement("input", {
       className: "input stu-remark",
       placeholder: "Remark",
       value: r.remark || '',
       onChange: e => setRemark(i, e.target.value)
-    }), r.studentId || (r.name || '').trim() ? /*#__PURE__*/React.createElement("button", {
+    }), canMarkReplacement ? /*#__PURE__*/React.createElement("button", {
+      type: "button",
+      className: "repl-mark-btn",
+      title: "Move this swimmer out for replacement",
+      onClick: async () => {
+        const ok = await markForReplacement({
+          studentId: r.studentId,
+          sessionId: modal.id,
+          weekStartDate: wk,
+          lessonTypeId: ltId,
+          lessonTypeName: currentLt.name,
+          day: modal.day,
+          startMinute: modal.startMinute
+        });
+        if (ok) {
+          setModal(null);
+        }
+      }
+    }, "→R") : /*#__PURE__*/React.createElement("span", null), filled ? /*#__PURE__*/React.createElement("button", {
       type: "button",
       className: "stu-x",
       title: "Clear this slot (bound-group members prompt a group-remove)",
       onClick: () => removeRow(i)
-    }, "×") : null), gradeFor === r.studentId && r.studentId ? /*#__PURE__*/React.createElement(StudentGradingPanel, {
+    }, "×") : /*#__PURE__*/React.createElement("span", null)), gradeFor === r.studentId && r.studentId ? /*#__PURE__*/React.createElement(StudentGradingPanel, {
       studentId: r.studentId,
       sessionId: modal.id,
       studentName: studentById[r.studentId]?.name || r.name,

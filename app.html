@@ -362,19 +362,85 @@
     .hint{font-size:11px;color:var(--text-2);margin-top:4px}
     .swatch{width:100%;height:38px;padding:3px;border:1px solid var(--border-2);border-radius:10px;background:var(--surface-2);cursor:pointer}
     .swatch::-webkit-color-swatch-wrapper{padding:0}.swatch::-webkit-color-swatch{border:none;border-radius:7px}.swatch::-moz-color-swatch{border:none;border-radius:7px}
-    .stu-list{display:flex;flex-direction:column;gap:3px}
-    .stu-row{display:grid;grid-template-columns:16px 1fr;gap:5px;align-items:center}
-    .stu-num{font-size:10px;font-weight:700;color:var(--text-3);text-align:center;padding-top:6px}
-    .stu-fields{display:flex;gap:5px;min-width:0;flex-wrap:wrap;align-items:center}
-    .stu-fields > .ssel{flex:1.25 1 0;min-width:140px}
-    .stu-remark{flex:1 1 0;min-width:100px;font-size:11.5px}
+    /* ── The swimmer list ──────────────────────────────────────────────
+       One grid, seven columns, so every control lines up down the page
+       and a row is mostly swimmer rather than mostly border. What was
+       here before was a flex-wrap of seven separately bordered boxes:
+       each carried its own frame and padding, nothing aligned, and a
+       booking clash on one swimmer made that row taller than the rest.
+
+       Chrome is spent where it says something. The attendance state and
+       an open syllabus get colour; a name, a package and a remark are
+       plain until the pointer is on them. Rows are separated by a
+       hairline instead of a gap, which is quieter AND tighter. */
+    .stu-list{display:flex;flex-direction:column}
+    .stu-row{display:grid;grid-template-columns:18px 1fr;gap:0 4px;align-items:start;
+      border-top:1px solid var(--border);padding:1px 0}
+    .stu-row:first-child{border-top:0}
+    .stu-row.is-filled:hover{background:var(--surface-2)}
+    .stu-num{font-size:10px;font-weight:700;color:var(--text-3);text-align:center;
+      line-height:30px}
+    .stu-fields{display:grid;min-width:0;align-items:center;gap:4px;
+      grid-template-columns:
+        minmax(110px, 1.45fr)  /* name            */
+        minmax(0, auto)        /* package / trial */
+        auto                   /* attendance      */
+        auto                   /* syllabus        */
+        minmax(100px, 1.55fr)  /* remark          */
+        auto                   /* → replacement   */
+        18px;                  /* clear           */
+    }
+    .stu-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .stu-remark{min-width:0;font-size:11.5px}
+    /* Borderless until you touch it. Three of these per row, each with a
+       1px frame and 9px of padding, was most of the old row's width. */
+    .stu-fields .input.stu-remark,
+    .stu-fields .ssel-control{background:transparent;border-color:transparent;
+      box-shadow:none;transition:background .12s, border-color .12s}
+    .stu-fields .input.stu-remark{padding:5px 6px;height:30px}
+    /* .ssel-control.has and .ssel-btn.has come later in this file and
+       carry the same specificity, so they would win on order alone and
+       put the frame back. Matched one level deeper on purpose. */
+    .stu-fields .ssel-control.has,
+    .stu-fields .ssel-btn.has{background:transparent;border-color:transparent}
+    .stu-fields .input.stu-remark:hover,
+    .stu-fields .ssel-control:hover,
+    .stu-fields .ssel-control.has:hover,
+    .stu-fields .ssel-btn.has:hover{background:#fff;border-color:var(--border-2)}
+    .stu-fields .input.stu-remark:focus,
+    .stu-fields .ssel-control:focus-within,
+    .stu-fields .ssel-control.has:focus-within{background:#fff;border-color:var(--primary)}
+    .stu-fields .ssel-control{padding:0 2px 0 6px;border-radius:7px}
+    .stu-fields .ssel-input{padding:5px 0;font-size:12.5px}
+    .stu-fields .ssel-btn{background:transparent;border-color:transparent;border-radius:7px;
+      padding:5px 7px;transition:background .12s, border-color .12s}
+    .stu-fields .ssel-btn:hover{background:#fff;border-color:var(--border-2)}
+    .stu-fields .ssel-label{font-size:12.5px}
+    /* The clash note sits under the name rather than beside it, so a
+       swimmer with one does not shove the whole row out of line. */
+    .stu-fields .ssel-warn{font-size:10px;margin-top:1px;line-height:1.3;
+      white-space:normal}
+    /* With the frame gone, the clear-name × was a glyph floating in the
+       space between a name and its package. Faint until the row is under
+       the pointer; never hidden, because a control you cannot find is
+       worse than a quiet one. */
+    .stu-fields .ssel-x{opacity:.25;transition:opacity .12s}
+    .stu-row:hover .stu-fields .ssel-x,
+    .stu-fields .ssel-control:focus-within .ssel-x{opacity:.75}
+    .stu-fields .ssel-x:hover{opacity:1}
     /* Grading a swimmer from the scheduler. The panel is the third child
        of .stu-row, which is a two-column grid — without the span it drops
        into the 16px number column and reads as a vertical word. */
-    .stu-grade{padding:4px 9px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;
-      border:1px solid var(--border-2);background:#fff;color:var(--text-2);line-height:1.3;white-space:nowrap}
-    .stu-grade:hover{border-color:var(--primary);color:var(--primary)}
-    .stu-grade.is-on{background:var(--primary);border-color:var(--primary);color:#fff}
+    /* Quieter than a swimmer's name. It was the boldest thing on the row
+       and the row is about the swimmer, not the button. */
+    .stu-grade{padding:0 8px;height:24px;border-radius:6px;font-size:10.5px;font-weight:700;
+      letter-spacing:.2px;cursor:pointer;border:1px solid transparent;background:transparent;
+      color:var(--text-3);opacity:.8;line-height:1;white-space:nowrap;align-self:center;
+      display:inline-flex;align-items:center;transition:.12s ease}
+    .stu-row:hover .stu-grade{opacity:1}
+    .stu-grade:hover{background:#fff;border-color:var(--border-2);color:var(--primary)}
+    .stu-grade.is-on{background:var(--primary-soft);border-color:var(--primary);
+      color:var(--primary-on-soft)}
     .stu-row > .grade-pane{grid-column:2}
     .grade-pane{margin:6px 0 10px;padding:10px 12px;border:1px solid var(--border);
       border-radius:10px;background:var(--surface-2)}
@@ -416,7 +482,9 @@
     .group-chip-bound:hover{background:#FEF9C7;border-color:#CA8A04}
     /* Subtle package label shown next to a swimmer's name in the modal row.
        Indicates which package they're enrolled on for the current lesson type. */
-    .stu-pkg-label{display:inline-block;font-size:10.5px;color:var(--text-3);background:var(--surface-2);border:1px solid var(--border-2);border-radius:4px;padding:1px 6px;white-space:nowrap;line-height:1.4;flex-shrink:0}
+    /* A fact, not a button. It was a bordered pill and read as one. */
+    .stu-pkg-label{display:inline-block;font-size:10.5px;color:var(--text-3);
+      white-space:nowrap;line-height:1.4;letter-spacing:.2px}
     .stu-x{padding:0;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;line-height:1;color:var(--text-2);cursor:pointer;flex-shrink:0;border:none;background:transparent}
     .stu-x:hover{color:var(--red-tx)}
     .ssel{position:relative;min-width:0}
@@ -549,8 +617,13 @@
     .repl-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .repl-badge-sm{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:var(--amber-bg);color:var(--amber-tx);border:1px solid var(--amber-bd);font-size:10px;font-weight:900;flex-shrink:0}
     /* →R button on regular student slots — quietly amber, hover lifts to clear amber */
-    .repl-mark-btn{display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 10px;font-size:11px;font-weight:800;letter-spacing:.4px;background:transparent;color:var(--amber-tx);border:1px solid var(--amber-bd);border-radius:8px;cursor:pointer;white-space:nowrap;align-self:center;flex:0 0 auto;transition:background .15s, transform .15s}
-    .repl-mark-btn:hover{background:var(--amber-bg);transform:translateY(-1px)}
+    /* Rarely used, so it stops shouting: an outlined amber block 36px
+       tall on every row, for an action taken on perhaps one of them. */
+    .repl-mark-btn{display:inline-flex;align-items:center;justify-content:center;height:24px;
+      padding:0 7px;font-size:10.5px;font-weight:800;letter-spacing:.3px;background:transparent;
+      color:var(--amber-tx);border:1px solid transparent;border-radius:6px;cursor:pointer;
+      white-space:nowrap;align-self:center;opacity:.65;transition:.12s ease}
+    .repl-mark-btn:hover{background:var(--amber-bg);border-color:var(--amber-bd);opacity:1}
     /* Quick-pick candidate row above the manual selector */
     .repl-quickpick{padding:10px 12px;background:#fff;border:1px dashed var(--border-2);border-radius:10px}
     .quickpick-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:#fff;border:1px solid var(--border-2);border-radius:999px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text);transition:background .15s, border-color .15s, transform .15s}
@@ -691,13 +764,25 @@
        Pending = neutral grey hourglass; Attended = green check; Absent = amber X.
        Active state pops with a colored fill so the scheduler can scan a busy
        class at a glance and know who's been marked and who hasn't. */
-    .att-seg{display:inline-flex;border:1px solid var(--border-2);border-radius:5px;overflow:hidden;flex-shrink:0;background:#fff;height:24px}
-    .att-btn{width:22px;height:22px;border:none;background:transparent;color:var(--text-3);font-size:11px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;transition:.12s ease;border-right:1px solid var(--border-2)}
-    .att-btn:last-child{border-right:none}
-    .att-btn:hover{background:var(--surface-2)}
-    .att-btn.is-on.att-pending{background:#E5E7EB;color:#374151}
-    .att-btn.is-on.att-attended{background:var(--green-bg);color:var(--green-tx)}
-    .att-btn.is-on.att-absent{background:var(--amber-bg);color:var(--amber-tx)}
+    /* Three bare buttons. The group used to be boxed and ruled, which
+       drew a frame around a control whose whole job is to show one of
+       three states — so the frame competed with the state. Now only the
+       state is coloured, and the other two sit back. */
+    .att-seg{display:inline-flex;gap:2px;flex-shrink:0;height:26px;align-items:center}
+    .att-btn{width:24px;height:24px;border:1px solid transparent;background:transparent;
+      color:var(--text-3);font-size:11px;font-weight:800;cursor:pointer;display:flex;
+      align-items:center;justify-content:center;padding:0;line-height:1;border-radius:6px;
+      opacity:.45;transition:.12s ease}
+    .att-btn:hover{background:#fff;border-color:var(--border-2);opacity:1}
+    .att-btn.is-on{opacity:1}
+    /* Pending is the state most rows are in most of the time, so it is
+       an outline rather than a fill -- a register of twelve swimmers
+       should not be twelve grey chips. Attended and absent are the ones
+       worth seeing from across the screen. */
+    .att-btn.is-on.att-pending{background:transparent;color:var(--text-2);
+      border-color:var(--border-2)}
+    .att-btn.is-on.att-attended{background:var(--green-bg);color:var(--green-tx);border-color:var(--green-bd)}
+    .att-btn.is-on.att-absent{background:var(--amber-bg);color:var(--amber-tx);border-color:var(--amber-bd)}
 
     /* ── Lessons rows (register + edit) ──────────────────────────────────── */
     .lessons-rows{display:flex;flex-direction:column;gap:8px}
@@ -1240,7 +1325,7 @@
 
     /* Trial annotation — drawn from the swimmer's package (any package whose
        name contains "trial"). Pill in the modal slot, subtle mark in cards. */
-    .trial-pill{display:inline-flex;align-items:center;height:22px;padding:0 7px;font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:5px;white-space:nowrap;align-self:center;flex:0 0 auto}
+    .trial-pill{display:inline-flex;align-items:center;height:18px;padding:0 6px;font-size:9px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;background:#FEE2E2;color:#B91C1C;border:1px solid #FCA5A5;border-radius:5px;white-space:nowrap;align-self:center;flex:0 0 auto}
     .trial-mark{font-size:11px;font-weight:700;color:#B91C1C;letter-spacing:.2px}
     .wa-stu .trial-mark{font-size:10px}
     .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border-2);border-radius:10px;padding:3px;gap:3px}

@@ -12698,22 +12698,29 @@ function SessionModal({ modal, setModal, saveBusy, canEditSess, saveSession, del
                 const pkg = enrol?.packageId ? packageById(enrol.packageId) : null;
                 if(pkg) pkgLabel = pkg.name;
               }
-              return <div className="stu-row" key={i}>
+              const filled = !!(r.studentId || (r.name || '').trim());
+              // One grid, seven columns, every row the same. The old row was
+              // a flex-wrap of seven bordered boxes: each one carried its own
+              // border and padding, nothing lined up down the page, and a
+              // swimmer with a booking clash pushed their row taller than
+              // its neighbours. Most of the width was chrome.
+              return <div className={`stu-row${filled ? ' is-filled' : ''}`} key={i}>
                 <span className="stu-num">{i+1}</span>
                 <div className="stu-fields">
                   <StudentSelect valueId={r.studentId} fallbackLabel={r.studentId ? null : (r.name ? `${r.name}${r.age ? ` (${r.age})` : ''}` : '')} studentById={studentById} candidates={candidates} onPick={(stu)=>pickStudent(i, stu)} conflict={rowConflict(r, i)} trialStudentIds={trialStudentIds}
         trialByLessonType={trialByLessonType} pendingByKey={pendingByKey} weekStartDate={wk} lessonTypeId={ltId} />
-                  {pkgLabel && !isTrial ? <span className="stu-pkg-label" title={`Enrolled package for ${currentLt?.name}`}>{pkgLabel}</span> : null}
-                  {isTrial ? <span className="trial-pill" title="Trial package — one-off booking.">trial</span> : null}
-                  {canMarkReplacement ? <button type="button" className="repl-mark-btn" title="Move this swimmer out for replacement" onClick={async ()=>{
-                    const ok = await markForReplacement({ studentId:r.studentId, sessionId:modal.id, weekStartDate:wk, lessonTypeId:ltId, lessonTypeName:currentLt.name, day:modal.day, startMinute:modal.startMinute });
-                    if(ok){ setModal(null); }
-                  }}>→ R</button> : null}
-                  {(r.studentId || (r.name || '').trim()) ? <div className="att-seg" role="group" aria-label="Attendance">
+                  {/* The package is a fact about this swimmer, not a button.
+                      It was drawn as a bordered pill and read as one. */}
+                  <span className="stu-meta">
+                    {isTrial
+                      ? <span className="trial-pill" title="Trial package — one-off booking.">trial</span>
+                      : (pkgLabel ? <span className="stu-pkg-label" title={`Enrolled package for ${currentLt?.name}`}>{pkgLabel}</span> : null)}
+                  </span>
+                  {filled ? <div className="att-seg" role="group" aria-label="Attendance">
                     <button type="button" className={`att-btn att-pending ${(r.attendance||'pending')==='pending'?'is-on':''}`} onClick={()=>setAttendance(i,'pending')} title="Not yet marked">⏳</button>
                     <button type="button" className={`att-btn att-attended ${r.attendance==='attended'?'is-on':''}`} onClick={()=>setAttendance(i,'attended')} title="Attended — −1 credit on save">✓</button>
                     <button type="button" className={`att-btn att-absent ${r.attendance==='absent'?'is-on':''}`} onClick={()=>setAttendance(i,'absent')} title="Absent — −1 credit on save">✗</button>
-                  </div> : null}
+                  </div> : <span />}
                   {/* Grading from the desktop. Only for a swimmer who is
                       actually on the books -- a typed-in name has no record
                       to tick against. */}
@@ -12721,9 +12728,17 @@ function SessionModal({ modal, setModal, saveBusy, canEditSess, saveSession, del
                     className={`stu-grade${gradeFor === r.studentId ? ' is-on' : ''}`}
                     title="Tick what this swimmer has been seen to do"
                     onClick={()=>setGradeFor(gradeFor === r.studentId ? null : r.studentId)}>
-                    {gradeFor === r.studentId ? 'Close' : 'Syllabus'}</button> : null}
+                    Syllabus</button> : <span />}
                   <input className="input stu-remark" placeholder="Remark" value={r.remark || ''} onChange={(e)=>setRemark(i, e.target.value)} />
-                  {(r.studentId || (r.name||'').trim()) ? <button type="button" className="stu-x" title="Clear this slot (bound-group members prompt a group-remove)" onClick={()=>removeRow(i)}>×</button> : null}
+                  {/* Moving a swimmer out and clearing the slot are the two
+                      ways a name leaves this row, so they sit together at the
+                      end. The replacement button used to be the loudest thing
+                      on a row it is rarely used on. */}
+                  {canMarkReplacement ? <button type="button" className="repl-mark-btn" title="Move this swimmer out for replacement" onClick={async ()=>{
+                    const ok = await markForReplacement({ studentId:r.studentId, sessionId:modal.id, weekStartDate:wk, lessonTypeId:ltId, lessonTypeName:currentLt.name, day:modal.day, startMinute:modal.startMinute });
+                    if(ok){ setModal(null); }
+                  }}>→R</button> : <span />}
+                  {filled ? <button type="button" className="stu-x" title="Clear this slot (bound-group members prompt a group-remove)" onClick={()=>removeRow(i)}>×</button> : <span />}
                 </div>
                 {gradeFor === r.studentId && r.studentId
                   ? <StudentGradingPanel studentId={r.studentId} sessionId={modal.id}

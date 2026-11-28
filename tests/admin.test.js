@@ -1312,6 +1312,118 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
       throw new Error('it does not say where to fix it');
   });
 
+  // ── The swimmer list in the session modal ─────────────────────────────
+  // Measured, not described. The old row was a flex-wrap of seven
+  // separately bordered boxes: nothing lined up down the page, and a
+  // swimmer with a booking clash pushed their own row taller AND shoved
+  // its controls sideways. Both are geometry, so both are checked in
+  // pixels against the real component.
+  const mountSession = () => page.evaluate(() => {
+    let host = document.getElementById('sm-host');
+    if (!host) { host = document.createElement('div'); host.id = 'sm-host';
+                 document.body.appendChild(host); }
+    const stu = (id, name, age) => ({ id, name, age,
+      enrollments: [{ lessonTypeId: 'lt1', packageId: 'pk1' }] });
+    const S = ['Ng Yi Xuan', 'Max Ng Ho Yin', 'Then Jhe Xuen', 'Lim Ke Xuan',
+               'Koo Sin Yan', 'Koo Huey Qi'].map((n, i) => stu('s' + (i+1), n, 12));
+    const lt = { id: 'lt1', name: 'LTS Group', students_per_instructor: 6,
+                 default_duration_minutes: 50, default_pool_id: 'po1', is_active: true,
+                 billing_model: 'monthly', class_type: 'group', programme_type: 'lessons' };
+    const noop = () => {};
+    const modal = { mode: 'edit', id: 'se1', weekStartDate: '2026-11-23', day: 5,
+      startMinute: 1080,
+      form: { type: 'LTS Group', lessonTypeId: 'lt1', instructorId: 'i1',
+              instructorName: 'Tony', poolId: 'po1', durationMinutes: 50,
+              replacementRows: [],
+              studentRows: S.map((s, i) => ({ studentId: s.id, name: s.name, age: 12,
+                attendance: i === 1 ? 'attended' : (i === 3 ? 'absent' : 'pending'),
+                remark: i > 2 ? 'Replacement 27/11 Fri 5PM' : '' })) } };
+    ReactDOM.createRoot(host).render(React.createElement(SessionModal, {
+      modal, setModal: noop, saveBusy: false, canEditSess: true,
+      saveSession: noop, deleteSession: noop, openAddAtTime: noop,
+      instructors: [{ id: 'i1', name: 'Tony', is_active: true }],
+      lessonTypes: [lt], pools: [{ id: 'po1', name: 'SSGT Pool A', capacity: 16, is_active: true }],
+      lessonTypeByName: (n) => (n === 'LTS Group' ? lt : null),
+      poolById: () => ({ id: 'po1', name: 'SSGT Pool A', capacity: 16 }),
+      packageById: () => ({ id: 'pk1', name: 'LTS FAM4' }),
+      students: S, studentById: Object.fromEntries(S.map(x => [x.id, x])),
+      weekEnrollments: {}, familyGroups: [], membersByGroup: {}, groupById: () => null,
+      trialStudentIds: new Set(), trialByLessonType: {},
+      creditByKey: () => ({ credits: 2 }), purchasesByKey: () => [],
+      addCreditPurchase: noop, adjustCredit: noop, initCredit: noop,
+      pendingByKey: {}, replacementPending: [], markForReplacement: noop,
+      forwardClassToNextWeek: noop, startFullClassMove: noop, duplicateSessionForward: noop
+    }));
+  });
+
+  await step('every swimmer row lines up, column for column', async () => {
+    await mountSession();
+    await page.waitForTimeout(1200);
+    if (await page.locator('#sm-host .stu-row').count() !== 6)
+      throw new Error('the six swimmers did not render');
+    for (const sel of ['.att-seg', '.stu-grade', '.stu-remark', '.stu-x']) {
+      const edges = await page.locator('#sm-host .stu-fields ' + sel)
+        .evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().left)));
+      if (edges.length !== 6)
+        throw new Error(sel + ' is missing from some rows: ' + edges.length + ' of 6');
+      if (new Set(edges).size !== 1)
+        throw new Error(sel + ' starts at a different x on different rows: '
+          + [...new Set(edges)].join(', ') + ' — the columns do not line up');
+    }
+  });
+
+  await step('and a booking clash does not drag its neighbours out of line', async () => {
+    const before = await page.locator('#sm-host .att-seg')
+      .evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().left)));
+    await page.evaluate(() => {
+      const c = document.querySelectorAll('#sm-host .stu-fields .ssel')[2];
+      const w = document.createElement('div');
+      w.className = 'ssel-warn';
+      w.textContent = 'Also booked Thu 5:00 PM this week';
+      c.appendChild(w);
+    });
+    await page.waitForTimeout(300);
+    const after = await page.locator('#sm-host .att-seg')
+      .evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().left)));
+    if (new Set(after).size !== 1 || after[0] !== before[0])
+      throw new Error('the clash moved the attendance column: '
+        + [...new Set(after)].join(', ') + ' (was ' + before[0] + ')');
+  });
+
+  await step('a row is a swimmer, not a stack of boxes', async () => {
+    // Sabotage-proof: this is a real measurement of the shipped CSS, and
+    // it fails if the borders and padding come back. Six rows in the old
+    // layout were 231px; the budget is deliberately above what it is now
+    // and well below what it was.
+    const h = await page.locator('#sm-host .stu-list')
+      .evaluate(e => Math.round(e.getBoundingClientRect().height));
+    if (h > 215)
+      throw new Error('six swimmers take ' + h + 'px — the row has grown chrome again');
+    // borderTopColor alone is a trap: with border-width 0 it reports the
+    // element's text colour, so every row "had a border" and the first
+    // version of this check failed on a wrapper div with no border at
+    // all. The width is what decides whether anything is drawn.
+    const framed = await page.locator('#sm-host .stu-fields').first().evaluate(el => {
+      const drawn = (n) => {
+        const st = getComputedStyle(n);
+        return parseFloat(st.borderTopWidth) > 0
+            && st.borderTopStyle !== 'none'
+            && st.borderTopColor !== 'rgba(0, 0, 0, 0)'
+            && st.borderTopColor !== 'transparent';
+      };
+      const out = [];
+      for (const c of el.children) {
+        if (drawn(c)) out.push(c.className);
+        for (const g of c.querySelectorAll('*')) if (drawn(g)) out.push(g.className);
+      }
+      return out;
+    });
+    // Only what carries a state may draw a frame when nothing is hovered.
+    const allowed = framed.filter(c => !/att-btn|trial-pill/.test(c));
+    if (allowed.length)
+      throw new Error('these draw a border at rest: ' + allowed.join(', '));
+  });
+
   await step('no JS errors', async () => { if (errs.length) throw new Error(errs[0]); });
 
   console.log(fail ? fail + ' FAILED' : 'all green');
