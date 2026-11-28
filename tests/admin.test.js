@@ -1512,9 +1512,30 @@ const BASE = process.env.BASE || 'http://127.0.0.1:8904';
         + JSON.stringify(cells[0]));
     if (!/1\/2/.test(cells[0]))
       throw new Error('the count is wrong: ' + JSON.stringify(cells[0]));
-    if (cells[1] !== '—')
+    // A swimmer whose lesson type has no syllabus still gets a way in --
+    // their attendance and their coaches' notes are in there too. It
+    // says so rather than drawing a dash nobody can click.
+    if (!/No syllabus/.test(cells[1]))
       throw new Error('a swimmer on an ungraded lesson type shows a syllabus: '
         + JSON.stringify(cells[1]));
+    if (/Star Swim Passport/.test(cells[1]))
+      throw new Error('an ungraded swimmer was given a syllabus: ' + JSON.stringify(cells[1]));
+  });
+
+  // The window used to be reachable only by clicking a bold name, which
+  // looks like a bold name. Every row now carries a button that says
+  // which syllabus the swimmer is on and opens their particulars.
+  await step('the syllabus cell is the way in, on graded and ungraded alike', async () => {
+    const btns = await page.locator('#sw-host .syl-btn').count();
+    if (btns !== 2)
+      throw new Error('expected a syllabus button on both rows, found ' + btns);
+    await page.locator('#sw-host .syl-btn').nth(1).click();
+    await page.waitForTimeout(800);
+    const t = await page.locator('.particulars').innerText();
+    if (!/Ungraded Child/.test(t))
+      throw new Error('the ungraded row opened the wrong swimmer: ' + t.slice(0, 120));
+    await page.locator('.particulars .modal-head button').click();
+    await page.waitForTimeout(400);
   });
 
   await step('and the name opens that swimmer\u2019s particulars', async () => {

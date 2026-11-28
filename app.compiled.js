@@ -20125,9 +20125,11 @@ function StudentsView({
       border: 'none',
       borderRadius: 0
     }
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "swimmers-table"
+  }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '14%'
+      width: '15%'
     }
   }, "Name"), /*#__PURE__*/React.createElement("th", {
     style: {
@@ -20135,31 +20137,31 @@ function StudentsView({
     }
   }, "Age"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '13%'
+      width: '12%'
     }
   }, "Parent"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '10%'
+      width: '7%'
     }
   }, "Emergency"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '10%'
+      width: '9%'
     }
   }, "Lesson Type"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '17%'
+      width: '10%'
     }
   }, "Package"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '9%'
+      width: '8%'
     }
   }, "Credits"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '11%'
+      width: '12%'
     }
   }, "Syllabus"), /*#__PURE__*/React.createElement("th", {
     style: {
-      width: '5%'
+      width: '4%'
     }
   }, "T&C"), /*#__PURE__*/React.createElement("th", null, "Schedule"))), /*#__PURE__*/React.createElement("tbody", null, displayList.length ? displayList.map((row, ri) => {
     const s = row.s;
@@ -20205,16 +20207,19 @@ function StudentsView({
     }, s.gender === 'female' ? '♀' : '♂') : null), /*#__PURE__*/React.createElement("td", null, s.age != null ? s.age : '—'), /*#__PURE__*/React.createElement("td", {
       style: {
         fontSize: 11
-      }
+      },
+      title: parentBits.join(' · ')
     }, parentBits.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
       style: {
         fontWeight: 600
-      }
+      },
+      className: "sw-clip"
     }, s.guardianName || '—'), s.guardianPhone ? /*#__PURE__*/React.createElement("div", {
-      className: "subtle"
+      className: "subtle sw-clip"
     }, s.guardianPhone) : null) : /*#__PURE__*/React.createElement("span", {
       className: "subtle"
     }, "—")), /*#__PURE__*/React.createElement("td", {
+      className: "sw-emerg",
       style: {
         fontSize: 11
       }
@@ -20265,32 +20270,43 @@ function StudentsView({
     }, rem != null ? rem : '—')) : null)) : /*#__PURE__*/React.createElement("span", {
       className: "subtle"
     }, "—")), /*#__PURE__*/React.createElement("td", {
-      style: {
-        fontSize: 11
-      }
+      className: "syl-td"
     }, (() => {
       const g = syllabusFor ? syllabusFor(s) : null;
-      if (!g) return /*#__PURE__*/React.createElement("span", {
-        className: "subtle"
-      }, "—");
-      return /*#__PURE__*/React.createElement("div", {
-        className: "syl-cell"
+      const open = () => setParticulars(s);
+      if (!g) return /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        className: "syl-btn is-none",
+        onClick: open,
+        title: "No syllabus on this swimmer's lesson type — open their particulars anyway"
       }, /*#__PURE__*/React.createElement("span", {
-        className: "syl-cell-prog"
-      }, g.program.name), /*#__PURE__*/React.createElement("span", {
+        className: "syl-btn-prog"
+      }, "No syllabus"), /*#__PURE__*/React.createElement("span", {
+        className: "syl-btn-go",
+        "aria-hidden": "true"
+      }, "↗"));
+      return /*#__PURE__*/React.createElement("button", {
+        type: "button",
+        className: "syl-btn",
+        onClick: open,
+        title: `${g.program.name} — ${g.top ? `${g.top.label ? 'Stage ' + g.top.label + ' · ' : ''}${g.top.name}` : 'no stage yet'}. Open particulars.`
+      }, /*#__PURE__*/React.createElement("span", {
         className: `syl-cell-stage${g.top ? '' : ' is-none'}`,
         style: g.top && g.top.colour ? {
           background: g.top.colour,
           borderColor: g.top.colour,
           color: '#fff'
-        } : null,
-        title: g.top ? `${g.top.name}${g.top.formal_name ? ' · ' + g.top.formal_name : ''}` : 'No stage earned yet'
+        } : null
       }, g.top ? g.top.label || g.top.level_no : '–'), /*#__PURE__*/React.createElement("span", {
-        className: "subtle",
-        style: {
-          fontSize: 10
-        }
-      }, g.earned, "/", g.total));
+        className: "syl-btn-text"
+      }, /*#__PURE__*/React.createElement("span", {
+        className: "syl-btn-prog"
+      }, g.program.name), /*#__PURE__*/React.createElement("span", {
+        className: "syl-btn-sub"
+      }, g.top ? g.top.name : 'No stage yet', " · ", g.earned, "/", g.total)), /*#__PURE__*/React.createElement("span", {
+        className: "syl-btn-go",
+        "aria-hidden": "true"
+      }, "↗"));
     })()), /*#__PURE__*/React.createElement("td", null, tcOk ? /*#__PURE__*/React.createElement("span", {
       className: "tc-badge-ok",
       title: `Accepted ${new Date(s.tcAcceptedAt).toLocaleDateString()} · ID: ${s.tcAcceptanceId}`
@@ -20307,12 +20323,13 @@ function StudentsView({
         e.stopPropagation();
         if (targetWeek) jumpToWeek(targetWeek, 0);
       };
+      const full = `${g.type}: ${g.times.join(', ')}`;
       return targetWeek ? /*#__PURE__*/React.createElement("button", {
         key: gi,
         type: "button",
         className: "swimmer-sched-link",
         onClick: handleJump,
-        title: `Jump to week of ${targetWeek}`
+        title: `${full} — jump to week of ${targetWeek}`
       }, /*#__PURE__*/React.createElement("span", {
         style: {
           fontWeight: 700
@@ -20325,8 +20342,9 @@ function StudentsView({
       }, "↗")) : /*#__PURE__*/React.createElement("div", {
         key: gi,
         style: {
-          marginBottom: 2
-        }
+          marginBottom: 1
+        },
+        title: full
       }, /*#__PURE__*/React.createElement("span", {
         style: {
           fontWeight: 700

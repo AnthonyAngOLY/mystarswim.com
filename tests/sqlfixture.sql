@@ -76,7 +76,11 @@ create table auth.users (
 -- reads the JWT; here it is a switch a test flips, because what is being
 -- tested is that the functions ask it, not how it answers.
 create table _test_state (office boolean not null default true, crew uuid,
-                          may_note boolean not null default true);
+                          may_note boolean not null default true,
+                          -- The website seat a test is pretending to be.
+                          -- Null means no JWT at all, which is the SQL
+                          -- editor and the attendance app.
+                          app_user uuid);
 insert into _test_state (office) values (true);
 
 create or replace function can_write_office() returns boolean
@@ -124,6 +128,33 @@ create table if not exists student_enrollments (
   student_id uuid, lesson_type_id uuid);
 create table if not exists admin_employees (
   id uuid primary key default gen_random_uuid(), full_name text);
+
+-- The two tables acting_person_name() falls back to when there is no
+-- crew id -- an instructor signed in at a desk, then any other website
+-- seat. They are here because plpgsql resolves a table name when the
+-- query RUNS: without them the function installs perfectly and raises
+-- on the first tick somebody makes from the scheduler, which is the
+-- exact shape of the min(uuid) fault this suite exists for.
+create table if not exists scheduler_instructors (
+  id uuid primary key default gen_random_uuid(), name text,
+  app_user_id uuid, is_active boolean not null default true);
+create table if not exists app_users (
+  id uuid primary key default gen_random_uuid(), display_name text);
+
+-- A token, as the functions read one. Supabase's auth.jwt() raises when
+-- there is none, and the functions all catch that -- so the default here
+-- raises too, or the no-login path would never be the one under test.
+create or replace function auth.jwt() returns jsonb
+language plpgsql stable as $$
+declare v uuid;
+begin
+  select app_user into v from _test_state limit 1;
+  if v is null then
+    raise exception 'no JWT';
+  end if;
+  return jsonb_build_object('app_metadata',
+           jsonb_build_object('app_user_id', v::text));
+end $$;
 
 -- The one check that decides who may tick. The real one asks whether
 -- this person was rostered to that child's water; here it is a switch,

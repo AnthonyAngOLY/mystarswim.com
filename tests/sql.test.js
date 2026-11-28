@@ -854,6 +854,78 @@ const FILES = [
       if (q(`select count(*) from student_task_marks where removed_at is null`) !== '0')
         throw new Error('this probe left ticks behind and the steps after it '
           + 'will assert against a dirty fixture');
+    } },
+  { file: 'supabase_grading_marked_by.sql',
+    probe: () => {
+      const stu = q(`select id from students limit 1`);
+      const task = q(`select t.id from grading_tasks t
+                        join grading_milestones m on m.id = t.milestone_id
+                        join grading_programs p on p.id = m.program_id
+                       where p.id = (select grading_program_id
+                                       from scheduler_lesson_types
+                                      where grading_program_id is not null limit 1)
+                       order by m.level_no, t.sort_order limit 1`);
+      const crew = q(`select id from admin_employees where full_name='Coach Sally'`);
+      const asWho = () => q(`select acting_person_name()`);
+      try {
+        // 1. A coach on the phone: their employee record.
+        q(`update _test_state set crew='${crew}', app_user=null`);
+        if (asWho() !== 'Coach Sally')
+          throw new Error('a rostered coach is not named by their employee record: '
+            + asWho());
+
+        // 2. An instructor signed in at a desk instead. Same human, no
+        //    crew id on this login, so the scheduler seat answers.
+        q(`insert into app_users (display_name) values ('Front Desk')
+             returning id`);
+        const deskUid = q(`select id from app_users where display_name='Front Desk'`);
+        q(`insert into scheduler_instructors (name, app_user_id)
+             values ('Tony Instructor', '${deskUid}')`);
+        q(`update _test_state set crew=null, app_user='${deskUid}'`);
+        if (asWho() !== 'Tony Instructor')
+          throw new Error('an instructor at a desk is not named by their seat: ' + asWho());
+
+        // 3. The office: a website seat that is nobody's instructor.
+        q(`insert into app_users (display_name) values ('Anthony')`);
+        const officeUid = q(`select id from app_users where display_name='Anthony'`);
+        q(`update _test_state set app_user='${officeUid}'`);
+        if (asWho() !== 'Anthony')
+          throw new Error('the office is still anonymous: ' + JSON.stringify(asWho())
+            + ' — this is the whole point of the file');
+        if (asWho() === 'the office')
+          throw new Error('still the old placeholder');
+
+        // 4. No login at all: the SQL editor. Named, but not as a person.
+        q(`update _test_state set crew=null, app_user=null`);
+        if (asWho() !== 'Star Swim')
+          throw new Error('with no login it should fall back to Star Swim, got ' + asWho());
+
+        // 5. And the tick itself carries it. The function could resolve
+        //    the name perfectly and still store the old one.
+        q(`update _test_state set app_user='${officeUid}'`);
+        const out = JSON.parse(q(`select mark_grading_task('${stu}','${task}',true)`));
+        if (out.ok !== true) throw new Error('the tick was refused: ' + JSON.stringify(out));
+        if (out.by !== 'Anthony')
+          throw new Error('the reply does not say who: ' + JSON.stringify(out.by));
+        const stored = q(`select marked_by_name from student_task_marks
+                           where student_id='${stu}' and task_id='${task}'
+                             and removed_at is null`);
+        if (stored !== 'Anthony')
+          throw new Error('the mark was stored as ' + JSON.stringify(stored));
+
+        // Un-ticking records who withdrew it, by the same rule.
+        q(`update _test_state set app_user='${deskUid}'`);
+        q(`select mark_grading_task('${stu}','${task}',false)`);
+        const undone = q(`select removed_by_name from student_task_marks
+                           where student_id='${stu}' and task_id='${task}'`);
+        if (undone !== 'Tony Instructor')
+          throw new Error('the withdrawal names nobody: ' + JSON.stringify(undone));
+      } finally {
+        q(`delete from student_task_marks where student_id='${stu}';
+           delete from scheduler_instructors;
+           delete from app_users;
+           update _test_state set crew='${crew}', app_user=null`);
+      }
     } }
 ];
 

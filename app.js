@@ -11860,16 +11860,23 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
     </div>
     <div className="card" style={{padding:0,overflow:'hidden'}}>
       <div className="table-wrap" style={{border:'none',borderRadius:0}}>
-        <table><thead><tr>
-          <th style={{width:'14%'}}>Name</th>
+        <table className="swimmers-table"><thead><tr>
+          {/* Schedule carries the most text of any column -- a swimmer
+              with three Sunday slots -- and had whatever was left over,
+              which was about a tenth. Package was given 17% to say
+              "Normal · RM200 · 4 credits" and Emergency 10% to say "as
+              guardian". Rebalanced so the column with the sentences in
+              it has twice the room, and Name has enough that most of
+              them stay on one line. */}
+          <th style={{width:'15%'}}>Name</th>
           <th style={{width:32}}>Age</th>
-          <th style={{width:'13%'}}>Parent</th>
-          <th style={{width:'10%'}}>Emergency</th>
-          <th style={{width:'10%'}}>Lesson Type</th>
-          <th style={{width:'17%'}}>Package</th>
-          <th style={{width:'9%'}}>Credits</th>
-          <th style={{width:'11%'}}>Syllabus</th>
-          <th style={{width:'5%'}}>T&amp;C</th>
+          <th style={{width:'12%'}}>Parent</th>
+          <th style={{width:'7%'}}>Emergency</th>
+          <th style={{width:'9%'}}>Lesson Type</th>
+          <th style={{width:'10%'}}>Package</th>
+          <th style={{width:'8%'}}>Credits</th>
+          <th style={{width:'12%'}}>Syllabus</th>
+          <th style={{width:'4%'}}>T&amp;C</th>
           <th>Schedule</th>
         </tr></thead>
         <tbody>{displayList.length ? displayList.map((row,ri)=>{
@@ -11895,38 +11902,51 @@ function StudentsView({ students, lessonTypes, lessonTypeById, packages, package
                         onClick={()=>setParticulars(s)}>{s.name}</button>
                 {s.gender?<span style={{marginLeft:4,fontSize:10,color:'var(--text-3)'}}>{s.gender==='female'?'♀':'♂'}</span>:null}</td>
               <td>{s.age!=null?s.age:'—'}</td>
-              <td style={{fontSize:11}}>{parentBits.length
-                ? <><div style={{fontWeight:600}}>{s.guardianName || '—'}</div>{s.guardianPhone ? <div className="subtle">{s.guardianPhone}</div> : null}</>
+              <td style={{fontSize:11}} title={parentBits.join(' · ')}>{parentBits.length
+                ? <><div style={{fontWeight:600}} className="sw-clip">{s.guardianName || '—'}</div>{s.guardianPhone ? <div className="subtle sw-clip">{s.guardianPhone}</div> : null}</>
                 : <span className="subtle">—</span>}</td>
-              <td style={{fontSize:11}}>{emergencyBits}</td>
+              <td className="sw-emerg" style={{fontSize:11}}>{emergencyBits}</td>
               <td><div style={{display:'flex',flexWrap:'wrap',gap:3}}>{(s.lessonTypeIds||[]).length?s.lessonTypeIds.map(id=>{const c=colorsForId(id);return <span key={id} className="chip" style={{background:c.bg,borderColor:c.bd,color:c.tx,fontSize:10,padding:'2px 7px'}}>{c.name}</span>;}): <span className="subtle">—</span>}</div></td>
               <td style={{fontSize:12}}>{packageLabel(s)}</td>
               <td>{ltCredits.length
                 ? <div style={{display:'flex',flexDirection:'column',gap:2}}>{ltCredits.map(({lt, rem}) => lt ? <span key={lt.id} className="swimmer-cred-chip"><span className="subtle" style={{fontSize:9}}>{lt.name.split(' ').slice(0,2).join(' ')}:</span> <strong className={rem!=null && rem<=2?'credit-low':''}>{rem!=null ? rem : '—'}</strong></span> : null)}</div>
                 : <span className="subtle">—</span>}</td>
-              <td style={{fontSize:11}}>{(() => {
+              {/* The way in to this swimmer's particulars. The name is
+                  clickable too, but a bold name looks like a bold name --
+                  nobody finds a window behind one. This cell says what it
+                  is about and looks like something to press. */}
+              <td className="syl-td">{(() => {
                 const g = syllabusFor ? syllabusFor(s) : null;
-                if(!g) return <span className="subtle">—</span>;
-                return <div className="syl-cell">
-                  <span className="syl-cell-prog">{g.program.name}</span>
+                const open = () => setParticulars(s);
+                if(!g) return <button type="button" className="syl-btn is-none" onClick={open}
+                    title="No syllabus on this swimmer's lesson type — open their particulars anyway">
+                    <span className="syl-btn-prog">No syllabus</span>
+                    <span className="syl-btn-go" aria-hidden="true">↗</span>
+                  </button>;
+                return <button type="button" className="syl-btn" onClick={open}
+                    title={`${g.program.name} — ${g.top ? `${g.top.label ? 'Stage ' + g.top.label + ' · ' : ''}${g.top.name}` : 'no stage yet'}. Open particulars.`}>
                   <span className={`syl-cell-stage${g.top ? '' : ' is-none'}`}
-                        style={g.top && g.top.colour ? { background:g.top.colour, borderColor:g.top.colour, color:'#fff' } : null}
-                        title={g.top ? `${g.top.name}${g.top.formal_name ? ' · ' + g.top.formal_name : ''}` : 'No stage earned yet'}>
+                        style={g.top && g.top.colour ? { background:g.top.colour, borderColor:g.top.colour, color:'#fff' } : null}>
                     {g.top ? (g.top.label || g.top.level_no) : '–'}
                   </span>
-                  <span className="subtle" style={{fontSize:10}}>{g.earned}/{g.total}</span>
-                </div>;
+                  <span className="syl-btn-text">
+                    <span className="syl-btn-prog">{g.program.name}</span>
+                    <span className="syl-btn-sub">{g.top ? g.top.name : 'No stage yet'} · {g.earned}/{g.total}</span>
+                  </span>
+                  <span className="syl-btn-go" aria-hidden="true">↗</span>
+                </button>;
               })()}</td>
               <td>{tcOk?<span className="tc-badge-ok" title={`Accepted ${new Date(s.tcAcceptedAt).toLocaleDateString()} · ID: ${s.tcAcceptanceId}`}>✅</span>:<span className="tc-badge-pending" title="Terms & Conditions not yet accepted">⚠</span>}</td>
               <td style={{fontSize:11}}>{sched?sched.map((g,gi)=>{
                 const targetWeek = jumpToWeek ? nextWeekFor(s.id, g.type) : null;
                 const handleJump = (e) => { e.stopPropagation(); if(targetWeek) jumpToWeek(targetWeek, 0); };
+                const full = `${g.type}: ${g.times.join(', ')}`;
                 return targetWeek
-                  ? <button key={gi} type="button" className="swimmer-sched-link" onClick={handleJump} title={`Jump to week of ${targetWeek}`}>
+                  ? <button key={gi} type="button" className="swimmer-sched-link" onClick={handleJump} title={`${full} — jump to week of ${targetWeek}`}>
                       <span style={{fontWeight:700}}>{g.type}:</span> <span className="subtle">{g.times.join(', ')}</span>
                       <span className="swimmer-sched-arrow" aria-hidden="true">↗</span>
                     </button>
-                  : <div key={gi} style={{marginBottom:2}}><span style={{fontWeight:700}}>{g.type}:</span> <span className="subtle">{g.times.join(', ')}</span></div>;
+                  : <div key={gi} style={{marginBottom:1}} title={full}><span style={{fontWeight:700}}>{g.type}:</span> <span className="subtle">{g.times.join(', ')}</span></div>;
               }):<span className="subtle">Not scheduled</span>}</td>
             </tr>
           </React.Fragment>;

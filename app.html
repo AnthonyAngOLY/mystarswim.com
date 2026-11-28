@@ -385,6 +385,8 @@
     /* The name in the Swimmers table is the way in to all of the above,
        so it has to look like a way in without turning the column into a
        wall of blue. */
+    /* Still a way in, quietly. The syllabus cell is the signposted one;
+       this is for whoever reaches for the name out of habit. */
     .swimmer-name-link{background:none;border:0;padding:0;font:inherit;font-weight:700;
       color:var(--text);cursor:pointer;text-align:left;border-bottom:1px solid transparent}
     .swimmer-name-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
@@ -392,11 +394,39 @@
     /* The syllabus column. Programme on top, the stage they hold beside a
        count -- the stage carries its own colour, which is the one thing
        on that row worth a swatch. */
-    .syl-cell{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-    .syl-cell-prog{font-weight:600;font-size:10.5px;color:var(--text-2);
-      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+    /* ── The Swimmers table ────────────────────────────────────────────
+       Nine columns of which three wrap, so the rows were all different
+       heights and the eye had nothing to run along. Tighter padding, a
+       top alignment so the first line of every cell starts level, and
+       the two cells that run long are clipped with the whole value on
+       the title. */
+    .swimmers-table th,.swimmers-table td{padding:6px 10px;vertical-align:top;
+      line-height:1.35}
+    .swimmers-table tbody tr:hover{background:var(--surface-2)}
+    .sw-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+    .swimmers-table .syl-td{padding:4px 6px}
+
+    /* The way in to a swimmer's particulars. It was the name, which is
+       bold text and looks like bold text -- there was nothing to say a
+       window was behind it. This is a button, it says which syllabus
+       they are on, and it is in the column somebody is already reading
+       when they wonder how a child is doing. */
+    .syl-btn{display:flex;align-items:center;gap:6px;width:100%;text-align:left;
+      font:inherit;padding:4px 6px;border-radius:8px;cursor:pointer;
+      border:1px solid transparent;background:transparent;transition:.12s ease}
+    .syl-btn:hover,.syl-btn:focus-visible{background:#fff;border-color:var(--border-2);
+      box-shadow:0 1px 2px rgba(16,24,40,.05)}
+    .syl-btn:hover .syl-btn-go,.syl-btn:focus-visible .syl-btn-go{opacity:1;color:var(--primary)}
+    .syl-btn-text{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+    .syl-btn-prog{font-weight:700;font-size:10.5px;color:var(--text-2);
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .syl-btn-sub{font-size:9.5px;color:var(--text-3);white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+    .syl-btn-go{flex:none;font-size:10px;color:var(--text-3);opacity:.45;transition:.12s ease}
+    .syl-btn.is-none .syl-btn-prog{font-weight:600;color:var(--text-3)}
+
     .syl-cell-stage{display:inline-flex;align-items:center;justify-content:center;
-      min-width:19px;height:19px;padding:0 5px;border-radius:5px;font-size:10px;
+      flex:none;min-width:21px;height:21px;padding:0 5px;border-radius:6px;font-size:10.5px;
       font-weight:800;background:var(--surface-3);border:1px solid var(--border-2);
       color:var(--text-2)}
     .syl-cell-stage.is-none{opacity:.5}
@@ -1365,14 +1395,28 @@
        text row with a subtle ↗ arrow on hover; links to the current
        week (if the swimmer has a session there) or the earliest future
        week with that LT scheduled. */
-    .swimmer-sched-link{display:block;width:100%;padding:2px 4px;margin-bottom:2px;background:transparent;border:1px solid transparent;border-radius:4px;text-align:left;font-size:11px;cursor:pointer;color:inherit;font-family:inherit;transition:.12s ease;position:relative}
+    /* One line per lesson type, whatever the times say. A swimmer with
+       three Sunday slots used to turn their row into three rows, and
+       the whole column into a ladder nobody could scan. The full list
+       is on the title. */
+    .swimmer-sched-link{display:block;width:100%;padding:2px 4px;margin-bottom:1px;background:transparent;border:1px solid transparent;border-radius:4px;text-align:left;font-size:11px;cursor:pointer;color:inherit;font-family:inherit;transition:.12s ease;position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .swimmers-table td > div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    /* The schedule is the column with sentences in it, so it gets the
+       slack and the others are measured to what they actually say. */
+    .swimmers-table td:last-child{white-space:normal}
+    /* "↗ as guardian" is a fixed phrase and wrapping it after "as" cost
+       every row a second line for no information at all. */
+    .swimmers-table .sw-emerg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .swimmer-sched-link:hover{background:#EFF6FF;border-color:#BFDBFE;color:#1E40AF}
     .swimmer-sched-link:hover .subtle{color:#1E40AF}
     .swimmer-sched-arrow{display:inline-block;margin-left:4px;font-size:10px;opacity:0;color:#3B82F6;transition:.12s ease;font-weight:800}
     .swimmer-sched-link:hover .swimmer-sched-arrow{opacity:1}
 
     /* Per-LT credit chip in the read-only Swimmers directory */
-    .swimmer-cred-chip{display:inline-block;font-size:10.5px;padding:1px 6px;background:var(--surface-2);border:1px solid var(--border-2);border-radius:4px;line-height:1.4;white-space:nowrap}
+    /* A balance, not a button. Six of these boxed on a row was six more
+       frames in a table that already had enough. The number is the thing
+       worth seeing, so it keeps its weight and the label sits back. */
+    .swimmer-cred-chip{display:inline-block;font-size:10.5px;padding:0;background:transparent;border:0;line-height:1.5;white-space:nowrap}
     .swimmer-cred-chip strong{font-weight:800;color:var(--text)}
     .swimmer-cred-chip strong.credit-low{color:var(--red-tx)}
 
