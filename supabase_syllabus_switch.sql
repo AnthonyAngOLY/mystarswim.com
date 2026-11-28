@@ -128,9 +128,23 @@ language sql stable security definer set search_path = public as $$
       ) z), '[]'::jsonb);
 $$;
 
+-- SECURITY DEFINER and it takes a student id, so left alone it would be
+-- a way for anyone holding the anon key -- which is printed in every
+-- page we serve -- to read any child's ticks by guessing a uuid. The
+-- functions that wrap it do the "is this yours" check; this one does
+-- not, so nobody outside gets to call it.
+--
+-- service_role is granted explicitly rather than left to PUBLIC: taking
+-- it from public takes it from service_role too, and that is how an
+-- Edge Function ends up answering "we could not check that just now".
+revoke all on function grading_ladder(uuid, uuid) from public, anon, authenticated;
+grant execute on function grading_ladder(uuid, uuid) to service_role;
+
 comment on function grading_ladder(uuid, uuid) is
   'The stages of one syllabus with one swimmer''s progress against them. '
-  'Used for the syllabus they are on and for any they have moved off.';
+  'Used for the syllabus they are on and for any they have moved off. '
+  'Not callable from a browser: it does no ownership check, because the '
+  'functions that call it have already done one.';
 
 
 -- ─── Who is using this syllabus? ────────────────────────────────────────

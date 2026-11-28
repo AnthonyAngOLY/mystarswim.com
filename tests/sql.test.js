@@ -588,6 +588,20 @@ const FILES = [
     } },
   { file: 'supabase_syllabus_switch.sql',
     probe: () => {
+      // grading_ladder is SECURITY DEFINER and takes a student id with
+      // no ownership check of its own. Left executable by PUBLIC it
+      // would be a way to read any child's ticks with the anon key,
+      // which is printed in every page we serve.
+      for (const role of ['anon', 'authenticated']) {
+        if (q(`select has_function_privilege('${role}', 'public.grading_ladder(uuid,uuid)', 'execute')`) !== 'f')
+          throw new Error(role + ' can call grading_ladder directly, which reads any '
+            + 'child’s progress without asking whose child it is');
+      }
+      // And the wrappers still work, which is what proves the revoke did
+      // not simply break the feature.
+      if (q(`select has_function_privilege('authenticated', 'public.student_grading(uuid)', 'execute')`) !== 't')
+        throw new Error('the revoke took student_grading with it');
+
       const sp  = q(`select id from grading_programs where name='Swim Passport'`);
       const mas = q(`select id from grading_programs where name='MAS BADGES'`);
       const stu = q(`select id from students limit 1`);
